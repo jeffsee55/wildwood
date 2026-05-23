@@ -17,12 +17,39 @@ const database = createLibsqlClient({
 export const githubOrg = process.env.TR33_GITHUB_ORG || "jeffsee55";
 export const githubRepo = process.env.TR33_GITHUB_REPO || "tr33";
 
-function isNextProductionBuild(): boolean {
+const docsVersion = "docs-0";
+
+/** `next build` — prefetch index into LibSQL/Turso from the repo checkout. */
+export function isDocsPrefetchBuild(): boolean {
   return process.env.NEXT_PHASE === "phase-production-build";
 }
 
-/** GitHub App remote only when installation is known (or explicitly forced). */
+/**
+ * Deployed production (Vercel SSR/API). No git — only reads a build-time index.
+ * Dev (`next dev`) is not included.
+ */
+export function isDocsDeployedRuntime(): boolean {
+  if (isDocsPrefetchBuild()) {
+    return false;
+  }
+  if (process.env.TR33_DOCS_SOURCE === "local") {
+    return false;
+  }
+  return process.env.NODE_ENV === "production";
+}
+
+/** GitHub App remote for /api edits when installation is configured. */
 export function wantsGithubRemote(): boolean {
+  if (isDocsDeployedRuntime()) {
+    if (process.env.TR33_DOCS_SOURCE === "github") {
+      return Boolean(process.env.GITHUB_APP_ID && process.env.GITHUB_PRIVATE_KEY);
+    }
+    return Boolean(
+      process.env.GITHUB_APP_ID &&
+        process.env.GITHUB_PRIVATE_KEY &&
+        process.env.GITHUB_APP_INSTALLATION_ID?.trim(),
+    );
+  }
   if (process.env.TR33_DOCS_SOURCE === "local") {
     return false;
   }
@@ -36,21 +63,19 @@ export function wantsGithubRemote(): boolean {
   );
 }
 
-/** Use the git checkout under `content/` instead of the GitHub API. */
+/** Local git checkout for dev and build prefetch only. */
 export function useLocalContentRoot(): boolean {
-  if (process.env.TR33_DOCS_SOURCE === "local") {
-    return true;
+  if (isDocsDeployedRuntime()) {
+    return false;
   }
   if (process.env.TR33_DOCS_SOURCE === "github") {
     return false;
   }
-  if (!wantsGithubRemote()) {
-    if (hasLocalDocsContent()) {
-      return true;
-    }
-    if (isNextProductionBuild() || (process.env.VERCEL === "1" && process.env.CI === "1")) {
-      return true;
-    }
+  if (process.env.TR33_DOCS_SOURCE === "local") {
+    return true;
+  }
+  if (isDocsPrefetchBuild() || hasLocalDocsContent()) {
+    return true;
   }
   return (
     process.env.NODE_ENV !== "production" &&
@@ -59,23 +84,20 @@ export function useLocalContentRoot(): boolean {
   );
 }
 
-function resolveLocalDocsRef(): string {
-  const sha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
-  if (sha) {
-    return sha;
-  }
-  const configured = process.env.TR33_DOCS_LOCAL_REF?.trim();
+/**
+ * Ref key stored in `_refs` — must match between build prefetch and production reads.
+ * On Vercel, defaults to the deployment commit so local git does not need `main`.
+ */
+export function resolveDocsIndexRef(): string {
+  const configured = process.env.TR33_DOCS_REF?.trim();
   if (configured) {
     return configured;
   }
-  return "HEAD";
-}
-
-function resolveDocsRef(local: boolean): string {
-  if (local) {
-    return resolveLocalDocsRef();
+  const vercelSha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
+  if (vercelSha) {
+    return vercelSha;
   }
-  return process.env.TR33_DOCS_REF || "main";
+  return "main";
 }
 
 function githubAppAuthConfig(): Tr33AuthConfig["github"] | undefined {
@@ -126,25 +148,25 @@ const nav = z.collection({
 });
 
 const collections = { authors, docs, nav };
-const version = "docs-0";
 
 function createDocsClient(): Tr33Client {
   const local = useLocalContentRoot();
-  const ref = resolveDocsRef(local);
+  const indexRef = resolveDocsIndexRef();
+
   const config = local
     ? defineConfig({
         org: githubOrg,
         repo: githubRepo,
-        ref,
+        ref: indexRef,
         localPath: resolveDocsRepoRoot(),
-        version,
+        version: docsVersion,
         collections,
       })
     : defineConfig({
         org: githubOrg,
         repo: githubRepo,
-        ref,
-        version,
+        ref: indexRef,
+        version: docsVersion,
         collections,
       });
 
@@ -174,6 +196,10 @@ export function getDocsTr33(): Tr33Client {
 export function githubInstallHint(): string {
   return (
     `Install the GitHub App on https://github.com/${githubOrg}/${githubRepo} ` +
-    "(or set GITHUB_APP_INSTALLATION_ID / TR33_DOCS_SOURCE=local)."
+    "(or set GITHUB_APP_INSTALLATION_ID)."
   );
+}
+
+export function docsIndexVersion(): string {
+  return docsVersion;
 }
