@@ -1,6 +1,6 @@
 /**
  * Relaxed `Content-Security-Policy` for the embedded VS Code workbench
- * (`/api/vscode/editor`, `workbench.html`, and **all** other `vscode-web` HTML assets).
+ * (`/api/vscode/editor`, workbench iframes, and **all** proxied `vscode-cdn` HTML).
  *
  * The workbench and extension host use **inline** scripts, **eval**, `blob:` workers,
  * and fetches to VS Code’s CDN. A hash-only policy in shipped HTML can block
@@ -35,7 +35,7 @@ export function stripBuiltInCspMetaFromHtml(html: string): string {
 }
 
 /**
- * Use for every `Response` that serves `text/html` from `/api/vscode/vscode-web/**`.
+ * Use for every `Response` that serves `text/html` from `/api/vscode/cdn/**`.
  * Includes no-store to match the rest of the embed.
  */
 export const VSCODE_EMBED_HTML_RESPONSE_HEADERS: Record<string, string> = {
@@ -45,13 +45,3 @@ export const VSCODE_EMBED_HTML_RESPONSE_HEADERS: Record<string, string> = {
   pragma: "no-cache",
   expires: "0",
 };
-
-/** Versioned static assets (js/css/fonts); browsers and the edge cache these. */
-export function vscodeWebStaticCacheHeaders(version: string): Record<string, string> {
-  return {
-    "cache-control": "public, max-age=31536000, immutable",
-    "cdn-cache-control": "public, max-age=31536000, immutable",
-    "vercel-cdn-cache-control": "public, max-age=31536000, immutable",
-    "x-vscode-version": version,
-  };
-}

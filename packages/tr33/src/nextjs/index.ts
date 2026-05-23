@@ -1,7 +1,7 @@
 // import extension from "tr33-vscode";
 
 import { existsSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,6 @@ import {
   stripBuiltInCspMetaFromHtml,
   VSCODE_EMBED_DOCUMENT_CSP,
   VSCODE_EMBED_HTML_RESPONSE_HEADERS,
-  vscodeWebStaticCacheHeaders,
 } from "@/nextjs/vscode-embed-csp";
 import {
   TR33_ACTIVE_REF_COOKIE,
@@ -30,7 +29,7 @@ import {
   cookiesFromCookieHeader,
   resolveActiveRef,
 } from "@/nextjs/resolve-active-ref";
-import { loadVendoredVscodeWebAssets } from "@/nextjs/vscode-web-vendor";
+import { resolveVscodeWebCdn } from "@/nextjs/vscode-web-cdn";
 
 /** Turbopack/Next do not implement `import.meta.resolve`; use CJS resolver instead. */
 const nodeRequire = createRequire(import.meta.url);
@@ -95,41 +94,12 @@ function resolveTr33VscodePackageJsonPath(): string {
   );
 }
 
-let vscodeWebAssetsPromise: Promise<{
-  rootDir: string;
-  version: string;
-}> | null = null;
-
 const extensionPkgSchema = z.object({
   name: z.string(),
   publisher: z.string(),
   version: z.string(),
   enabledApiProposals: z.array(z.string()),
 });
-
-/** Vendor tree from `tr33` build; static assets use HTTP cache headers at runtime. */
-const ensureVscodeWebAssets = (): Promise<{
-  rootDir: string;
-  version: string;
-}> => {
-  if (!vscodeWebAssetsPromise) {
-    vscodeWebAssetsPromise = loadVendoredVscodeWebAssets();
-  }
-  return vscodeWebAssetsPromise;
-};
-
-const toSafeAssetPath = (root: string, asset: string) => {
-  const normalizedAsset = asset.replace(/^\/+/, "");
-  const resolvedPath = path.resolve(root, normalizedAsset);
-  const resolvedRoot = path.resolve(root);
-  if (
-    resolvedPath !== resolvedRoot &&
-    !resolvedPath.startsWith(`${resolvedRoot}${path.sep}`)
-  ) {
-    return null;
-  }
-  return resolvedPath;
-};
 
 const setNoStoreHeaders = (event: {
   node?: { res?: { setHeader: (k: string, v: string) => void } };
@@ -208,7 +178,7 @@ export const createHandler = (
     req: { headers: { get: (name: string) => string | null } };
   }) => {
     const dir = event.url.pathname.split("/").slice(0, -1).join("/");
-    const version = (await ensureVscodeWebAssets()).version;
+    const version = (await resolveVscodeWebCdn()).version;
     const comparisonRef = ref;
     const cookies = cookiesFromCookieHeader(event.req.headers.get("cookie"));
     const explicitActiveRefCookie = cookies
@@ -1003,12 +973,12 @@ export const createHandler = (
       setNoStoreHeaders(event);
       setResponseHeader(event, "Content-Security-Policy", VSCODE_EMBED_DOCUMENT_CSP);
       const workbenchConfig = await getWorkbenchConfig(event);
-      const { version: vscodeWebVersion } = await ensureVscodeWebAssets();
+      const vscodeWebCdn = await resolveVscodeWebCdn();
       const code = getCode({
         origin: event.url.origin,
         prefix: "/api/vscode",
         workbenchConfig,
-        vscodeWebVersion,
+        vscodeWebCdn,
       });
       return html(event, code);
     })
@@ -1039,93 +1009,48 @@ export const createHandler = (
       });
     });
 
-  const mergeVscodeStaticCache = (response: Response, version: string) => {
-    const headers = new Headers(response.headers);
-    for (const [key, value] of Object.entries(
-      vscodeWebStaticCacheHeaders(version),
-    )) {
-      headers.set(key, value);
-    }
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    });
-  };
-
-  const vscodeWeb = new H3();
-  // Same host as the extension; static assets use versioned URLs + cache headers.
-  vscodeWeb.get("/:version/**:asset", async (event) => {
+  // Proxies VS Code HTML from vscode-cdn (CSP strip); redirects everything else to the CDN.
+  const vscodeCdn = new H3();
+  vscodeCdn.get("/:commit/**:asset", async (event) => {
     const asset = event.context.params?.asset;
-    const versionParam = event.context.params?.version;
-    if (!asset || !versionParam) {
-      return new Response(`No asset provided in query`, { status: 404 });
+    const commitParam = event.context.params?.commit;
+    if (!asset || !commitParam) {
+      return new Response("No asset path", { status: 404 });
     }
-    const assets = await ensureVscodeWebAssets();
-    if (versionParam !== assets.version) {
-      return new Response("VS Code version mismatch", { status: 404 });
-    }
-    const filePath = toSafeAssetPath(assets.rootDir, asset);
-    if (!filePath) {
-      return new Response("Invalid asset path", { status: 400 });
+    const cdn = await resolveVscodeWebCdn();
+    if (commitParam !== cdn.commit) {
+      return new Response("VS Code commit mismatch", { status: 404 });
     }
 
-    const lower = filePath.toLowerCase();
+    const cdnUrl = `${cdn.cdnBase}/${asset.replace(/^\/+/, "")}`;
+    const lower = asset.toLowerCase();
     if (lower.endsWith(".html") || lower.endsWith(".htm")) {
       setNoStoreHeaders(event);
-      let contents: string;
-      try {
-        contents = await readFile(filePath, "utf-8");
-      } catch {
+      const upstream = await fetch(cdnUrl);
+      if (!upstream.ok) {
         return new Response("Not found", { status: 404 });
       }
+      let contents = await upstream.text();
       contents = stripBuiltInCspMetaFromHtml(contents);
       return new Response(contents, {
         headers: VSCODE_EMBED_HTML_RESPONSE_HEADERS,
       });
     }
 
-    const served = await serveStatic(event, {
-      getContents: async () => {
-        try {
-          const contents = await readFile(filePath);
-          return new Uint8Array(contents);
-        } catch {
-          return undefined;
-        }
-      },
-      getMeta: async () => {
-        try {
-          const fileStat = await stat(filePath);
-          return {
-            size: fileStat.size,
-            mtime: fileStat.mtimeMs,
-          };
-        } catch {
-          return {
-            size: 0,
-            mtime: Date.now(),
-          };
-        }
-      },
-    });
-    if (served instanceof Response) {
-      return mergeVscodeStaticCache(served, assets.version);
-    }
-    return served;
+    return Response.redirect(cdnUrl, 307);
   });
 
-  vscodeWeb.get("/", async (event) => {
+  vscodeCdn.get("/", async (event) => {
     setNoStoreHeaders(event);
-    const assets = await ensureVscodeWebAssets();
+    const cdn = await resolveVscodeWebCdn();
     const base = event.url.pathname.replace(/\/$/, "");
     return Response.redirect(
-      `${base}/${assets.version}/out/vs/code/browser/workbench/workbench.html`,
+      `${base}/${cdn.commit}/out/vs/code/browser/workbench/workbench.html`,
       302,
     );
   });
 
-  vscode.mount("/vscode-web", vscodeWeb);
+  vscode.mount("/cdn", vscodeCdn);
   app.mount("/git", gitService);
   app.mount("/vscode", vscode);
 

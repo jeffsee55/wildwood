@@ -1,3 +1,6 @@
+import type { VscodeWebCdn } from "@/nextjs/vscode-web-cdn";
+import { vscodeCdnProxyPrefix } from "@/nextjs/vscode-web-cdn";
+
 const escapeHtmlAttr = (value: string) =>
   value
     .replaceAll("&", "&amp;")
@@ -9,10 +12,11 @@ export const getCode = (config: {
   origin: string;
   prefix: string;
   workbenchConfig: object;
-  /** Version segment in asset URLs; paired with immutable cache headers when VS Code updates. */
-  vscodeWebVersion: string;
+  vscodeWebCdn: VscodeWebCdn;
 }) => {
-  const VSCODE_BASE_URL = `${config.origin}${config.prefix}/vscode-web/${config.vscodeWebVersion}`;
+  const { cdnBase, commit } = config.vscodeWebCdn;
+  const proxyBase = vscodeCdnProxyPrefix(config.prefix, commit);
+  const fileRoot = `${config.origin}${proxyBase}/out/`;
   const configJson = escapeHtmlAttr(JSON.stringify(config.workbenchConfig));
   const emptyAuthSession = escapeHtmlAttr(JSON.stringify({}));
   return `<!DOCTYPE html>
@@ -30,19 +34,18 @@ export const getCode = (config: {
     <meta id="vscode-workbench-web-configuration" data-settings="${configJson}" />
     <meta id="vscode-workbench-auth-session" data-settings="${emptyAuthSession}" />
 
-    <link rel="apple-touch-icon" href="${VSCODE_BASE_URL}/resources/server/code-192.png" />
-    <link rel="icon" href="${VSCODE_BASE_URL}/resources/server/favicon.ico" type="image/x-icon" />
-    <link rel="manifest" href="${VSCODE_BASE_URL}/resources/server/manifest.json" crossorigin="use-credentials" />
-    <link rel="stylesheet" href="${VSCODE_BASE_URL}/out/vs/code/browser/workbench/workbench.css" />
+    <link rel="apple-touch-icon" href="${cdnBase}/code-192.png" />
+    <link rel="icon" href="${cdnBase}/favicon.ico" type="image/x-icon" />
+    <link rel="manifest" href="${cdnBase}/manifest.json" crossorigin="use-credentials" />
+    <link rel="stylesheet" href="${cdnBase}/out/vs/workbench/workbench.web.main.internal.css" />
   </head>
 
   <body aria-label="" style="background-color: #100F0F;"></body>
   <script>
-    const baseUrl = new URL("${VSCODE_BASE_URL}", window.location.origin).toString();
-    globalThis._VSCODE_FILE_ROOT = baseUrl + "/out/";
+    globalThis._VSCODE_FILE_ROOT = ${JSON.stringify(fileRoot)};
   </script>
-  <script type="module" src="${VSCODE_BASE_URL}/out/nls.messages.js"></script>
-  <script type="module" src="${VSCODE_BASE_URL}/out/vs/code/browser/workbench/workbench.js"></script>
+  <script type="module" src="${cdnBase}/out/nls.messages.js"></script>
+  <script type="module" src="${cdnBase}/out/vs/workbench/workbench.web.main.internal.js"></script>
 </html>
 `;
 };
