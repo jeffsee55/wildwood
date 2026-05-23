@@ -1,5 +1,5 @@
 import type { VscodeWebCdn } from "@/nextjs/vscode-web-cdn";
-import { vscodeCdnProxyPrefix } from "@/nextjs/vscode-web-cdn";
+import { vscodeCdnProxyAssetUrl } from "@/nextjs/vscode-web-cdn";
 
 const escapeHtmlAttr = (value: string) =>
   value
@@ -14,9 +14,10 @@ export const getCode = (config: {
   workbenchConfig: object;
   vscodeWebCdn: VscodeWebCdn;
 }) => {
-  const { cdnBase, commit } = config.vscodeWebCdn;
-  const proxyBase = vscodeCdnProxyPrefix(config.prefix, commit);
-  const fileRoot = `${config.origin}${proxyBase}/out/`;
+  const { commit } = config.vscodeWebCdn;
+  const asset = (path: string) =>
+    vscodeCdnProxyAssetUrl(config.origin, config.prefix, commit, path);
+  const fileRoot = `${asset("out")}/`;
   const configJson = escapeHtmlAttr(JSON.stringify(config.workbenchConfig));
   const emptyAuthSession = escapeHtmlAttr(JSON.stringify({}));
   return `<!DOCTYPE html>
@@ -34,18 +35,18 @@ export const getCode = (config: {
     <meta id="vscode-workbench-web-configuration" data-settings="${configJson}" />
     <meta id="vscode-workbench-auth-session" data-settings="${emptyAuthSession}" />
 
-    <link rel="apple-touch-icon" href="${cdnBase}/code-192.png" />
-    <link rel="icon" href="${cdnBase}/favicon.ico" type="image/x-icon" />
-    <link rel="manifest" href="${cdnBase}/manifest.json" crossorigin="use-credentials" />
-    <link rel="stylesheet" href="${cdnBase}/out/vs/workbench/workbench.web.main.internal.css" />
+    <link rel="apple-touch-icon" href="${asset("code-192.png")}" />
+    <link rel="icon" href="${asset("favicon.ico")}" type="image/x-icon" />
+    <link rel="manifest" href="${asset("manifest.json")}" crossorigin="use-credentials" />
+    <link rel="stylesheet" href="${asset("out/vs/workbench/workbench.web.main.internal.css")}" />
   </head>
 
   <body aria-label="" style="background-color: #100F0F;"></body>
   <script>
     globalThis._VSCODE_FILE_ROOT = ${JSON.stringify(fileRoot)};
   </script>
-  <script type="module" src="${cdnBase}/out/nls.messages.js"></script>
-  <script type="module" src="${cdnBase}/out/vs/workbench/workbench.web.main.internal.js"></script>
+  <script type="module" src="${asset("out/nls.messages.js")}"></script>
+  <script type="module" src="${asset("out/vs/workbench/workbench.web.main.internal.js")}"></script>
 </html>
 `;
 };

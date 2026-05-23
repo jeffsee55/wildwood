@@ -64,3 +64,14 @@ export function resolveVscodeWebCdn(): Promise<VscodeWebCdn> {
 export function vscodeCdnProxyPrefix(apiPrefix: string, commit: string): string {
   return `${apiPrefix}/cdn/${commit}`;
 }
+
+/** Same-origin URL for a vscode-cdn asset (required for `type="module"` scripts). */
+export function vscodeCdnProxyAssetUrl(
+  origin: string,
+  apiPrefix: string,
+  commit: string,
+  assetPath: string,
+): string {
+  const prefix = vscodeCdnProxyPrefix(apiPrefix, commit);
+  return `${origin}${prefix}/${assetPath.replace(/^\/+/, "")}`;
+}

@@ -45,3 +45,13 @@ export const VSCODE_EMBED_HTML_RESPONSE_HEADERS: Record<string, string> = {
   pragma: "no-cache",
   expires: "0",
 };
+
+/** Proxied static assets (commit-pinned); edge and browsers cache these. */
+export function vscodeWebStaticCacheHeaders(commit: string): Record<string, string> {
+  return {
+    "cache-control": "public, max-age=31536000, immutable",
+    "cdn-cache-control": "public, max-age=31536000, immutable",
+    "vercel-cdn-cache-control": "public, max-age=31536000, immutable",
+    "x-vscode-commit": commit,
+  };
+}

@@ -19,6 +19,7 @@ import {
   stripBuiltInCspMetaFromHtml,
   VSCODE_EMBED_DOCUMENT_CSP,
   VSCODE_EMBED_HTML_RESPONSE_HEADERS,
+  vscodeWebStaticCacheHeaders,
 } from "@/nextjs/vscode-embed-csp";
 import {
   TR33_ACTIVE_REF_COOKIE,
@@ -1009,7 +1010,7 @@ export const createHandler = (
       });
     });
 
-  // Proxies VS Code HTML from vscode-cdn (CSP strip); redirects everything else to the CDN.
+  // Same-origin proxy to main.vscode-cdn.net (module scripts need CORS; HTML needs CSP strip).
   const vscodeCdn = new H3();
   vscodeCdn.get("/:commit/**:asset", async (event) => {
     const asset = event.context.params?.asset;
@@ -1023,12 +1024,22 @@ export const createHandler = (
     }
 
     const cdnUrl = `${cdn.cdnBase}/${asset.replace(/^\/+/, "")}`;
+    const range = event.req.headers.get("range");
+    const upstream = await fetch(cdnUrl, {
+      method: event.req.method === "HEAD" ? "HEAD" : "GET",
+      headers: range ? { Range: range } : undefined,
+    });
+    if (!upstream.ok) {
+      return new Response("Not found", { status: upstream.status });
+    }
+
     const lower = asset.toLowerCase();
     if (lower.endsWith(".html") || lower.endsWith(".htm")) {
-      setNoStoreHeaders(event);
-      const upstream = await fetch(cdnUrl);
-      if (!upstream.ok) {
-        return new Response("Not found", { status: 404 });
+      if (event.req.method === "HEAD") {
+        return new Response(null, {
+          status: upstream.status,
+          headers: VSCODE_EMBED_HTML_RESPONSE_HEADERS,
+        });
       }
       let contents = await upstream.text();
       contents = stripBuiltInCspMetaFromHtml(contents);
@@ -1037,7 +1048,32 @@ export const createHandler = (
       });
     }
 
-    return Response.redirect(cdnUrl, 307);
+    const headers = new Headers();
+    const passthrough = [
+      "content-type",
+      "content-length",
+      "content-encoding",
+      "content-range",
+      "accept-ranges",
+      "etag",
+      "last-modified",
+    ] as const;
+    for (const name of passthrough) {
+      const value = upstream.headers.get(name);
+      if (value) {
+        headers.set(name, value);
+      }
+    }
+    for (const [key, value] of Object.entries(
+      vscodeWebStaticCacheHeaders(cdn.commit),
+    )) {
+      headers.set(key, value);
+    }
+
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers,
+    });
   });
 
   vscodeCdn.get("/", async (event) => {
