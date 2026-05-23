@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Toolbar } from "tr33/nextjs";
 
 import { getDocsIndex, Markdown, slugFromDocPath } from "@/lib/content";
-import { tr33 } from "@/lib/tr33";
+import { getDocsTr33 } from "@/lib/tr33";
 
 export default async function Home() {
   const { docs, nav } = await getDocsIndex();
@@ -53,7 +53,7 @@ export default async function Home() {
         )}
       </section>
 
-      <Toolbar tr33={tr33} apiBase="/api" theme="light" />
+      <Toolbar tr33={getDocsTr33()} apiBase="/api" theme="light" />
     </main>
   );
 }

@@ -184,6 +184,19 @@ export class NativeRemote extends Remote {
       }
       lastErr = String(result.error);
     }
+    for (const fallback of ["HEAD", process.env.VERCEL_GIT_COMMIT_SHA].filter(
+      (value): value is string => Boolean(value?.trim()),
+    )) {
+      if (tried.has(fallback)) continue;
+      tried.add(fallback);
+      const result = await this.executeCommand({
+        command: `rev-parse ${fallback}`,
+      });
+      if (result.isOk()) {
+        return result.value.trim();
+      }
+      lastErr = String(result.error);
+    }
     const hasOrigin = await this.hasOriginRemote();
     const summary = lastErr ? gitErrorSummary(lastErr) : "git rev-parse failed";
     const guidance = hasOrigin

@@ -9,7 +9,7 @@ import {
   Markdown,
   slugFromDocPath,
 } from "@/lib/content";
-import { tr33 } from "@/lib/tr33";
+import { getDocsTr33 } from "@/lib/tr33";
 
 type PageProps = {
   params: Promise<{ slug: string }>;
@@ -94,7 +94,7 @@ export default async function DocsPage({ params }: PageProps) {
         <Markdown root={doc.body} />
       </article>
 
-      <Toolbar tr33={tr33} apiBase="/api" theme="light" />
+      <Toolbar tr33={getDocsTr33()} apiBase="/api" theme="light" />
     </main>
   );
 }

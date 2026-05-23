@@ -16,7 +16,6 @@ const database = createLibsqlClient({
 
 const githubOrg = process.env.TR33_GITHUB_ORG || "jeffsee55";
 const githubRepo = process.env.TR33_GITHUB_REPO || "tr33";
-const docsRef = process.env.TR33_DOCS_REF || "main";
 
 function isNextProductionBuild(): boolean {
   return process.env.NEXT_PHASE === "phase-production-build";
@@ -25,6 +24,9 @@ function isNextProductionBuild(): boolean {
 /**
  * Local git checkout: dev, `next build` (content is in the repo), and Vercel build.
  * GitHub App remote: production runtime on Vercel when app credentials are set.
+ *
+ * Evaluated when the client is created (not at module load) so build-time and
+ * runtime on Vercel can pick different remotes from the same bundle.
  */
 export function useLocalContentRoot(): boolean {
   if (process.env.TR33_DOCS_SOURCE === "local") {
@@ -33,8 +35,13 @@ export function useLocalContentRoot(): boolean {
   if (process.env.TR33_DOCS_SOURCE === "github") {
     return false;
   }
-  if (isNextProductionBuild() && hasLocalDocsContent()) {
-    return true;
+  if (hasLocalDocsContent()) {
+    if (isNextProductionBuild()) {
+      return true;
+    }
+    if (process.env.VERCEL === "1" && process.env.CI === "1") {
+      return true;
+    }
   }
   return (
     process.env.NODE_ENV !== "production" &&
@@ -43,8 +50,32 @@ export function useLocalContentRoot(): boolean {
   );
 }
 
+/** Ref for indexing local checkout (Vercel often has no `main` branch or `origin`). */
+function resolveLocalDocsRef(): string {
+  const sha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
+  if (sha) {
+    return sha;
+  }
+  const configured = process.env.TR33_DOCS_LOCAL_REF?.trim();
+  if (configured) {
+    return configured;
+  }
+  return "HEAD";
+}
+
+function resolveDocsRef(local: boolean): string {
+  if (local) {
+    return resolveLocalDocsRef();
+  }
+  return process.env.TR33_DOCS_REF || "main";
+}
+
 function githubAppAuthConfig(): Tr33AuthConfig["github"] | undefined {
-  if (useLocalContentRoot() || !process.env.GITHUB_APP_ID || !process.env.GITHUB_PRIVATE_KEY) {
+  if (
+    useLocalContentRoot() ||
+    !process.env.GITHUB_APP_ID ||
+    !process.env.GITHUB_PRIVATE_KEY
+  ) {
     return undefined;
   }
   return {
@@ -89,36 +120,45 @@ const nav = z.collection({
 const collections = { authors, docs, nav };
 const version = "docs-0";
 
-const config = useLocalContentRoot()
-  ? defineConfig({
-      org: githubOrg,
-      repo: githubRepo,
-      ref: docsRef,
-      localPath: resolveDocsRepoRoot(),
-      version,
-      collections,
-    })
-  : defineConfig({
-      org: githubOrg,
-      repo: githubRepo,
-      ref: docsRef,
-      version,
-      collections,
-    });
+function createDocsClient(): Tr33Client {
+  const local = useLocalContentRoot();
+  const ref = resolveDocsRef(local);
+  const config = local
+    ? defineConfig({
+        org: githubOrg,
+        repo: githubRepo,
+        ref,
+        localPath: resolveDocsRepoRoot(),
+        version,
+        collections,
+      })
+    : defineConfig({
+        org: githubOrg,
+        repo: githubRepo,
+        ref,
+        version,
+        collections,
+      });
 
-const githubAuth = githubAppAuthConfig();
+  const githubAuth = githubAppAuthConfig();
 
-export const tr33 = createClient({
-  auth: githubAuth
-    ? {
-        github: githubAuth,
-        authorize: () => true,
-      }
-    : undefined,
-  config,
-  database,
-}) satisfies Tr33Client;
+  return createClient({
+    auth: githubAuth
+      ? {
+          github: githubAuth,
+          authorize: () => true,
+        }
+      : undefined,
+    config,
+    database,
+  });
+}
+
+let docsClient: Tr33Client | null = null;
 
 export function getDocsTr33(): Tr33Client {
-  return tr33;
+  if (!docsClient) {
+    docsClient = createDocsClient();
+  }
+  return docsClient;
 }

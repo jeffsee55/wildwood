@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cache, type ReactNode } from "react";
 import { ensureDocsContentReady } from "./ensure-docs-ready";
-import { tr33 } from "./tr33";
+import { getDocsTr33 } from "./tr33";
 
 type Meta = {
   _meta: {
@@ -72,6 +72,7 @@ function navChildToDocPath(navPath: string, childPath: string): string {
 
 export const getDocsIndex = cache(async (): Promise<DocsIndex> => {
   await ensureDocsContentReady();
+  const tr33 = getDocsTr33();
   const [docsResult, navResult] = await Promise.all([
     tr33.docs.findMany({}),
     tr33.nav.findMany({}),
