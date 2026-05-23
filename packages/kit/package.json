@@ -59,6 +59,9 @@
     ".": "./dist/index.js",
     "./package.json": "./package.json"
   },
+  "files": [
+    "dist"
+  ],
   "inlinedDependencies": {
     "sonner": "2.0.5"
   }

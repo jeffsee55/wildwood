@@ -58,9 +58,6 @@ importers:
       tr33:
         specifier: workspace:*
         version: link:../../packages/tr33
-      tr33-store:
-        specifier: workspace:*
-        version: link:../../packages/store
     devDependencies:
       '@tailwindcss/postcss':
         specifier: 4.2.2

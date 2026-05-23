@@ -6,8 +6,7 @@ export default defineConfig({
   outDir: "dist",
   clean: true,
   exports: true,
-  /** Bundle workspace store so Next.js apps do not need a direct `tr33-store` dependency. */
+  /** Inlined into tr33 so apps only need `tr33` + prebuilt `@tr33/kit` (client UI). */
   noExternal: ["tr33-store"],
-  // This isn't working for ignore tests for some reason
   ignoreWatch: ["tr33.db"],
 });
