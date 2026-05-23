@@ -8,6 +8,10 @@ const escapeHtmlAttr = (value: string) =>
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
 
+/** Safe JSON inside `<script>` (not HTML attributes). */
+const jsonForScript = (value: unknown) =>
+  JSON.stringify(value).replace(/</g, "\\u003c");
+
 export const getCode = (config: {
   origin: string;
   prefix: string;
@@ -18,6 +22,9 @@ export const getCode = (config: {
   const asset = (path: string) =>
     vscodeCdnProxyAssetUrl(config.origin, config.prefix, commit, path);
   const fileRoot = `${asset("out")}/`;
+  const workbenchModule = asset(
+    "out/vs/workbench/workbench.web.main.internal.js",
+  );
   const configJson = escapeHtmlAttr(JSON.stringify(config.workbenchConfig));
   const emptyAuthSession = escapeHtmlAttr(JSON.stringify({}));
   return `<!DOCTYPE html>
@@ -41,12 +48,28 @@ export const getCode = (config: {
     <link rel="stylesheet" href="${asset("out/vs/workbench/workbench.web.main.internal.css")}" />
   </head>
 
-  <body aria-label="" style="background-color: #100F0F;"></body>
+  <body aria-label="" style="margin:0;overflow:hidden;background-color:#100F0F;"></body>
   <script>
     globalThis._VSCODE_FILE_ROOT = ${JSON.stringify(fileRoot)};
   </script>
   <script type="module" src="${asset("out/nls.messages.js")}"></script>
-  <script type="module" src="${asset("out/vs/workbench/workbench.web.main.internal.js")}"></script>
+  <script type="module">
+    import { create } from ${jsonForScript(workbenchModule)};
+    const config = JSON.parse(
+      document.getElementById("vscode-workbench-web-configuration").getAttribute("data-settings"),
+    );
+    const workspace = config.folderUri ? { folderUri: config.folderUri } : undefined;
+    await create(document.body, {
+      ...config,
+      workspaceProvider: {
+        workspace,
+        trusted: true,
+        async open() {
+          return true;
+        },
+      },
+    });
+  </script>
 </html>
 `;
 };
