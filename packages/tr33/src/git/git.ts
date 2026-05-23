@@ -139,6 +139,19 @@ export class Git implements Gitable {
         oid: commit.treeOid,
       }),
     });
+    await this.db.refs.setTreeOid({
+      ref: args.ref,
+      treeOid: commit.treeOid,
+    });
+    const indexed = await this.db.refs.get({ ref: args.ref });
+    const prev = indexed?.versions ?? [];
+    const versions = prev.includes(this.config.version)
+      ? prev
+      : [...prev, this.config.version];
+    await this.db.refs.updateVersions({
+      ref: args.ref,
+      versions,
+    });
   }
 
   async add({

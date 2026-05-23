@@ -41,6 +41,15 @@ async function assertIndexedForProduction(
     throw new Error(missingIndexMessage(ref));
   }
   if (!worktree.versions?.includes(version)) {
+    // Indexes written before switch stamped versions are fixed (see git.switch).
+    if (worktree.rootTree || worktree.commit) {
+      const prev = worktree.versions ?? [];
+      await tr33._.db.refs.updateVersions({
+        ref,
+        versions: prev.includes(version) ? prev : [...prev, version],
+      });
+      return;
+    }
     throw new Error(
       `Docs index in database is missing version "${version}" for ref "${ref}". ` +
         "Re-run production build with the same TR33_DOCS_* env as runtime.",
