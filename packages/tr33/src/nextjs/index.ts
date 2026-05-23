@@ -107,11 +107,19 @@ function resolveTr33VscodePackageJsonPath(): string {
 const execFileAsync = promisify(execFile);
 const VSCODE_WEB_PLATFORM =
   process.env.TR33_VSCODE_WEB_PLATFORM || "server-linux-x64-web";
-const VSCODE_WEB_CACHE_ROOT = path.join(
-  process.cwd(),
-  ".tr33-cache",
-  "vscode-web",
-);
+
+/** VS Code web download cache (toolbar editor). Writable on serverless via `/tmp`. */
+function resolveTr33CacheRoot(): string {
+  if (process.env.TR33_CACHE_DIR?.trim()) {
+    return path.resolve(process.env.TR33_CACHE_DIR.trim());
+  }
+  if (process.env.VERCEL === "1" || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return path.join(tmpdir(), ".tr33-cache");
+  }
+  return path.join(process.cwd(), ".tr33-cache");
+}
+
+const VSCODE_WEB_CACHE_ROOT = path.join(resolveTr33CacheRoot(), "vscode-web");
 let vscodeWebVersionPromise: Promise<string> | null = null;
 let vscodeWebAssetsPromise: Promise<{
   rootDir: string;
