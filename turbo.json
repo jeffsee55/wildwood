@@ -34,7 +34,7 @@
         "@tr33/ui#build",
         "tr33-vscode#build"
       ],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**", "bundled-extension/**"]
     },
     "next:dev": {
       "dependsOn": ["^build"]

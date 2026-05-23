@@ -7,9 +7,32 @@ const nodeRequire = createRequire(import.meta.url);
 
 let extensionRoot: string | undefined;
 
-/** Resolved `tr33-vscode` package root (`packages/extension` in the monorepo). */
+function tr33PackageRootFromModule(): string {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+}
+
+/** Resolved tr33-vscode root: `bundled-extension/` shipped with `tr33`, then monorepo / node_modules. */
 export function getTr33ExtensionRoot(): string {
   if (extensionRoot) {
+    return extensionRoot;
+  }
+
+  const tryRoot = (root: string | undefined): string | undefined => {
+    if (!root) {
+      return undefined;
+    }
+    const pkg = path.join(root, "package.json");
+    if (existsSync(pkg)) {
+      return root;
+    }
+    return undefined;
+  };
+
+  const bundled = tryRoot(
+    path.join(tr33PackageRootFromModule(), "bundled-extension"),
+  );
+  if (bundled) {
+    extensionRoot = bundled;
     return extensionRoot;
   }
 
@@ -26,12 +49,7 @@ export function getTr33ExtensionRoot(): string {
   };
 
   const fromTr33Pkg = tryResolve(() => {
-    const tr33PkgJson = path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "..",
-      "..",
-      "package.json",
-    );
+    const tr33PkgJson = path.join(tr33PackageRootFromModule(), "package.json");
     return createRequire(tr33PkgJson).resolve("tr33-vscode/package.json");
   });
   if (fromTr33Pkg) {
@@ -49,19 +67,19 @@ export function getTr33ExtensionRoot(): string {
 
   const cwd = process.cwd();
   for (const candidate of [
+    path.join(cwd, "packages", "extension"),
+    path.join(cwd, "..", "..", "packages", "extension"),
     path.join(cwd, "node_modules", "tr33-vscode"),
     path.join(cwd, "node_modules", "tr33", "node_modules", "tr33-vscode"),
-    path.join(cwd, "..", "..", "packages", "extension"),
-    path.join(cwd, "packages", "extension"),
   ]) {
-    const pkg = path.join(candidate, "package.json");
-    if (existsSync(pkg)) {
-      extensionRoot = candidate;
+    const root = tryRoot(candidate);
+    if (root) {
+      extensionRoot = root;
       return extensionRoot;
     }
   }
 
   throw new Error(
-    `Could not resolve tr33-vscode package root (cwd=${cwd}). Install workspace deps or run from the monorepo.`,
+    `Could not resolve tr33-vscode package root (cwd=${cwd}). Run tr33 build (bundled-extension) or install workspace deps.`,
   );
 }

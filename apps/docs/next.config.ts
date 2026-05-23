@@ -9,7 +9,10 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["better-sqlite3"],
   outputFileTracingRoot: monorepoRoot,
   outputFileTracingIncludes: {
-    "/api/*": ["packages/extension/**/*"],
+    "/api/*": [
+      "packages/extension/**/*",
+      "packages/tr33/bundled-extension/**/*",
+    ],
   },
 };
 

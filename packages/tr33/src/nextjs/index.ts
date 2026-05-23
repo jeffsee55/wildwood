@@ -183,6 +183,7 @@ export const createHandler = (
             "https://openvsxorg.blob.core.windows.net/resources/{publisher}/{name}/{version}/{path}",
           controlUrl: `${event.url.origin}${dir}/extensions/marketplace.json`,
         },
+        chatParticipantRegistry: `${event.url.origin}${dir}/extensions/chat.json`,
         extensionEnabledApiProposals: {
           [`${pkg.publisher}.${pkg.name}`]: pkg.enabledApiProposals,
           nullExtensionDescription: pkg.enabledApiProposals,
@@ -891,6 +892,14 @@ export const createHandler = (
     asset: string,
   ) => {
     setNoStoreHeaders(event);
+    if (asset === "package.json") {
+      return withVscodeEmbedCors(
+        event.req,
+        Response.json(extensionPkg, {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }
     const filePath = path.join(getTr33ExtensionRoot(), asset);
     try {
       const served = await serveStatic(event, {
@@ -943,8 +952,15 @@ export const createHandler = (
       setNoStoreHeaders(event);
       return Response.json(await getWorkbenchConfig(event));
     })
-    .get("/extensions/marketplace.json", async (event) => {
-      return proxyMainVscodeCdnAsset(event.req, "extensions/marketplace.json");
+    .get("extensions/**:asset", async (event) => {
+      const asset = event.context.params?.asset;
+      if (!asset) {
+        return new Response("No asset path", {
+          status: 404,
+          headers: vscodeEmbedCorsHeaders(event.req),
+        });
+      }
+      return proxyMainVscodeCdnAsset(event.req, `extensions/${asset}`);
     })
     .get("/extension/package.json", async (event) => {
       return serveTr33ExtensionAsset(event, "package.json");
