@@ -43,6 +43,7 @@ drizzle
 .env*.local
 
 tr33.db
+packages/tr33/vendor/
 .tr33-cache/
 # Legacy cache dir name (safe to delete locally)
 .tr33-cache/

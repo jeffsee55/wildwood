@@ -1,21 +1,10 @@
 // import extension from "tr33-vscode";
 
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import {
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { calculateBlobOid, calculateBlobOidFromBytes } from "tr33-store";
 import extensionPkg from "tr33-vscode/package.json" with { type: "json" };
 import { H3, html, serveStatic, setResponseHeader } from "h3";
@@ -30,6 +19,7 @@ import {
   stripBuiltInCspMetaFromHtml,
   VSCODE_EMBED_DOCUMENT_CSP,
   VSCODE_EMBED_HTML_RESPONSE_HEADERS,
+  vscodeWebStaticCacheHeaders,
 } from "@/nextjs/vscode-embed-csp";
 import {
   TR33_ACTIVE_REF_COOKIE,
@@ -40,6 +30,7 @@ import {
   cookiesFromCookieHeader,
   resolveActiveRef,
 } from "@/nextjs/resolve-active-ref";
+import { loadVendoredVscodeWebAssets } from "@/nextjs/vscode-web-vendor";
 
 /** Turbopack/Next do not implement `import.meta.resolve`; use CJS resolver instead. */
 const nodeRequire = createRequire(import.meta.url);
@@ -104,23 +95,6 @@ function resolveTr33VscodePackageJsonPath(): string {
   );
 }
 
-const execFileAsync = promisify(execFile);
-const VSCODE_WEB_PLATFORM =
-  process.env.TR33_VSCODE_WEB_PLATFORM || "server-linux-x64-web";
-
-/** VS Code web download cache (toolbar editor). Writable on serverless via `/tmp`. */
-function resolveTr33CacheRoot(): string {
-  if (process.env.TR33_CACHE_DIR?.trim()) {
-    return path.resolve(process.env.TR33_CACHE_DIR.trim());
-  }
-  if (process.env.VERCEL === "1" || process.env.AWS_LAMBDA_FUNCTION_NAME) {
-    return path.join(tmpdir(), ".tr33-cache");
-  }
-  return path.join(process.cwd(), ".tr33-cache");
-}
-
-const VSCODE_WEB_CACHE_ROOT = path.join(resolveTr33CacheRoot(), "vscode-web");
-let vscodeWebVersionPromise: Promise<string> | null = null;
 let vscodeWebAssetsPromise: Promise<{
   rootDir: string;
   version: string;
@@ -133,84 +107,14 @@ const extensionPkgSchema = z.object({
   enabledApiProposals: z.array(z.string()),
 });
 
-const resolveVscodeWebVersion = async (): Promise<string> => {
-  if (vscodeWebVersionPromise) {
-    return vscodeWebVersionPromise;
-  }
-  vscodeWebVersionPromise = (async () => {
-    const versionOverride = process.env.TR33_VSCODE_WEB_VERSION;
-    if (versionOverride && versionOverride !== "latest") {
-      return versionOverride;
-    }
-    const response = await fetch(
-      "https://update.code.visualstudio.com/api/releases/stable",
-    );
-    if (!response.ok) {
-      throw new Error(`Failed to resolve VS Code version: ${response.status}`);
-    }
-    const versions = (await response.json()) as string[];
-    if (versions.length === 0) {
-      throw new Error("No stable VS Code versions returned");
-    }
-    return versions[0];
-  })();
-  return vscodeWebVersionPromise;
-};
-
-const ensureVscodeWebAssets = async (): Promise<{
+/** Vendor tree from `tr33` build; static assets use HTTP cache headers at runtime. */
+const ensureVscodeWebAssets = (): Promise<{
   rootDir: string;
   version: string;
 }> => {
-  if (vscodeWebAssetsPromise) {
-    return vscodeWebAssetsPromise;
+  if (!vscodeWebAssetsPromise) {
+    vscodeWebAssetsPromise = loadVendoredVscodeWebAssets();
   }
-  vscodeWebAssetsPromise = (async () => {
-    const version = await resolveVscodeWebVersion();
-    const versionDir = path.join(
-      VSCODE_WEB_CACHE_ROOT,
-      `${VSCODE_WEB_PLATFORM}-${version}`,
-    );
-    const readyFile = path.join(versionDir, ".ready");
-
-    try {
-      await stat(readyFile);
-    } catch {
-      await mkdir(versionDir, { recursive: true });
-      const tmpDir = await mkdtemp(path.join(tmpdir(), "tr33-vscode-web-"));
-      try {
-        const archivePath = path.join(tmpDir, "vscode-web.tgz");
-        const downloadUrl = `https://update.code.visualstudio.com/${version}/${VSCODE_WEB_PLATFORM}/stable`;
-        const response = await fetch(downloadUrl);
-        if (!response.ok) {
-          throw new Error(
-            `Failed to download VS Code web assets: ${response.status}`,
-          );
-        }
-        await writeFile(archivePath, Buffer.from(await response.arrayBuffer()));
-        await execFileAsync("tar", ["-xzf", archivePath, "-C", versionDir]);
-        await writeFile(readyFile, `${Date.now()}\n`, "utf-8");
-      } finally {
-        await rm(tmpDir, { recursive: true, force: true });
-      }
-    }
-
-    const expectedRoot = path.join(versionDir, `vscode-${VSCODE_WEB_PLATFORM}`);
-    try {
-      await stat(expectedRoot);
-      return { rootDir: expectedRoot, version };
-    } catch {
-      const entries = await readdir(versionDir, { withFileTypes: true });
-      const fallback = entries.find(
-        (entry) => entry.isDirectory() && entry.name.startsWith("vscode-"),
-      );
-      if (!fallback) {
-        throw new Error(
-          "VS Code web assets extracted, but root folder not found",
-        );
-      }
-      return { rootDir: path.join(versionDir, fallback.name), version };
-    }
-  })();
   return vscodeWebAssetsPromise;
 };
 
@@ -304,7 +208,7 @@ export const createHandler = (
     req: { headers: { get: (name: string) => string | null } };
   }) => {
     const dir = event.url.pathname.split("/").slice(0, -1).join("/");
-    const version = await resolveVscodeWebVersion();
+    const version = (await ensureVscodeWebAssets()).version;
     const comparisonRef = ref;
     const cookies = cookiesFromCookieHeader(event.req.headers.get("cookie"));
     const explicitActiveRefCookie = cookies
@@ -1099,10 +1003,12 @@ export const createHandler = (
       setNoStoreHeaders(event);
       setResponseHeader(event, "Content-Security-Policy", VSCODE_EMBED_DOCUMENT_CSP);
       const workbenchConfig = await getWorkbenchConfig(event);
+      const { version: vscodeWebVersion } = await ensureVscodeWebAssets();
       const code = getCode({
         origin: event.url.origin,
         prefix: "/api/vscode",
         workbenchConfig,
+        vscodeWebVersion,
       });
       return html(event, code);
     })
@@ -1133,16 +1039,32 @@ export const createHandler = (
       });
     });
 
+  const mergeVscodeStaticCache = (response: Response, version: string) => {
+    const headers = new Headers(response.headers);
+    for (const [key, value] of Object.entries(
+      vscodeWebStaticCacheHeaders(version),
+    )) {
+      headers.set(key, value);
+    }
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  };
+
   const vscodeWeb = new H3();
-  // We load from here so the extension server
-  // is the same host as our extension.
-  vscodeWeb.get("/**:asset", async (event) => {
-    setNoStoreHeaders(event);
+  // Same host as the extension; static assets use versioned URLs + cache headers.
+  vscodeWeb.get("/:version/**:asset", async (event) => {
     const asset = event.context.params?.asset;
-    if (!asset) {
+    const versionParam = event.context.params?.version;
+    if (!asset || !versionParam) {
       return new Response(`No asset provided in query`, { status: 404 });
     }
     const assets = await ensureVscodeWebAssets();
+    if (versionParam !== assets.version) {
+      return new Response("VS Code version mismatch", { status: 404 });
+    }
     const filePath = toSafeAssetPath(assets.rootDir, asset);
     if (!filePath) {
       return new Response("Invalid asset path", { status: 400 });
@@ -1150,6 +1072,7 @@ export const createHandler = (
 
     const lower = filePath.toLowerCase();
     if (lower.endsWith(".html") || lower.endsWith(".htm")) {
+      setNoStoreHeaders(event);
       let contents: string;
       try {
         contents = await readFile(filePath, "utf-8");
@@ -1162,7 +1085,7 @@ export const createHandler = (
       });
     }
 
-    return serveStatic(event, {
+    const served = await serveStatic(event, {
       getContents: async () => {
         try {
           const contents = await readFile(filePath);
@@ -1186,25 +1109,20 @@ export const createHandler = (
         }
       },
     });
+    if (served instanceof Response) {
+      return mergeVscodeStaticCache(served, assets.version);
+    }
+    return served;
   });
 
-  // Convenience redirect to the workbench entrypoint.
   vscodeWeb.get("/", async (event) => {
     setNoStoreHeaders(event);
     const assets = await ensureVscodeWebAssets();
-    const filePath = path.join(
-      assets.rootDir,
-      "out/vs/code/browser/workbench/workbench.html",
+    const base = event.url.pathname.replace(/\/$/, "");
+    return Response.redirect(
+      `${base}/${assets.version}/out/vs/code/browser/workbench/workbench.html`,
+      302,
     );
-    try {
-      let contents = await readFile(filePath, "utf-8");
-      contents = stripBuiltInCspMetaFromHtml(contents);
-      return new Response(contents, {
-        headers: VSCODE_EMBED_HTML_RESPONSE_HEADERS,
-      });
-    } catch {
-      return new Response("Workbench not found", { status: 404 });
-    }
   });
 
   vscode.mount("/vscode-web", vscodeWeb);

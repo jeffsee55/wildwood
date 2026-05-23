@@ -9,8 +9,10 @@ export const getCode = (config: {
   origin: string;
   prefix: string;
   workbenchConfig: object;
+  /** Version segment in asset URLs; paired with immutable cache headers when VS Code updates. */
+  vscodeWebVersion: string;
 }) => {
-  const VSCODE_BASE_URL = `${config.origin}${config.prefix}/vscode-web`;
+  const VSCODE_BASE_URL = `${config.origin}${config.prefix}/vscode-web/${config.vscodeWebVersion}`;
   const configJson = escapeHtmlAttr(JSON.stringify(config.workbenchConfig));
   const emptyAuthSession = escapeHtmlAttr(JSON.stringify({}));
   return `<!DOCTYPE html>

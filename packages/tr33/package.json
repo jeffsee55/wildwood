@@ -10,10 +10,11 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "vendor"
   ],
   "scripts": {
-    "build": "pnpm run build:deps && tsdown",
+    "build": "pnpm run build:deps && node scripts/fetch-vscode-web.mjs && tsdown",
     "build:deps": "pnpm --filter tr33-store run build && pnpm --filter @tr33/kit run build && pnpm --filter @tr33/ui run build",
     "dev": "tsdown --watch",
     "lib:dev": "tsdown --watch",
