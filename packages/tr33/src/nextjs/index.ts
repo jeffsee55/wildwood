@@ -1027,7 +1027,10 @@ export const createHandler = (
     const range = event.req.headers.get("range");
     const upstream = await fetch(cdnUrl, {
       method: event.req.method === "HEAD" ? "HEAD" : "GET",
-      headers: range ? { Range: range } : undefined,
+      headers: {
+        "Accept-Encoding": "identity",
+        ...(range ? { Range: range } : {}),
+      },
     });
     if (!upstream.ok) {
       return new Response("Not found", { status: upstream.status });
@@ -1049,10 +1052,9 @@ export const createHandler = (
     }
 
     const headers = new Headers();
+    // `fetch` decompresses the body; forwarding `content-encoding` breaks the browser.
     const passthrough = [
       "content-type",
-      "content-length",
-      "content-encoding",
       "content-range",
       "accept-ranges",
       "etag",
