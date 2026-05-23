@@ -1,7 +1,7 @@
 // import extension from "tr33-vscode";
 
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,9 @@ import {
   stripBuiltInCspMetaFromHtml,
   VSCODE_EMBED_DOCUMENT_CSP,
   VSCODE_EMBED_HTML_RESPONSE_HEADERS,
+  vscodeEmbedCorsHeaders,
   vscodeWebStaticCacheHeaders,
+  withVscodeEmbedCors,
 } from "@/nextjs/vscode-embed-csp";
 import {
   TR33_ACTIVE_REF_COOKIE,
@@ -179,7 +181,8 @@ export const createHandler = (
     req: { headers: { get: (name: string) => string | null } };
   }) => {
     const dir = event.url.pathname.split("/").slice(0, -1).join("/");
-    const version = (await resolveVscodeWebCdn()).version;
+    const cdn = await resolveVscodeWebCdn();
+    const webEndpointBase = `${event.url.origin}${dir}/cdn/${cdn.commit}`;
     const comparisonRef = ref;
     const cookies = cookiesFromCookieHeader(event.req.headers.get("cookie"));
     const explicitActiveRefCookie = cookies
@@ -231,7 +234,10 @@ export const createHandler = (
         nameLong: "VSCode Web sample",
         applicationName: "code-web-sample",
         dataFolderName: ".vscode-web-sample",
-        version,
+        version: cdn.version,
+        commit: cdn.commit,
+        webEndpointUrl: webEndpointBase,
+        webEndpointUrlTemplate: webEndpointBase,
         extensionsGallery: {
           serviceUrl: "https://open-vsx.org/vscode/gallery",
           itemUrl: "https://open-vsx.org/vscode/item",
@@ -941,30 +947,15 @@ export const createHandler = (
     }
   });
 
-  // CORS for extension assets: VS Code webview loads from vscode-cdn.net and fetches
-  // extension JS from localhost. Chrome's Private Network Access requires
-  // Access-Control-Allow-Private-Network: true for preflight and responses.
+  // CORS for extension host on `*.vscode-cdn.net` loading `/api/vscode/extension/**`.
   vscode.use(async (event, next) => {
-    const corsHeaders: Record<string, string> = {
-      "Access-Control-Allow-Origin": event.req.headers.get("origin") ?? "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "*",
-      "Access-Control-Allow-Private-Network": "true",
-    };
+    const corsHeaders = vscodeEmbedCorsHeaders(event.req);
     if (event.req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders });
     }
     const response = await next();
     if (response instanceof Response) {
-      const h = new Headers(response.headers);
-      for (const [k, v] of Object.entries(corsHeaders)) {
-        h.set(k, v);
-      }
-      return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: h,
-      });
+      return withVscodeEmbedCors(event.req, response);
     }
     return response;
   });
@@ -997,16 +988,25 @@ export const createHandler = (
       const extensionPkgPath = resolveTr33VscodePackageJsonPath();
       const extensionDir = path.dirname(extensionPkgPath);
       const filePath = path.join(extensionDir, asset);
-      return serveStatic(event, {
+      const served = await serveStatic(event, {
         getContents: async () => {
-          return readFile(filePath, "utf-8");
+          const contents = await readFile(filePath);
+          return new Uint8Array(contents);
         },
         getMeta: async () => {
+          const fileStat = await stat(filePath);
           return {
-            size: 0,
-            mtime: Date.now(),
+            size: fileStat.size,
+            mtime: fileStat.mtimeMs,
           };
         },
+      });
+      if (served instanceof Response) {
+        return withVscodeEmbedCors(event.req, served);
+      }
+      return new Response("Not found", {
+        status: 404,
+        headers: vscodeEmbedCorsHeaders(event.req),
       });
     });
 
@@ -1092,24 +1092,28 @@ export const createHandler = (
   app.mount("/git", gitService);
   app.mount("/vscode", vscode);
 
-  // CORS at base level: service worker (vscode-cdn.net) fetches extension assets
-  // from localhost. Chrome's Private Network Access requires preflight to return
-  // Access-Control-Allow-Private-Network: true. Must run before any routing.
-  const corsHeaders = (event: { req: Request }) => ({
-    "Access-Control-Allow-Origin": event.req.headers.get("origin") ?? "*",
-    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS, POST",
-    "Access-Control-Allow-Headers": "*",
-    "Access-Control-Allow-Private-Network": "true",
-  });
   base.use(async (event, next) => {
-    const headers = corsHeaders(event);
+    const pathname = event.url.pathname;
+    const isVscodeApi = pathname.startsWith("/api/vscode/");
+    const corsHeaders = isVscodeApi
+      ? vscodeEmbedCorsHeaders(event.req)
+      : {
+          "Access-Control-Allow-Origin":
+            event.req.headers.get("origin") ?? "*",
+          "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS, POST",
+          "Access-Control-Allow-Headers": "*",
+          "Access-Control-Allow-Private-Network": "true",
+        };
     if (event.req.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers });
+      return new Response(null, { status: 204, headers: corsHeaders });
     }
     const res = await next();
+    if (res instanceof Response && isVscodeApi) {
+      return withVscodeEmbedCors(event.req, res);
+    }
     if (res instanceof Response) {
       const h = new Headers(res.headers);
-      for (const [k, v] of Object.entries(headers)) h.set(k, v);
+      for (const [k, v] of Object.entries(corsHeaders)) h.set(k, v);
       return new Response(res.body, {
         status: res.status,
         statusText: res.statusText,
@@ -1192,7 +1196,13 @@ async function withNextTr33Response(
 
   const response = await upstream();
 
-  if (!response.ok) {
+  if (pathname.startsWith("/api/vscode/")) {
+    const withCors = (res: Response) => withVscodeEmbedCors(request, res);
+    if (!response.ok) {
+      tr33NextLog("upstream not ok", request.method, pathname, response.status);
+      return withCors(response);
+    }
+  } else if (!response.ok) {
     tr33NextLog("upstream not ok", request.method, pathname, response.status);
     return response;
   }

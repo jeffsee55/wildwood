@@ -46,6 +46,32 @@ export const VSCODE_EMBED_HTML_RESPONSE_HEADERS: Record<string, string> = {
   expires: "0",
 };
 
+/** CORS for extension host on `*.vscode-cdn.net` fetching embedder `/api/vscode/**` assets. */
+export function vscodeEmbedCorsHeaders(req: {
+  headers: { get: (name: string) => string | null };
+}): Record<string, string> {
+  const origin = req.headers.get("origin");
+  return {
+    "Access-Control-Allow-Origin": origin ?? "*",
+    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+    "Access-Control-Allow-Headers": "*",
+    "Access-Control-Allow-Private-Network": "true",
+    Vary: "Origin",
+  };
+}
+
+export function withVscodeEmbedCors(req: Request, response: Response): Response {
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(vscodeEmbedCorsHeaders(req))) {
+    headers.set(key, value);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 /** Proxied static assets (commit-pinned); edge and browsers cache these. */
 export function vscodeWebStaticCacheHeaders(commit: string): Record<string, string> {
   return {
