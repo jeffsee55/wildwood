@@ -8,6 +8,8 @@
     "lint": "turbo lint",
     "dev:web": "turbo run watch:deps next:dev studio:play --filter=tr33 --filter=@tr33/kit --filter=tr33-vscode --filter=play",
     "dev:web-play": "pnpm run dev:web",
+    "dev:docs": "turbo run watch:deps next:dev studio:play --filter=tr33 --filter=@tr33/kit --filter=tr33-vscode --filter=docs",
+    "playground": "pnpm run dev:web",
     "dev:vscode-playground": "turbo run playground studio --filter=tr33",
     "studio:tr33": "turbo run studio --filter=tr33",
     "studio:web-db": "turbo run studio:play --filter=tr33",

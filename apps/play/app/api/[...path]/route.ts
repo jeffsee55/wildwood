@@ -1,13 +1,18 @@
-import { handle } from "tr33/nextjs";
+import { cookiesFromCookieHeader, handle } from "tr33/nextjs";
 
-import { tr33 } from "@/lib/tr33";
+import { getPlaygroundTr33 } from "@/lib/tr33";
 
-const tr33Api = handle(tr33, {
-  revalidateTagOnDraftExit: "some-cache-tag",
-});
+const revalidate = { revalidateTagOnDraftExit: "some-cache-tag" as const };
 
-export const GET = tr33Api;
-export const HEAD = tr33Api;
-export const OPTIONS = tr33Api;
+async function tr33HandlerFor(request: Request) {
+  const tr33 = getPlaygroundTr33(
+    cookiesFromCookieHeader(request.headers.get("cookie")),
+  );
+  return handle(tr33, revalidate)(request);
+}
+
+export const GET = tr33HandlerFor;
+export const HEAD = tr33HandlerFor;
+export const OPTIONS = tr33HandlerFor;
 /** Git mutations and other Tr33 APIs use POST; Next only forwards exported methods. */
-export const POST = tr33Api;
+export const POST = tr33HandlerFor;

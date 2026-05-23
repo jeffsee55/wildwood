@@ -18,8 +18,42 @@ import type { Cache, Commit, FindWorktreeEntriesArgs, Ref } from "@/types";
 import { refSchema } from "@/types";
 
 const createDrizzle = (client: LibsqlClient) => {
-  return drizzle(client, { schema, relations, logger: false });
+  return drizzle({ client, schema, relations, logger: false });
 };
+
+function splitSqlStatements(sql: string): string[] {
+  return sql
+    .split(/;\s*(?:\n|$)/)
+    .map((statement) => statement.trim())
+    .filter((statement) => statement && !statement.startsWith("--"));
+}
+
+function isIgnorableSchemaError(err: unknown): boolean {
+  return err instanceof Error && /already exists/i.test(err.message);
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (typeof err === "object" && err !== null && "message" in err) {
+    return String((err as { message: unknown }).message);
+  }
+  return "";
+}
+
+/** LibSQL / SQLite errors when Tr33 or Better Auth tables have not been created yet. */
+export function isMissingSchemaError(err: unknown): boolean {
+  const message = errorMessage(err);
+  if (/no such table/i.test(message)) {
+    return true;
+  }
+  if (typeof err === "object" && err !== null && "code" in err) {
+    const code = String((err as { code: unknown }).code);
+    return code === "SQLITE_ERROR";
+  }
+  return false;
+}
 
 /** Deduplicate `_refs.versions` (order preserved, first occurrence wins). */
 function dedupeRefVersions(versions: string[]): string[] {
@@ -572,12 +606,13 @@ export class LibsqlDatabase {
   };
 
   async init() {
-    const statements = sqlSchema.raw.split("\n\n");
-    for (const statement of statements) {
-      if (statement) {
-        try {
-          await this.drizzle.run(statement);
-        } catch {}
+    for (const statement of splitSqlStatements(sqlSchema.raw)) {
+      try {
+        await this.client.execute(statement);
+      } catch (err) {
+        if (!isIgnorableSchemaError(err)) {
+          throw err;
+        }
       }
     }
   }

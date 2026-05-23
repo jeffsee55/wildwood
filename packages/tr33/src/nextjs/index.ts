@@ -18,10 +18,19 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { calculateBlobOid, calculateBlobOidFromBytes } from "tr33-store";
 import extensionPkg from "tr33-vscode/package.json" with { type: "json" };
-import { H3, html, serveStatic } from "h3";
+import { H3, html, serveStatic, setResponseHeader } from "h3";
 import { z } from "zod/v4";
+import {
+  type Tr33AuthAction,
+  userFromUnknownSession,
+} from "@/client/auth";
 import type { Tr33Client } from "@/client/index";
 import { getCode } from "@/nextjs/code";
+import {
+  stripBuiltInCspMetaFromHtml,
+  VSCODE_EMBED_DOCUMENT_CSP,
+  VSCODE_EMBED_HTML_RESPONSE_HEADERS,
+} from "@/nextjs/vscode-embed-csp";
 import {
   TR33_ACTIVE_REF_COOKIE,
   TR33_SYNC_HOST_ACTIVE_REF_HEADER,
@@ -238,6 +247,43 @@ export const createHandler = (
   const remote = git.remote;
   const pkg = extensionPkgSchema.parse(extensionPkg);
 
+  const resolveAuthUser = async (request: Request) => {
+    if (client._.auth?.getUser) {
+      return client._.auth.getUser(request);
+    }
+    if (client._.auth?.betterAuth) {
+      const session = await client._.auth.betterAuth.api.getSession({
+        headers: request.headers,
+      });
+      return userFromUnknownSession(session);
+    }
+    return null;
+  };
+
+  const authorizeGitAction = async (
+    request: Request,
+    action: Tr33AuthAction,
+  ): Promise<Response | null> => {
+    const authorize = client._.auth?.authorize;
+    if (!authorize) {
+      return null;
+    }
+    const user = await resolveAuthUser(request);
+    const result = await authorize({
+      action,
+      config: client._.config,
+      request,
+      user,
+    });
+    if (result instanceof Response) {
+      return result;
+    }
+    if (result === false) {
+      return new Response("Forbidden", { status: 403 });
+    }
+    return null;
+  };
+
   const isNativeRemoteNotImplementedError = (error: unknown): boolean => {
     return (
       error instanceof Error &&
@@ -375,16 +421,36 @@ export const createHandler = (
 
     try {
       const refName = decodeURIComponent(refParam);
+      tr33GitApiLog("GET /worktrees/:ref", {
+        ref: refName,
+        org,
+        repo,
+        url: event.url?.href ?? refParam,
+      });
+      const authError = await authorizeGitAction(event.req, {
+        type: "git.switchRef",
+        ref: refName,
+      });
+      if (authError) return authError;
       await client._.git.switch({ ref: refName });
       const worktree = await git.db.refs.get({ ref: refName });
       if (!worktree) {
         await client._.db.init();
         const commit = await remote.fetchCommit({ ref: refName });
+        tr33GitApiLog("GET /worktrees — no local worktree row, using remote commit", {
+          ref: refName,
+          treeOid: commit.treeOid.slice(0, 7),
+        });
         return Response.json({
           commit: { oid: commit.oid, treeOid: commit.treeOid },
           rootTreeOid: null,
         });
       }
+      tr33GitApiLog("GET /worktrees — ok", {
+        ref: refName,
+        commitTree: worktree.commit.treeOid.slice(0, 7),
+        hasRootTree: Boolean(worktree.rootTree?.oid),
+      });
       return Response.json({
         commit: { oid: worktree.commit.oid, treeOid: worktree.commit.treeOid },
         rootTreeOid:
@@ -409,10 +475,23 @@ export const createHandler = (
     }
 
     try {
+      tr33GitApiLog("GET /tree/:oid", {
+        oid: oid.slice(0, 7),
+        org,
+        repo,
+      });
       const treeEntry = await git.getTree(oid);
       if (!treeEntry) {
+        tr33GitApiLog("GET /tree/:oid — not found (db + remote)", {
+          oid: oid.slice(0, 7),
+        });
         return new Response("Tree not found", { status: 404 });
       }
+      const entryCount = Object.keys(treeEntry).length;
+      tr33GitApiLog("GET /tree/:oid — ok", {
+        oid: oid.slice(0, 7),
+        entryCount,
+      });
       return Response.json(treeEntry);
     } catch (error) {
       console.error("Failed to fetch tree:", error);
@@ -569,6 +648,12 @@ export const createHandler = (
         });
       }
       const { name } = parsed;
+      const authError = await authorizeGitAction(event.req, {
+        type: "git.createBranch",
+        name,
+        baseRef: base,
+      });
+      if (authError) return authError;
 
       await git.createBranch({ name, base });
 
@@ -606,6 +691,12 @@ export const createHandler = (
           files[path] = bytes;
         }
       }
+      const authError = await authorizeGitAction(event.req, {
+        type: "git.add",
+        ref: refParam,
+        paths: Object.keys(files),
+      });
+      if (authError) return authError;
 
       await client._.git.add({
         ref: refParam,
@@ -648,6 +739,12 @@ export const createHandler = (
           author: z.object({ name: z.string(), email: z.string() }),
         })
         .parse(body);
+      const authError = await authorizeGitAction(event.req, {
+        type: "git.commit",
+        ref: refParam,
+        message,
+      });
+      if (authError) return authError;
 
       const commit = await git.commit({
         ref: refParam,
@@ -668,6 +765,11 @@ export const createHandler = (
     try {
       const body = await event.req.json();
       const { ref: refParam } = z.object({ ref: z.string() }).parse(body);
+      const authError = await authorizeGitAction(event.req, {
+        type: "git.discard",
+        ref: refParam,
+      });
+      if (authError) return authError;
 
       await git.discard({ ref: refParam });
 
@@ -685,6 +787,11 @@ export const createHandler = (
     try {
       const body = await event.req.json();
       const { ref: refParam } = z.object({ ref: z.string() }).parse(body);
+      const authError = await authorizeGitAction(event.req, {
+        type: "git.push",
+        ref: refParam,
+      });
+      if (authError) return authError;
 
       const result = await git.push({ ref: refParam });
 
@@ -705,6 +812,11 @@ export const createHandler = (
     try {
       const body = await event.req.json();
       const { ref: refParam } = z.object({ ref: z.string() }).parse(body);
+      const authError = await authorizeGitAction(event.req, {
+        type: "git.pull",
+        ref: refParam,
+      });
+      if (authError) return authError;
 
       const pullResult = await git.pull({ ref: refParam });
       if (pullResult.type === "conflict") {
@@ -744,6 +856,12 @@ export const createHandler = (
           message: z.string().optional(),
         })
         .parse(body);
+      const authError = await authorizeGitAction(event.req, {
+        type: "git.merge",
+        ref: refParam,
+        message: messageParam,
+      });
+      if (authError) return authError;
 
       // Merge target is config ref (comparison base).
       if (refParam === ref) {
@@ -866,6 +984,13 @@ export const createHandler = (
           body: z.string().optional(),
         })
         .parse(body);
+      const authError = await authorizeGitAction(event.req, {
+        type: "git.createPr",
+        ref: refParam,
+        title: titleParam,
+        body: bodyParam,
+      });
+      if (authError) return authError;
 
       let pr = await remote.findPr({
         head: refParam,
@@ -964,6 +1089,7 @@ export const createHandler = (
   vscode
     .get("/editor", async (event) => {
       setNoStoreHeaders(event);
+      setResponseHeader(event, "Content-Security-Policy", VSCODE_EMBED_DOCUMENT_CSP);
       const workbenchConfig = await getWorkbenchConfig(event);
       const code = getCode({
         origin: event.url.origin,
@@ -1013,6 +1139,21 @@ export const createHandler = (
     if (!filePath) {
       return new Response("Invalid asset path", { status: 400 });
     }
+
+    const lower = filePath.toLowerCase();
+    if (lower.endsWith(".html") || lower.endsWith(".htm")) {
+      let contents: string;
+      try {
+        contents = await readFile(filePath, "utf-8");
+      } catch {
+        return new Response("Not found", { status: 404 });
+      }
+      contents = stripBuiltInCspMetaFromHtml(contents);
+      return new Response(contents, {
+        headers: VSCODE_EMBED_HTML_RESPONSE_HEADERS,
+      });
+    }
+
     return serveStatic(event, {
       getContents: async () => {
         try {
@@ -1048,9 +1189,10 @@ export const createHandler = (
       "out/vs/code/browser/workbench/workbench.html",
     );
     try {
-      const contents = await readFile(filePath, "utf-8");
+      let contents = await readFile(filePath, "utf-8");
+      contents = stripBuiltInCspMetaFromHtml(contents);
       return new Response(contents, {
-        headers: { "content-type": "text/html; charset=utf-8" },
+        headers: VSCODE_EMBED_HTML_RESPONSE_HEADERS,
       });
     } catch {
       return new Response("Workbench not found", { status: 404 });
@@ -1114,6 +1256,14 @@ export type Tr33NextHandlerOptions = HandleOptions & {
  */
 const tr33NextLog = (...args: unknown[]) => {
   console.info("[tr33:next]", ...args);
+};
+
+/** Git REST (`/api/git/*`) — set `TR33_GIT_API_LOG=0` to silence. */
+const tr33GitApiLog = (...args: unknown[]) => {
+  if (process.env.TR33_GIT_API_LOG === "0") {
+    return;
+  }
+  console.info("[tr33:git-api]", ...args);
 };
 
 async function withNextTr33Response(
@@ -1268,3 +1418,9 @@ export {
   cookiesFromCookieHeader,
   resolveActiveRef,
 } from "./resolve-active-ref";
+export {
+  createGitHubAppManifestConversionRoute,
+  GitHubAppManifestCallback,
+  githubAppManifestConversionCommand,
+} from "./github-app-manifest";
+export { createTr33PlayAuth } from "./play-auth";

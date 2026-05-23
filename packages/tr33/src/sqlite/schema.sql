@@ -3,7 +3,7 @@ CREATE TABLE `_blobs` (
 	`repo_name` text NOT NULL,
 	`oid` text NOT NULL,
 	`content` text NOT NULL,
-	PRIMARY KEY(`org_name`, `repo_name`, `oid`)
+	CONSTRAINT `_blobs_pk` PRIMARY KEY(`org_name`, `repo_name`, `oid`)
 );
 
 CREATE TABLE `_commits` (
@@ -23,7 +23,7 @@ CREATE TABLE `_commits` (
 	`committer_timestamp` integer NOT NULL,
 	`committer_timezone_offset` integer NOT NULL,
 	`pushed_at` integer,
-	PRIMARY KEY(`org_name`, `repo_name`, `oid`)
+	CONSTRAINT `_commits_pk` PRIMARY KEY(`org_name`, `repo_name`, `oid`)
 );
 
 CREATE TABLE `_refs` (
@@ -34,7 +34,7 @@ CREATE TABLE `_refs` (
 	`remote_commit_oid` text,
 	`root_tree_oid` text,
 	`versions` text,
-	PRIMARY KEY(`org_name`, `repo_name`, `ref`)
+	CONSTRAINT `_refs_pk` PRIMARY KEY(`org_name`, `repo_name`, `ref`)
 );
 
 CREATE TABLE `_trees` (
@@ -42,7 +42,7 @@ CREATE TABLE `_trees` (
 	`repo_name` text NOT NULL,
 	`oid` text NOT NULL,
 	`entries` text NOT NULL,
-	PRIMARY KEY(`org_name`, `repo_name`, `oid`)
+	CONSTRAINT `_trees_pk` PRIMARY KEY(`org_name`, `repo_name`, `oid`)
 );
 
 CREATE TABLE `connections` (
@@ -57,7 +57,7 @@ CREATE TABLE `connections` (
 	`to` text NOT NULL,
 	`literal` text NOT NULL,
 	`collection` text NOT NULL,
-	PRIMARY KEY(`org_name`, `repo_name`, `ref`, `version`, `path`, `key`)
+	CONSTRAINT `connections_pk` PRIMARY KEY(`org_name`, `repo_name`, `ref`, `version`, `path`, `key`)
 );
 
 CREATE TABLE `entries` (
@@ -70,7 +70,7 @@ CREATE TABLE `entries` (
 	`path` text NOT NULL,
 	`collection` text NOT NULL,
 	`oid` text NOT NULL,
-	PRIMARY KEY(`org_name`, `repo_name`, `ref`, `version`, `variant`, `canonical`)
+	CONSTRAINT `entries_pk` PRIMARY KEY(`org_name`, `repo_name`, `ref`, `version`, `variant`, `canonical`)
 );
 
 CREATE TABLE `filters` (
@@ -82,6 +82,20 @@ CREATE TABLE `filters` (
 	`field` text NOT NULL,
 	`key` text NOT NULL,
 	`value` text NOT NULL,
-	PRIMARY KEY(`org_name`, `repo_name`, `ref`, `version`, `path`, `key`)
+	CONSTRAINT `filters_pk` PRIMARY KEY(`org_name`, `repo_name`, `ref`, `version`, `path`, `key`)
 );
 
+-- src/sqlite/better-auth-schema.sql
+create table "user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" integer not null, "image" text, "createdAt" date not null, "updatedAt" date not null);
+
+create table "session" ("id" text not null primary key, "expiresAt" date not null, "token" text not null unique, "createdAt" date not null, "updatedAt" date not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade);
+
+create table "account" ("id" text not null primary key, "accountId" text not null, "providerId" text not null, "userId" text not null references "user" ("id") on delete cascade, "accessToken" text, "refreshToken" text, "idToken" text, "accessTokenExpiresAt" date, "refreshTokenExpiresAt" date, "scope" text, "password" text, "createdAt" date not null, "updatedAt" date not null);
+
+create table "verification" ("id" text not null primary key, "identifier" text not null, "value" text not null, "expiresAt" date not null, "createdAt" date not null, "updatedAt" date not null);
+
+create index "session_userId_idx" on "session" ("userId");
+
+create index "account_userId_idx" on "account" ("userId");
+
+create index "verification_identifier_idx" on "verification" ("identifier");

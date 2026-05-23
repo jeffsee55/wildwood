@@ -1,0 +1,14 @@
+node_modules
+.git
+.turbo
+**/.next
+**/.tr33-cache
+**/*.db
+apps/play/.tr33-cache
+apps/play/.next
+apps/docs/.tr33-cache
+apps/docs/.next
+packages/tr33/src/tests
+packages/tr33/playground.ts
+packages/tr33/tr33.db
+packages/tr33/tr33-docs.db

@@ -15,5 +15,3 @@ export default defineConfig({
     url,
   },
 });
-
-export { url };

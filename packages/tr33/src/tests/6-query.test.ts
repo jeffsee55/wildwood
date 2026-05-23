@@ -113,7 +113,7 @@ describe("queries", () => {
       expect(result.items[0]?.author?.name).toBe("Heidi");
     });
 
-    it.only("queries authors with reverse references (docsAuthored)", async () => {
+    it("queries authors with reverse references (docsAuthored)", async () => {
       await t.git.switch({ ref: "main" });
       const result = await t.client.authors.findMany({
         where: {
@@ -123,7 +123,6 @@ describe("queries", () => {
           docsAuthored: true,
         },
       });
-      console.dir(result.items[0], { depth: null });
       expect(result.items).toHaveLength(1);
       expect(result.items[0]?.docsAuthored).toHaveLength(2);
       expect(result.items[0]?.docsAuthored?.map((d) => d.title).sort()).toEqual(

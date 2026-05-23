@@ -8,13 +8,14 @@ import {
 } from "tr33-store";
 import type { Config, ConfigInput } from "@/client/config";
 import { type PrInput, type Remote, resolvePrField } from "@/git/remote";
-import type { LibsqlDatabase } from "@/sqlite/database";
+import { isMissingSchemaError, type LibsqlDatabase } from "@/sqlite/database";
 import {
   type Commit,
   type FindWorktreeEntriesArgs,
   type Worktree,
   worktreeSchema,
 } from "@/types";
+import { formatZodErrorForUser } from "@/zod/format-zod-for-user";
 
 export class Git implements Gitable {
   config: Config<ConfigInput>;
@@ -237,7 +238,11 @@ export class Git implements Gitable {
         }
       }
 
-      const parsedResult = worktreeSchema.parse(result);
+      const parsed = worktreeSchema.safeParse(result);
+      if (!parsed.success) {
+        throw new Error(formatZodErrorForUser(parsed.error, "worktree"));
+      }
+      const parsedResult = parsed.data;
       const items = [];
       for (const entry of parsedResult.entries) {
         items.push(this.config.buildEntry(entry, false));
@@ -248,11 +253,9 @@ export class Git implements Gitable {
         items,
       };
     } catch (e) {
-      if (typeof e === "object" && e !== null && "code" in e) {
-        if (e.code === "SQLITE_ERROR") {
-          await this.db.init();
-          return this.findMany(args);
-        }
+      if (!retrying && isMissingSchemaError(e)) {
+        await this.db.init();
+        return this.findMany(args, { retrying: true });
       }
       throw e;
     }
@@ -625,6 +628,19 @@ export class Git implements Gitable {
       if (localBlob) blobsToSave.push({ oid, content: localBlob });
       const remoteBlob = blobsFromRemote.find((b) => b.oid === oid);
       if (remoteBlob) blobsToSave.push({ oid, content: remoteBlob.content });
+    }
+    // `_blobs` is keyed by (org, repo, oid). `batchGet` is oid-only, so it may
+    // find a row from a *previous* org/repo. We skipped the remote, but
+    // `batchPut` must still materialize a row for the *current* namespace;
+    // otherwise `writeEntries` can index `entries` with no join target (blob is null).
+    for (const oid of oids) {
+      if (blobsToSave.some((b) => b.oid === oid)) {
+        continue;
+      }
+      const fromOtherNamespace = dbBlobs.find((b) => b.oid === oid);
+      if (fromOtherNamespace) {
+        blobsToSave.push({ oid, content: fromOtherNamespace.content });
+      }
     }
 
     await this.db.blobs.batchPut(blobsToSave);

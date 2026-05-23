@@ -10,6 +10,15 @@ import {
 
 export { defineConfig } from "@/client/config";
 export { createClient, type Tr33Client } from "@/client/index";
+export type {
+  Tr33AuthAction,
+  Tr33AuthConfig,
+  Tr33AuthUser,
+  Tr33AuthorizeContext,
+  Tr33BetterAuthLike,
+  Tr33GitHubAppAuth,
+  Tr33GitHubAuth,
+} from "@/client/auth";
 
 export const z = {
   ...zod,

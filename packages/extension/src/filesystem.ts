@@ -165,22 +165,37 @@ export class Tr33FileSystemProvider
   // ── Gitable (raw data source — Trees caches on top) ────────────────
 
   async getTree(oid: string): Promise<TreeEntries | null> {
+    const url = `${this.apiUrl}/tree/${oid}`;
     try {
-      const res = await fetch(`${this.apiUrl}/tree/${oid}`);
-      if (!res.ok) return null;
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) {
+        logger(
+          "getTree HTTP error",
+          res.status,
+          url,
+          await res.text().catch(() => ""),
+        );
+        return null;
+      }
       return (await res.json()) as TreeEntries;
-    } catch {
+    } catch (e) {
+      logger("getTree fetch failed", url, e);
       return null;
     }
   }
 
   async getBlob(oid: string): Promise<{ oid: string; content: string } | null> {
+    const url = `${this.apiUrl}/blob/${oid}`;
     try {
-      const res = await fetch(`${this.apiUrl}/blob/${oid}`);
-      if (!res.ok) return null;
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) {
+        logger("getBlob HTTP error", res.status, url);
+        return null;
+      }
       const data = (await res.json()) as { content: string };
       return { oid, content: data.content };
-    } catch {
+    } catch (e) {
+      logger("getBlob fetch failed", url, e);
       return null;
     }
   }
@@ -589,21 +604,28 @@ export class Tr33FileSystemProvider
     const headers: Record<string, string> = {};
     if (options?.syncHostActiveRef) {
       headers[TR33_SYNC_HOST_ACTIVE_REF_HEADER] = "1";
-      logger(
-        "GET worktrees (sync host cookie)",
-        ref,
-        `${this.apiUrl}/worktrees/${encodeURIComponent(ref)}`,
-      );
     }
-    const res = await fetch(
-      `${this.apiUrl}/worktrees/${encodeURIComponent(ref)}`,
-      { credentials: "include", headers },
+    const url = `${this.apiUrl}/worktrees/${encodeURIComponent(ref)}`;
+    logger(
+      "GET worktrees",
+      { ref, syncHost: Boolean(options?.syncHostActiveRef), url },
     );
-    if (!res.ok) throw new Error(`Failed to fetch worktree: ${res.status}`);
-    return (await res.json()) as {
+    const res = await fetch(url, { credentials: "include", headers });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      logger("GET worktrees failed", res.status, body.slice(0, 500));
+      throw new Error(`Failed to fetch worktree: ${res.status}`);
+    }
+    const data = (await res.json()) as {
       commit: { oid: string; treeOid: string };
       rootTreeOid: string | null;
     };
+    logger("GET worktrees ok", {
+      ref,
+      commitTreeOid: data.commit.treeOid.slice(0, 7),
+      rootTreeOid: data.rootTreeOid?.slice(0, 7) ?? null,
+    });
+    return data;
   }
 
   private async fetchMergeBase(

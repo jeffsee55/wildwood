@@ -1,4 +1,4 @@
-import type { Theme } from "@tr33/kit";
+import type { KitAuthConfig, Theme } from "@tr33/kit";
 import { Kit } from "@tr33/kit";
 import { cookies } from "next/headers";
 import { type ReactNode, Suspense } from "react";
@@ -11,13 +11,14 @@ export type Tr33KitProps = {
   tr33: Tr33KitHostClient;
   apiBase?: string;
   theme?: Theme;
+  auth?: KitAuthConfig;
 };
 
 /**
  * Server wrapper: reads `tr33-active-ref` and renders the client {@link Kit}.
  * Call from within {@link Toolbar} (or your own `<Suspense>`) so `cookies()` stays off the page shell.
  */
-export async function Tr33Kit({ tr33, apiBase, theme }: Tr33KitProps) {
+export async function Tr33Kit({ tr33, apiBase, theme, auth }: Tr33KitProps) {
   const cookieStore = await cookies();
   const activeRef = resolveActiveRef({
     tr33,
@@ -29,6 +30,7 @@ export async function Tr33Kit({ tr33, apiBase, theme }: Tr33KitProps) {
       configRef={tr33._.config.ref}
       activeRef={activeRef}
       theme={theme}
+      auth={auth}
     />
   );
 }

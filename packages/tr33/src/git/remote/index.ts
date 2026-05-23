@@ -1,4 +1,5 @@
 import type { Config, ConfigInput } from "@/client/config";
+import type { Tr33AuthConfig } from "@/client/auth";
 import type { Commit } from "@/types";
 
 export type PushResult = {
@@ -59,8 +60,10 @@ export function resolvePrField<T>(value: PrFieldValue<T>, prev: T): T {
 
 export abstract class Remote {
   config: Config<ConfigInput>;
-  constructor(args: { config: Config<ConfigInput> }) {
+  auth?: Tr33AuthConfig;
+  constructor(args: { auth?: Tr33AuthConfig; config: Config<ConfigInput> }) {
     this.config = args.config;
+    this.auth = args.auth;
   }
 
   abstract listBranches(): Promise<string[]>;

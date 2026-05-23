@@ -5,3 +5,4 @@ packages:
 catalog:
   drizzle-kit: 1.0.0-beta.20
   drizzle-orm: 1.0.0-beta.20
+  neverthrow: 8.1.1

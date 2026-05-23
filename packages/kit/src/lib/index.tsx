@@ -6,6 +6,7 @@ import {
   type Theme,
 } from "@/components/theme-provider";
 import { KitFabMenu } from "@/components/kit-fab-menu";
+import type { KitAuthConfig } from "@/components/kit-auth-panel";
 import { Toaster } from "@/components/ui/sonner";
 import sonnerCss from "sonner/dist/styles.css?inline";
 import css from "../index.css?inline";
@@ -14,6 +15,7 @@ import { ShadowRoot } from "./shadow-root";
 const allCss = css + "\n" + sonnerCss;
 
 export type { ResolvedTheme, Theme }
+export type { KitAuthConfig };
 
 export type KitProps = {
   /**
@@ -35,6 +37,7 @@ export type KitProps = {
    * Active ref from the `tr33-active-ref` cookie (read on the server). Omitted in client-only hosts.
    */
   activeRef?: string | null;
+  auth?: KitAuthConfig;
 };
 
 export const Kit = ({
@@ -42,6 +45,7 @@ export const Kit = ({
   apiBase = "/api",
   configRef = "main",
   activeRef = null,
+  auth,
 }: KitProps) => {
   return (
     <ShadowRoot css={allCss}>
@@ -50,6 +54,7 @@ export const Kit = ({
           apiBase={apiBase}
           configRef={configRef}
           activeRef={activeRef}
+          auth={auth}
         />
         <Toaster />
       </ThemeProvider>

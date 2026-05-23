@@ -1,8 +1,28 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": [
+    "GITHUB_APP_ID",
+    "GITHUB_PRIVATE_KEY",
+    "GITHUB_APP_INSTALLATION_ID",
+    "TR33_GITHUB_ORG",
+    "TR33_GITHUB_REPO",
+    "TR33_DOCS_REF",
+    "TR33_DOCS_DATABASE_URL",
+    "TR33_DOCS_DATABASE_AUTH_TOKEN"
+  ],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "env": [
+        "GITHUB_APP_ID",
+        "GITHUB_PRIVATE_KEY",
+        "GITHUB_APP_INSTALLATION_ID",
+        "TR33_GITHUB_ORG",
+        "TR33_GITHUB_REPO",
+        "TR33_DOCS_REF",
+        "TR33_DOCS_DATABASE_URL",
+        "TR33_DOCS_DATABASE_AUTH_TOKEN"
+      ]
     },
     "next:dev": {
       "dependsOn": ["^build"]

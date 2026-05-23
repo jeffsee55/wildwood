@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import { graphql } from "@octokit/graphql";
+import { createAppAuth } from "@octokit/auth-app";
 import { Octokit } from "@octokit/rest";
 import {
   type CreatePrArgs,
@@ -12,6 +13,10 @@ import {
 } from "@/git/remote";
 import type { Commit } from "@/types";
 import { commitSchema } from "@/types";
+
+function normalizePrivateKey(privateKey: string): string {
+  return privateKey.replace(/\\n/g, "\n");
+}
 
 function getGitHubToken(): string {
   if (process.env.GITHUB_TOKEN) {
@@ -38,8 +43,10 @@ function getGitHubToken(): string {
 }
 
 export class GitHubRemote extends Remote {
-  private octokit: Octokit;
-  private graphqlClient: typeof graphql;
+  private githubClientPromise: Promise<{
+    graphqlClient: typeof graphql;
+    octokit: Octokit;
+  }> | null = null;
   private owner: string;
   private repo: string;
 
@@ -48,22 +55,69 @@ export class GitHubRemote extends Remote {
     super(baseArgs);
     this.owner = this.config.org;
     this.repo = this.config.repo;
+  }
 
-    const token = getGitHubToken();
+  private async getGitHubClient(): Promise<{
+    graphqlClient: typeof graphql;
+    octokit: Octokit;
+  }> {
+    if (this.githubClientPromise) {
+      return this.githubClientPromise;
+    }
+    this.githubClientPromise = (async () => {
+      const token = await this.getAuthToken();
+      return {
+        octokit: new Octokit({ auth: token }),
+        graphqlClient: graphql.defaults({
+          headers: {
+            authorization: `token ${token}`,
+          },
+        }),
+      };
+    })();
+    return this.githubClientPromise;
+  }
 
-    this.octokit = new Octokit({ auth: token });
-    this.graphqlClient = graphql.defaults({
-      headers: {
-        authorization: `token ${token}`,
-      },
+  private async getAuthToken(): Promise<string> {
+    const githubAuth = this.auth?.github;
+    if (githubAuth?.type === "token") {
+      return githubAuth.token;
+    }
+    if (githubAuth?.type === "app") {
+      const appAuth = createAppAuth({
+        appId: githubAuth.app.appId,
+        privateKey: normalizePrivateKey(githubAuth.app.privateKey),
+      });
+      const installationId =
+        githubAuth.app.installationId ??
+        (await this.resolveInstallationId(appAuth));
+      const installation = await appAuth({
+        type: "installation",
+        installationId: Number(installationId),
+      });
+      return installation.token;
+    }
+    return getGitHubToken();
+  }
+
+  private async resolveInstallationId(
+    appAuth: ReturnType<typeof createAppAuth>,
+  ): Promise<number> {
+    const appAuthentication = await appAuth({ type: "app" });
+    const appOctokit = new Octokit({ auth: appAuthentication.token });
+    const response = await appOctokit.apps.getRepoInstallation({
+      owner: this.owner,
+      repo: this.repo,
     });
+    return response.data.id;
   }
 
   async listBranches(): Promise<string[]> {
+    const { octokit } = await this.getGitHubClient();
     const branches: string[] = [];
     let page = 1;
     while (true) {
-      const response = await this.octokit.repos.listBranches({
+      const response = await octokit.repos.listBranches({
         owner: this.owner,
         repo: this.repo,
         per_page: 100,
@@ -79,6 +133,7 @@ export class GitHubRemote extends Remote {
   }
 
   async fetchCommit(args: { ref: string } | { oid: string }) {
+    const { graphqlClient } = await this.getGitHubClient();
     const ref = "ref" in args ? args.ref : args.oid;
 
     const query = `
@@ -112,7 +167,7 @@ export class GitHubRemote extends Remote {
 			}
 		`;
 
-    const result = await this.graphqlClient<{
+    const result = await graphqlClient<{
       repository: {
         object: {
           oid: string;
@@ -158,6 +213,7 @@ export class GitHubRemote extends Remote {
   }
 
   async fetchTree({ oid }: { oid: string }) {
+    const { graphqlClient } = await this.getGitHubClient();
     const query = `
 			query GetTree($owner: String!, $repo: String!, $oid: GitObjectID!) {
 				repository(owner: $owner, name: $repo) {
@@ -174,7 +230,7 @@ export class GitHubRemote extends Remote {
 			}
 		`;
 
-    const result = await this.graphqlClient<{
+    const result = await graphqlClient<{
       repository: {
         object: {
           entries: Array<{
@@ -210,12 +266,13 @@ export class GitHubRemote extends Remote {
   async fetchBlobs(args: {
     oids: string[];
   }): Promise<{ oid: string; content: string }[]> {
+    const { octokit } = await this.getGitHubClient();
     if (args.oids.length === 0) {
       return [];
     }
 
     const blobPromises = args.oids.map(async (oid) => {
-      const response = await this.octokit.git.getBlob({
+      const response = await octokit.git.getBlob({
         owner: this.owner,
         repo: this.repo,
         file_sha: oid,
@@ -233,8 +290,9 @@ export class GitHubRemote extends Remote {
   }
 
   async fetchBlobRaw(args: { oid: string }): Promise<Buffer | null> {
+    const { octokit } = await this.getGitHubClient();
     try {
-      const response = await this.octokit.git.getBlob({
+      const response = await octokit.git.getBlob({
         owner: this.owner,
         repo: this.repo,
         file_sha: args.oid,
@@ -246,7 +304,8 @@ export class GitHubRemote extends Remote {
   }
 
   async createBlob(args: { content: Uint8Array }): Promise<{ oid: string }> {
-    const response = await this.octokit.git.createBlob({
+    const { octokit } = await this.getGitHubClient();
+    const response = await octokit.git.createBlob({
       owner: this.owner,
       repo: this.repo,
       content: Buffer.from(args.content).toString("base64"),
@@ -264,12 +323,13 @@ export class GitHubRemote extends Remote {
       entries: Record<string, { type: "blob" | "tree"; oid: string }>;
     }[];
   }): Promise<PushResult> {
+    const { octokit } = await this.getGitHubClient();
     const { ref, commits, blobs, trees } = args;
 
     // 1. Create blobs
     const blobOidMap = new Map<string, string>();
     for (const blob of blobs) {
-      const response = await this.octokit.git.createBlob({
+      const response = await octokit.git.createBlob({
         owner: this.owner,
         repo: this.repo,
         content: Buffer.from(blob.content).toString("base64"),
@@ -294,7 +354,7 @@ export class GitHubRemote extends Remote {
           treeOidMap.get(entry.oid) ?? blobOidMap.get(entry.oid) ?? entry.oid,
       }));
 
-      const response = await this.octokit.git.createTree({
+      const response = await octokit.git.createTree({
         owner: this.owner,
         repo: this.repo,
         tree: treeItems,
@@ -327,7 +387,7 @@ export class GitHubRemote extends Remote {
 
       const rootTreeSha = treeOidMap.get(commit.treeOid) ?? commit.treeOid;
 
-      const commitResponse = await this.octokit.git.createCommit({
+      const commitResponse = await octokit.git.createCommit({
         owner: this.owner,
         repo: this.repo,
         message: commit.message,
@@ -376,7 +436,7 @@ export class GitHubRemote extends Remote {
 
     // 4. Update ref (or create if it doesn't exist yet)
     try {
-      await this.octokit.git.updateRef({
+      await octokit.git.updateRef({
         owner: this.owner,
         repo: this.repo,
         ref: `heads/${ref}`,
@@ -384,7 +444,7 @@ export class GitHubRemote extends Remote {
       });
     } catch {
       try {
-        await this.octokit.git.createRef({
+        await octokit.git.createRef({
           owner: this.owner,
           repo: this.repo,
           ref: `refs/heads/${ref}`,
@@ -405,7 +465,8 @@ export class GitHubRemote extends Remote {
   }
 
   async createPr(args: CreatePrArgs): Promise<PrResult> {
-    const response = await this.octokit.pulls.create({
+    const { octokit } = await this.getGitHubClient();
+    const response = await octokit.pulls.create({
       owner: this.owner,
       repo: this.repo,
       head: args.head,
@@ -416,7 +477,7 @@ export class GitHubRemote extends Remote {
 
     const labels = args.labels ?? [];
     if (labels.length > 0) {
-      await this.octokit.issues.addLabels({
+      await octokit.issues.addLabels({
         owner: this.owner,
         repo: this.repo,
         issue_number: response.data.number,
@@ -434,7 +495,8 @@ export class GitHubRemote extends Remote {
   }
 
   async updatePr(args: UpdatePrArgs): Promise<PrResult> {
-    const response = await this.octokit.pulls.update({
+    const { octokit } = await this.getGitHubClient();
+    const response = await octokit.pulls.update({
       owner: this.owner,
       repo: this.repo,
       pull_number: args.pr,
@@ -443,7 +505,7 @@ export class GitHubRemote extends Remote {
     });
 
     if (args.labels !== undefined) {
-      await this.octokit.issues.setLabels({
+      await octokit.issues.setLabels({
         owner: this.owner,
         repo: this.repo,
         issue_number: args.pr,
@@ -465,7 +527,8 @@ export class GitHubRemote extends Remote {
   }
 
   async findPr(args: { head: string; base: string }): Promise<PrResult | null> {
-    const response = await this.octokit.pulls.list({
+    const { octokit } = await this.getGitHubClient();
+    const response = await octokit.pulls.list({
       owner: this.owner,
       repo: this.repo,
       head: `${this.owner}:${args.head}`,
@@ -489,7 +552,8 @@ export class GitHubRemote extends Remote {
   }
 
   async mergePr(args: MergePrArgs): Promise<MergePrResult> {
-    const response = await this.octokit.pulls.merge({
+    const { octokit } = await this.getGitHubClient();
+    const response = await octokit.pulls.merge({
       owner: this.owner,
       repo: this.repo,
       pull_number: args.pr,
@@ -503,7 +567,8 @@ export class GitHubRemote extends Remote {
   }
 
   async createPrComment(args: { pr: number; body: string }): Promise<void> {
-    await this.octokit.issues.createComment({
+    const { octokit } = await this.getGitHubClient();
+    await octokit.issues.createComment({
       owner: this.owner,
       repo: this.repo,
       issue_number: args.pr,

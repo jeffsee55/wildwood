@@ -6,6 +6,7 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 
 import { Button } from "@/components/ui/button";
+import { KitAuthPanel, type KitAuthConfig } from "@/components/kit-auth-panel";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -85,12 +86,14 @@ type KitFabMenuProps = {
   configRef?: string;
   /** Active ref from cookie (server) */
   activeRef?: string | null;
+  auth?: KitAuthConfig;
 };
 
 export function KitFabMenu({
   apiBase = "/api",
   configRef = "main",
   activeRef = null,
+  auth,
 }: KitFabMenuProps) {
   const router = useRouter();
   /** Coalesce refresh + delay past Set-Cookie commit; immediate refresh can race the RSC request. */
@@ -126,6 +129,7 @@ export function KitFabMenu({
   editorOpenRef.current = editorOpen;
   /** Defer iframe mount so the toolbar and page paint first. */
   const [iframeReady, setIframeReady] = React.useState(false);
+  const [editorIframeLoaded, setEditorIframeLoaded] = React.useState(false);
   React.useEffect(() => {
     const id = requestIdleCallback(() => setIframeReady(true), {
       timeout: 2000,
@@ -357,6 +361,12 @@ export function KitFabMenu({
     return u.toString();
   }, [base, displayRef, editorOpen, embedRefLocked]);
 
+  React.useEffect(() => {
+    if (editorOpen) {
+      setEditorIframeLoaded(false);
+    }
+  }, [editorOpen, editorSrc]);
+
   const openEditor = React.useCallback(() => {
     if (typeof window !== "undefined") {
       try {
@@ -371,6 +381,7 @@ export function KitFabMenu({
     }
     notifyExtensionActiveRef(displayRef);
     setEmbedRefLocked(displayRef);
+    setEditorIframeLoaded(false);
     setEditorOpen(true);
   }, [displayRef, notifyExtensionActiveRef, offDefaultRef]);
 
@@ -634,6 +645,25 @@ export function KitFabMenu({
                   Exit preview (live / cached)
                 </DropdownMenuItem>
               ) : null}
+              {auth?.enabled ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger className="text-xs">
+                      Auth
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent
+                      side="left"
+                      align="end"
+                      sideOffset={8}
+                      className="w-auto max-w-[min(100vw-2rem,26rem)] p-0"
+                      container={portalContainer ?? undefined}
+                    >
+                      <KitAuthPanel auth={auth} />
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                </>
+              ) : null}
               <DropdownMenuItem onClick={() => {}}>Share</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -662,15 +692,39 @@ export function KitFabMenu({
             >
               <X className="size-4" aria-hidden />
             </Button>
-            {iframeReady ? (
+            {editorOpen && iframeReady ? (
               <iframe
                 ref={iframeRef}
                 title="VS Code"
                 loading="lazy"
                 fetchPriority="low"
-                className="h-full min-h-0 w-full flex-1 border-0"
+                className={cn(
+                  "h-full min-h-0 w-full flex-1 border-0 transition-opacity duration-300",
+                  editorIframeLoaded ? "opacity-100" : "opacity-0",
+                )}
+                onLoad={() => setEditorIframeLoaded(true)}
                 src={editorSrc}
               />
+            ) : null}
+            {!editorIframeLoaded ? (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background text-foreground">
+                <div className="flex w-[min(90vw,28rem)] flex-col items-center gap-4 rounded-xl border border-border bg-card/80 p-6 text-center shadow-lg backdrop-blur">
+                  <div className="flex size-12 items-center justify-center rounded-full border border-border bg-muted">
+                    <Loader2
+                      className="size-5 animate-spin text-muted-foreground"
+                      aria-hidden
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Loading editor</p>
+                    <p className="text-xs text-muted-foreground">
+                      Fetching the VS Code workbench for{" "}
+                      <span className="font-mono">{displayRef}</span>. This can
+                      take a moment on a slow network.
+                    </p>
+                  </div>
+                </div>
+              </div>
             ) : null}
           </div>
         </div>
