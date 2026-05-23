@@ -28,7 +28,12 @@
       ]
     },
     "tr33#build": {
-      "dependsOn": ["tr33-store#build", "@tr33/kit#build", "@tr33/ui#build"],
+      "dependsOn": [
+        "tr33-store#build",
+        "@tr33/kit#build",
+        "@tr33/ui#build",
+        "tr33-vscode#build"
+      ],
       "outputs": ["dist/**"]
     },
     "next:dev": {

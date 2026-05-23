@@ -1,10 +1,7 @@
 // import extension from "tr33-vscode";
 
-import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { calculateBlobOid, calculateBlobOidFromBytes } from "tr33-store";
 import extensionPkg from "tr33-vscode/package.json" with { type: "json" };
 import { H3, html, serveStatic, setResponseHeader } from "h3";
@@ -32,70 +29,11 @@ import {
   cookiesFromCookieHeader,
   resolveActiveRef,
 } from "@/nextjs/resolve-active-ref";
-import { resolveVscodeWebCdn } from "@/nextjs/vscode-web-cdn";
-
-/** Turbopack/Next do not implement `import.meta.resolve`; use CJS resolver instead. */
-const nodeRequire = createRequire(import.meta.url);
-
-/**
- * Path to `tr33-vscode/package.json`. Next/Turbopack bundles `createHandler` such that
- * `createRequire(import.meta.url).resolve("tr33-vscode/package.json")` can return pnpm
- * `[project]/packages/extension/...` placeholders that are not real filesystem paths.
- * Fall back to cwd-relative and monorepo layouts used by `apps/*`.
- */
-function resolveTr33VscodePackageJsonPath(): string {
-  const tryRequireFromTr33Pkg = (): string | undefined => {
-    try {
-      const tr33PkgJson = path.join(
-        path.dirname(fileURLToPath(import.meta.url)),
-        "..",
-        "..",
-        "package.json",
-      );
-      if (!existsSync(tr33PkgJson)) return undefined;
-      const req = createRequire(tr33PkgJson);
-      const resolved = req.resolve("tr33-vscode/package.json");
-      if (!resolved.includes("[project]") && existsSync(resolved))
-        return resolved;
-    } catch {
-      /* ignore */
-    }
-    return undefined;
-  };
-
-  const fromTr33 = tryRequireFromTr33Pkg();
-  if (fromTr33) return fromTr33;
-
-  try {
-    const resolved = nodeRequire.resolve("tr33-vscode/package.json");
-    if (!resolved.includes("[project]") && existsSync(resolved))
-      return resolved;
-  } catch {
-    /* ignore */
-  }
-
-  const cwd = process.cwd();
-  const fallbacks = [
-    path.join(cwd, "node_modules", "tr33-vscode", "package.json"),
-    path.join(
-      cwd,
-      "node_modules",
-      "tr33",
-      "node_modules",
-      "tr33-vscode",
-      "package.json",
-    ),
-    path.join(cwd, "..", "..", "packages", "extension", "package.json"),
-    path.join(cwd, "packages", "extension", "package.json"),
-  ];
-  for (const p of fallbacks) {
-    if (existsSync(p)) return p;
-  }
-
-  throw new Error(
-    `Could not resolve tr33-vscode package.json (cwd=${cwd}). Install workspace deps or run from the monorepo.`,
-  );
-}
+import { getTr33ExtensionRoot } from "@/nextjs/resolve-tr33-extension-root";
+import {
+  proxyMainVscodeCdnAsset,
+  resolveVscodeWebCdn,
+} from "@/nextjs/vscode-web-cdn";
 
 const extensionPkgSchema = z.object({
   name: z.string(),
@@ -243,6 +181,7 @@ export const createHandler = (
           itemUrl: "https://open-vsx.org/vscode/item",
           resourceUrlTemplate:
             "https://openvsxorg.blob.core.windows.net/resources/{publisher}/{name}/{version}/{path}",
+          controlUrl: `${event.url.origin}${dir}/extensions/marketplace.json`,
         },
         extensionEnabledApiProposals: {
           [`${pkg.publisher}.${pkg.name}`]: pkg.enabledApiProposals,
@@ -947,6 +886,32 @@ export const createHandler = (
     }
   });
 
+  const serveTr33ExtensionAsset = async (
+    event: Parameters<Parameters<H3["get"]>[1]>[0],
+    asset: string,
+  ) => {
+    setNoStoreHeaders(event);
+    const filePath = path.join(getTr33ExtensionRoot(), asset);
+    try {
+      const served = await serveStatic(event, {
+        getContents: async () => new Uint8Array(await readFile(filePath)),
+        getMeta: async () => {
+          const fileStat = await stat(filePath);
+          return { size: fileStat.size, mtime: fileStat.mtimeMs };
+        },
+      });
+      if (served instanceof Response) {
+        return withVscodeEmbedCors(event.req, served);
+      }
+    } catch {
+      /* fall through */
+    }
+    return new Response("Not found", {
+      status: 404,
+      headers: vscodeEmbedCorsHeaders(event.req),
+    });
+  };
+
   // CORS for extension host on `*.vscode-cdn.net` loading `/api/vscode/extension/**`.
   vscode.use(async (event, next) => {
     const corsHeaders = vscodeEmbedCorsHeaders(event.req);
@@ -978,36 +943,21 @@ export const createHandler = (
       setNoStoreHeaders(event);
       return Response.json(await getWorkbenchConfig(event));
     })
+    .get("/extensions/marketplace.json", async (event) => {
+      return proxyMainVscodeCdnAsset(event.req, "extensions/marketplace.json");
+    })
+    .get("/extension/package.json", async (event) => {
+      return serveTr33ExtensionAsset(event, "package.json");
+    })
     .get("extension/**:asset", async (event) => {
-      setNoStoreHeaders(event);
       const asset = event.context.params?.asset;
       if (!asset) {
-        return new Response(`No asset provided in query`, { status: 404 });
+        return new Response("No asset path", {
+          status: 404,
+          headers: vscodeEmbedCorsHeaders(event.req),
+        });
       }
-      // Resolve the tr33-vscode package directory (see resolveTr33VscodePackageJsonPath)
-      const extensionPkgPath = resolveTr33VscodePackageJsonPath();
-      const extensionDir = path.dirname(extensionPkgPath);
-      const filePath = path.join(extensionDir, asset);
-      const served = await serveStatic(event, {
-        getContents: async () => {
-          const contents = await readFile(filePath);
-          return new Uint8Array(contents);
-        },
-        getMeta: async () => {
-          const fileStat = await stat(filePath);
-          return {
-            size: fileStat.size,
-            mtime: fileStat.mtimeMs,
-          };
-        },
-      });
-      if (served instanceof Response) {
-        return withVscodeEmbedCors(event.req, served);
-      }
-      return new Response("Not found", {
-        status: 404,
-        headers: vscodeEmbedCorsHeaders(event.req),
-      });
+      return serveTr33ExtensionAsset(event, asset);
     });
 
   // Same-origin proxy to main.vscode-cdn.net (module scripts need CORS; HTML needs CSP strip).

@@ -1,3 +1,5 @@
+import { withVscodeEmbedCors } from "@/nextjs/vscode-embed-csp";
+
 export type VscodeWebCdn = {
   commit: string;
   version: string;
@@ -74,4 +76,31 @@ export function vscodeCdnProxyAssetUrl(
 ): string {
   const prefix = vscodeCdnProxyPrefix(apiPrefix, commit);
   return `${origin}${prefix}/${assetPath.replace(/^\/+/, "")}`;
+}
+
+/** Proxy `main.vscode-cdn.net` metadata (e.g. marketplace.json) through the embedder origin. */
+export async function proxyMainVscodeCdnAsset(
+  req: Request,
+  assetPath: string,
+): Promise<Response> {
+  const url = `https://main.vscode-cdn.net/${assetPath.replace(/^\/+/, "")}`;
+  const upstream = await fetch(url, {
+    headers: { "Accept-Encoding": "identity" },
+  });
+  const headers = new Headers();
+  const contentType = upstream.headers.get("content-type");
+  if (contentType) {
+    headers.set("content-type", contentType);
+  }
+  headers.set("cache-control", "public, max-age=3600");
+  if (!upstream.ok) {
+    return withVscodeEmbedCors(
+      req,
+      new Response("Not found", { status: upstream.status, headers }),
+    );
+  }
+  return withVscodeEmbedCors(
+    req,
+    new Response(upstream.body, { status: upstream.status, headers }),
+  );
 }
