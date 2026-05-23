@@ -14,20 +14,29 @@ const database = createLibsqlClient({
   authToken: process.env.TR33_DOCS_DATABASE_AUTH_TOKEN || "",
 });
 
-const githubOrg = process.env.TR33_GITHUB_ORG || "jeffsee55";
-const githubRepo = process.env.TR33_GITHUB_REPO || "tr33";
+export const githubOrg = process.env.TR33_GITHUB_ORG || "jeffsee55";
+export const githubRepo = process.env.TR33_GITHUB_REPO || "tr33";
 
 function isNextProductionBuild(): boolean {
   return process.env.NEXT_PHASE === "phase-production-build";
 }
 
-/**
- * Local git checkout: dev, `next build` (content is in the repo), and Vercel build.
- * GitHub App remote: production runtime on Vercel when app credentials are set.
- *
- * Evaluated when the client is created (not at module load) so build-time and
- * runtime on Vercel can pick different remotes from the same bundle.
- */
+/** GitHub App remote only when installation is known (or explicitly forced). */
+export function wantsGithubRemote(): boolean {
+  if (process.env.TR33_DOCS_SOURCE === "local") {
+    return false;
+  }
+  if (process.env.TR33_DOCS_SOURCE === "github") {
+    return Boolean(process.env.GITHUB_APP_ID && process.env.GITHUB_PRIVATE_KEY);
+  }
+  return Boolean(
+    process.env.GITHUB_APP_ID &&
+      process.env.GITHUB_PRIVATE_KEY &&
+      process.env.GITHUB_APP_INSTALLATION_ID?.trim(),
+  );
+}
+
+/** Use the git checkout under `content/` instead of the GitHub API. */
 export function useLocalContentRoot(): boolean {
   if (process.env.TR33_DOCS_SOURCE === "local") {
     return true;
@@ -35,11 +44,11 @@ export function useLocalContentRoot(): boolean {
   if (process.env.TR33_DOCS_SOURCE === "github") {
     return false;
   }
-  if (hasLocalDocsContent()) {
-    if (isNextProductionBuild()) {
+  if (!wantsGithubRemote()) {
+    if (hasLocalDocsContent()) {
       return true;
     }
-    if (process.env.VERCEL === "1" && process.env.CI === "1") {
+    if (isNextProductionBuild() || (process.env.VERCEL === "1" && process.env.CI === "1")) {
       return true;
     }
   }
@@ -50,7 +59,6 @@ export function useLocalContentRoot(): boolean {
   );
 }
 
-/** Ref for indexing local checkout (Vercel often has no `main` branch or `origin`). */
 function resolveLocalDocsRef(): string {
   const sha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
   if (sha) {
@@ -72,7 +80,7 @@ function resolveDocsRef(local: boolean): string {
 
 function githubAppAuthConfig(): Tr33AuthConfig["github"] | undefined {
   if (
-    useLocalContentRoot() ||
+    !wantsGithubRemote() ||
     !process.env.GITHUB_APP_ID ||
     !process.env.GITHUB_PRIVATE_KEY
   ) {
@@ -161,4 +169,11 @@ export function getDocsTr33(): Tr33Client {
     docsClient = createDocsClient();
   }
   return docsClient;
+}
+
+export function githubInstallHint(): string {
+  return (
+    `Install the GitHub App on https://github.com/${githubOrg}/${githubRepo} ` +
+    "(or set GITHUB_APP_INSTALLATION_ID / TR33_DOCS_SOURCE=local)."
+  );
 }

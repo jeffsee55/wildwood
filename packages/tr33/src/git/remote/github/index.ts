@@ -105,11 +105,26 @@ export class GitHubRemote extends Remote {
   ): Promise<number> {
     const appAuthentication = await appAuth({ type: "app" });
     const appOctokit = new Octokit({ auth: appAuthentication.token });
-    const response = await appOctokit.apps.getRepoInstallation({
-      owner: this.owner,
-      repo: this.repo,
-    });
-    return response.data.id;
+    try {
+      const response = await appOctokit.apps.getRepoInstallation({
+        owner: this.owner,
+        repo: this.repo,
+      });
+      return response.data.id;
+    } catch (error) {
+      const status =
+        typeof error === "object" && error !== null && "status" in error
+          ? (error as { status: number }).status
+          : undefined;
+      if (status === 404) {
+        throw new Error(
+          `GitHub App is not installed on ${this.owner}/${this.repo}. ` +
+            "Install the app on that repository or set GITHUB_APP_INSTALLATION_ID.",
+          { cause: error },
+        );
+      }
+      throw error;
+    }
   }
 
   async listBranches(): Promise<string[]> {
