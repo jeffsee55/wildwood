@@ -10,6 +10,7 @@ import {
   userFromUnknownSession,
 } from "@/client/auth";
 import type { Tr33Client } from "@/client/index";
+import { GitHubRemote } from "@/git/remote/github";
 import { getCode } from "@/nextjs/code";
 import {
   stripBuiltInCspMetaFromHtml,
@@ -1063,6 +1064,35 @@ export const createHandler = (
   });
 
   vscode.mount("/cdn", vscodeCdn);
+
+  app.get("/github/installation", async () => {
+    if (!(remote instanceof GitHubRemote)) {
+      return Response.json({
+        status: "not_configured",
+        repo: repoFull,
+        org,
+        repoName: repo,
+      });
+    }
+    const installation = await remote.getRepoInstallationStatus();
+    const appSlug = process.env.GITHUB_APP_SLUG?.trim();
+    const installUrl =
+      installation.status === "not_installed" && appSlug
+        ? `https://github.com/apps/${appSlug}/installations/new`
+        : undefined;
+    return Response.json({
+      repo: repoFull,
+      org,
+      repoName: repo,
+      ...installation,
+      installUrl,
+      hint:
+        installation.status === "not_installed"
+          ? `Install the GitHub App on ${repoFull} to edit with Tr33.`
+          : undefined,
+    });
+  });
+
   app.mount("/git", gitService);
   app.mount("/vscode", vscode);
 

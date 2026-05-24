@@ -38,17 +38,20 @@ export function isDocsDeployedRuntime(): boolean {
   return process.env.NODE_ENV === "production";
 }
 
-/** GitHub App remote for /api edits when installation is configured. */
+function hasGitHubAppCredentials(): boolean {
+  return Boolean(
+    process.env.GITHUB_APP_ID?.trim() &&
+      process.env.GITHUB_PRIVATE_KEY?.trim(),
+  );
+}
+
+/** GitHub App remote for /api git routes (installation resolved per repo when id omitted). */
 export function wantsGithubRemote(): boolean {
   if (isDocsDeployedRuntime()) {
-    if (process.env.TR33_DOCS_SOURCE === "github") {
-      return Boolean(process.env.GITHUB_APP_ID && process.env.GITHUB_PRIVATE_KEY);
+    if (process.env.TR33_DOCS_SOURCE === "local") {
+      return false;
     }
-    return Boolean(
-      process.env.GITHUB_APP_ID &&
-        process.env.GITHUB_PRIVATE_KEY &&
-        process.env.GITHUB_APP_INSTALLATION_ID?.trim(),
-    );
+    return hasGitHubAppCredentials();
   }
   if (process.env.TR33_DOCS_SOURCE === "local") {
     return false;

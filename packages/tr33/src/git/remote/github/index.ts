@@ -100,6 +100,40 @@ export class GitHubRemote extends Remote {
     return getGitHubToken();
   }
 
+  /** Whether this app is installed on the configured owner/repo (no installation token). */
+  async getRepoInstallationStatus(): Promise<
+    | { status: "installed"; installationId: number }
+    | { status: "not_installed" }
+    | { status: "not_configured" }
+  > {
+    const githubAuth = this.auth?.github;
+    if (githubAuth?.type !== "app") {
+      return { status: "not_configured" };
+    }
+    const appAuth = createAppAuth({
+      appId: githubAuth.app.appId,
+      privateKey: normalizePrivateKey(githubAuth.app.privateKey),
+    });
+    if (githubAuth.app.installationId) {
+      return {
+        status: "installed",
+        installationId: Number(githubAuth.app.installationId),
+      };
+    }
+    try {
+      const installationId = await this.resolveInstallationId(appAuth);
+      return { status: "installed", installationId };
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes("GitHub App is not installed")
+      ) {
+        return { status: "not_installed" };
+      }
+      throw error;
+    }
+  }
+
   private async resolveInstallationId(
     appAuth: ReturnType<typeof createAppAuth>,
   ): Promise<number> {

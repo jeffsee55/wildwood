@@ -9,6 +9,7 @@ import {
   Markdown,
   slugFromDocPath,
 } from "@/lib/content";
+import { getDocsKitAuth } from "@/lib/docs-kit-auth";
 import { getDocsTr33 } from "@/lib/tr33";
 
 type PageProps = {
@@ -94,7 +95,12 @@ export default async function DocsPage({ params }: PageProps) {
         <Markdown root={doc.body} />
       </article>
 
-      <Toolbar tr33={getDocsTr33()} apiBase="/api" theme="light" />
+      <Toolbar
+        tr33={getDocsTr33()}
+        apiBase="/api"
+        theme="light"
+        auth={getDocsKitAuth()}
+      />
     </main>
   );
 }

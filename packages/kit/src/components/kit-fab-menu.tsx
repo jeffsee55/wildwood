@@ -80,6 +80,13 @@ function normalizeApiBase(base: string): string {
   return b.startsWith("/") ? b : `/${b}`;
 }
 
+type GitHubInstallationResponse = {
+  status: "installed" | "not_installed" | "not_configured";
+  repo?: string;
+  installUrl?: string;
+  hint?: string;
+};
+
 type KitFabMenuProps = {
   apiBase?: string;
   /** Default ref when cookie is absent */
@@ -127,15 +134,80 @@ export function KitFabMenu({
   );
   const editorOpenRef = React.useRef(editorOpen);
   editorOpenRef.current = editorOpen;
-  /** Defer iframe mount so the toolbar and page paint first. */
+  /** Defer iframe mount until GitHub App install is confirmed (when applicable). */
   const [iframeReady, setIframeReady] = React.useState(false);
   const [editorIframeLoaded, setEditorIframeLoaded] = React.useState(false);
+  const [editorBootstrap, setEditorBootstrap] = React.useState<
+    "idle" | "checking" | "blocked" | "ready"
+  >("idle");
+  const [installPrompt, setInstallPrompt] = React.useState<{
+    installUrl?: string;
+    repo?: string;
+    hint?: string;
+  } | null>(null);
+  const installCheckRef = React.useRef(0);
+
+  const recheckGitHubInstallation = React.useCallback(async () => {
+    const checkId = ++installCheckRef.current;
+    setEditorBootstrap("checking");
+    setIframeReady(false);
+    setEditorIframeLoaded(false);
+    setInstallPrompt(null);
+    try {
+      const res = await fetch(`${base}/github/installation`, {
+        credentials: "include",
+      });
+      if (installCheckRef.current !== checkId) {
+        return;
+      }
+      if (!res.ok) {
+        setEditorBootstrap("ready");
+        requestIdleCallback(() => {
+          if (installCheckRef.current === checkId) {
+            setIframeReady(true);
+          }
+        }, { timeout: 2000 });
+        return;
+      }
+      const data = (await res.json()) as GitHubInstallationResponse;
+      if (data.status === "not_installed") {
+        setInstallPrompt({
+          installUrl: data.installUrl,
+          repo: data.repo,
+          hint: data.hint,
+        });
+        setEditorBootstrap("blocked");
+        return;
+      }
+      setEditorBootstrap("ready");
+      requestIdleCallback(() => {
+        if (installCheckRef.current === checkId) {
+          setIframeReady(true);
+        }
+      }, { timeout: 2000 });
+    } catch {
+      if (installCheckRef.current !== checkId) {
+        return;
+      }
+      setEditorBootstrap("ready");
+      requestIdleCallback(() => {
+        if (installCheckRef.current === checkId) {
+          setIframeReady(true);
+        }
+      }, { timeout: 2000 });
+    }
+  }, [base]);
+
   React.useEffect(() => {
-    const id = requestIdleCallback(() => setIframeReady(true), {
-      timeout: 2000,
-    });
-    return () => cancelIdleCallback(id);
-  }, []);
+    if (!editorOpen) {
+      installCheckRef.current += 1;
+      setEditorBootstrap("idle");
+      setIframeReady(false);
+      setInstallPrompt(null);
+      return;
+    }
+    void recheckGitHubInstallation();
+  }, [editorOpen, recheckGitHubInstallation]);
   /** Cookie + server props can lag behind a successful switch; keep UI + editor URL in sync immediately. */
   const [optimisticRef, setOptimisticRef] = React.useState<string | null>(null);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
@@ -692,7 +764,7 @@ export function KitFabMenu({
             >
               <X className="size-4" aria-hidden />
             </Button>
-            {editorOpen && iframeReady ? (
+            {editorOpen && editorBootstrap === "ready" && iframeReady ? (
               <iframe
                 ref={iframeRef}
                 title="VS Code"
@@ -706,23 +778,87 @@ export function KitFabMenu({
                 src={editorSrc}
               />
             ) : null}
-            {!editorIframeLoaded ? (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background text-foreground">
+            {editorOpen &&
+            (editorBootstrap !== "ready" ||
+              !editorIframeLoaded) ? (
+              <div
+                className={cn(
+                  "absolute inset-0 flex items-center justify-center bg-background text-foreground",
+                  editorBootstrap === "blocked"
+                    ? "pointer-events-auto"
+                    : "pointer-events-none",
+                )}
+              >
                 <div className="flex w-[min(90vw,28rem)] flex-col items-center gap-4 rounded-xl border border-border bg-card/80 p-6 text-center shadow-lg backdrop-blur">
-                  <div className="flex size-12 items-center justify-center rounded-full border border-border bg-muted">
-                    <Loader2
-                      className="size-5 animate-spin text-muted-foreground"
-                      aria-hidden
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium">Loading editor</p>
-                    <p className="text-xs text-muted-foreground">
-                      Fetching the VS Code workbench for{" "}
-                      <span className="font-mono">{displayRef}</span>. This can
-                      take a moment on a slow network.
-                    </p>
-                  </div>
+                  {editorBootstrap === "blocked" ? (
+                    <>
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">
+                          Install the GitHub App
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {installPrompt?.hint ??
+                            `Tr33 needs the GitHub App on ${installPrompt?.repo ?? "this repository"} before the editor can load.`}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        {installPrompt?.installUrl ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => {
+                              window.open(
+                                installPrompt.installUrl,
+                                "_blank",
+                                "noopener,noreferrer",
+                              );
+                            }}
+                          >
+                            Install on GitHub
+                          </Button>
+                        ) : null}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => void recheckGitHubInstallation()}
+                        >
+                          I&apos;ve installed it
+                        </Button>
+                      </div>
+                      {!installPrompt?.installUrl ? (
+                        <p className="text-xs text-muted-foreground">
+                          Set{" "}
+                          <code className="font-mono">GITHUB_APP_SLUG</code> on
+                          the deployment so we can link to your app&apos;s
+                          install page.
+                        </p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex size-12 items-center justify-center rounded-full border border-border bg-muted">
+                        <Loader2
+                          className="size-5 animate-spin text-muted-foreground"
+                          aria-hidden
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">Loading editor</p>
+                        <p className="text-xs text-muted-foreground">
+                          {editorBootstrap === "checking"
+                            ? "Checking GitHub App access…"
+                            : (
+                              <>
+                                Fetching the VS Code workbench for{" "}
+                                <span className="font-mono">{displayRef}</span>
+                                . This can take a moment on a slow network.
+                              </>
+                            )}
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             ) : null}

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getDocsKitAuth } from "@/lib/docs-kit-auth";
 import { Toolbar } from "tr33/nextjs";
 
 import { getDocsIndex, Markdown, slugFromDocPath } from "@/lib/content";
@@ -53,7 +54,12 @@ export default async function Home() {
         )}
       </section>
 
-      <Toolbar tr33={getDocsTr33()} apiBase="/api" theme="light" />
+      <Toolbar
+        tr33={getDocsTr33()}
+        apiBase="/api"
+        theme="light"
+        auth={getDocsKitAuth()}
+      />
     </main>
   );
 }
