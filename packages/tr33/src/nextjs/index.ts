@@ -1,7 +1,5 @@
 // import extension from "tr33-vscode";
 
-import { readFile, stat } from "node:fs/promises";
-import path from "node:path";
 import { calculateBlobOid, calculateBlobOidFromBytes } from "tr33-store";
 import extensionPkg from "tr33-vscode/package.json" with { type: "json" };
 import extensionNls from "tr33-vscode/package.nls.json" with { type: "json" };
@@ -30,7 +28,10 @@ import {
   cookiesFromCookieHeader,
   resolveActiveRef,
 } from "@/nextjs/resolve-active-ref";
-import { getTr33ExtensionRoot } from "@/nextjs/resolve-tr33-extension-root";
+import {
+  extensionAssetContentType,
+  readBundledExtensionAsset,
+} from "@/nextjs/read-bundled-extension-asset";
 import {
   proxyMainVscodeCdnAsset,
   resolveVscodeWebCdn,
@@ -909,25 +910,23 @@ export const createHandler = (
         }),
       );
     }
-    const filePath = path.join(getTr33ExtensionRoot(), asset);
-    try {
-      const served = await serveStatic(event, {
-        getContents: async () => new Uint8Array(await readFile(filePath)),
-        getMeta: async () => {
-          const fileStat = await stat(filePath);
-          return { size: fileStat.size, mtime: fileStat.mtimeMs };
-        },
+    const bytes = await readBundledExtensionAsset(asset);
+    if (!bytes) {
+      console.error("[tr33:vscode] extension asset not found:", asset);
+      return new Response("Not found", {
+        status: 404,
+        headers: vscodeEmbedCorsHeaders(event.req),
       });
-      if (served instanceof Response) {
-        return withVscodeEmbedCors(event.req, served);
-      }
-    } catch {
-      /* fall through */
     }
-    return new Response("Not found", {
-      status: 404,
-      headers: vscodeEmbedCorsHeaders(event.req),
-    });
+
+    const contentType = extensionAssetContentType(asset);
+    const headers = new Headers(vscodeEmbedCorsHeaders(event.req));
+    if (contentType) {
+      headers.set("content-type", contentType);
+    }
+    headers.set("cache-control", "public, max-age=3600");
+
+    return new Response(bytes, { status: 200, headers });
   };
 
   // CORS for extension host on `*.vscode-cdn.net` loading `/api/vscode/extension/**`.

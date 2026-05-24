@@ -1,15 +1,11 @@
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { getTr33PackageRoot } from "@/nextjs/read-bundled-extension-asset";
 
 const nodeRequire = createRequire(import.meta.url);
 
 let extensionRoot: string | undefined;
-
-function tr33PackageRootFromModule(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-}
 
 /** Resolved tr33-vscode root: `bundled-extension/` shipped with `tr33`, then monorepo / node_modules. */
 export function getTr33ExtensionRoot(): string {
@@ -29,7 +25,7 @@ export function getTr33ExtensionRoot(): string {
   };
 
   const bundled = tryRoot(
-    path.join(tr33PackageRootFromModule(), "bundled-extension"),
+    path.join(getTr33PackageRoot(), "bundled-extension"),
   );
   if (bundled) {
     extensionRoot = bundled;
@@ -49,7 +45,7 @@ export function getTr33ExtensionRoot(): string {
   };
 
   const fromTr33Pkg = tryResolve(() => {
-    const tr33PkgJson = path.join(tr33PackageRootFromModule(), "package.json");
+    const tr33PkgJson = path.join(getTr33PackageRoot(), "package.json");
     return createRequire(tr33PkgJson).resolve("tr33-vscode/package.json");
   });
   if (fromTr33Pkg) {

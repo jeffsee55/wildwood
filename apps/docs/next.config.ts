@@ -6,7 +6,7 @@ const docsDir = path.dirname(fileURLToPath(import.meta.url));
 const monorepoRoot = path.join(docsDir, "../..");
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["better-sqlite3"],
+  serverExternalPackages: ["better-sqlite3", "tr33"],
   outputFileTracingRoot: monorepoRoot,
   outputFileTracingIncludes: {
     "/api/*": [
