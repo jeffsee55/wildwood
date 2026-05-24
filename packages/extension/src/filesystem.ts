@@ -99,7 +99,7 @@ export class Tr33FileSystemProvider
   // ── Gitable (raw data source — Trees caches on top) ────────────────
 
   async getTree(oid: string): Promise<TreeEntries | null> {
-    const url = `${this.apiUrl}/tree/${oid}`;
+    const url = `${this.apiUrl}/tree/${encodeURIComponent(String(oid))}`;
     try {
       const res = await fetch(url, { credentials: "include" });
       if (!res.ok) {
@@ -119,7 +119,7 @@ export class Tr33FileSystemProvider
   }
 
   async getBlob(oid: string): Promise<{ oid: string; content: string } | null> {
-    const url = `${this.apiUrl}/blob/${oid}`;
+    const url = `${this.apiUrl}/blob/${encodeURIComponent(String(oid))}`;
     try {
       const res = await fetch(url, { credentials: "include" });
       if (!res.ok) {

@@ -47,14 +47,15 @@ export function extensionAssetContentType(asset: string): string | undefined {
 export async function readBundledExtensionAsset(
   asset: string,
 ): Promise<Uint8Array | null> {
-  const cached = assetCache.get(asset);
+  const assetPath = String(asset);
+  const cached = assetCache.get(assetPath);
   if (cached) {
     return cached;
   }
 
-  if (asset === "dist/extension.js") {
+  if (assetPath === "dist/extension.js") {
     const bytes = getExtensionJsBytes();
-    assetCache.set(asset, bytes);
+    assetCache.set(assetPath, bytes);
     return bytes;
   }
 
@@ -62,12 +63,12 @@ export async function readBundledExtensionAsset(
     if (!existsSync(path.join(root, "package.json"))) {
       continue;
     }
-    const filePath = path.join(root, asset);
+    const filePath = path.join(root, assetPath);
     if (!existsSync(filePath)) {
       continue;
     }
     const bytes = new Uint8Array(await readFile(filePath));
-    assetCache.set(asset, bytes);
+    assetCache.set(assetPath, bytes);
     return bytes;
   }
 

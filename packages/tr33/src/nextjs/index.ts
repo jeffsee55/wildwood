@@ -56,6 +56,16 @@ const setNoStoreHeaders = (event: {
   event.node?.res?.setHeader("expires", "0");
 };
 
+/** H3 may coerce all-digit path params to numbers (e.g. GitHub installation ids). */
+const routeParamString = (
+  value: string | number | undefined,
+): string | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return String(value);
+};
+
 export const createHandler = (
   client: Tr33Client,
   options?: { currentRef?: string },
@@ -246,7 +256,7 @@ export const createHandler = (
   });
 
   gitService.get("/worktrees/:ref", async (event) => {
-    const refParam = event.context.params?.ref;
+    const refParam = routeParamString(event.context.params?.ref);
     if (!refParam) {
       return new Response("Ref parameter required", { status: 400 });
     }
@@ -301,7 +311,7 @@ export const createHandler = (
   });
 
   gitService.get("/tree/:oid", async (event) => {
-    const oid = event.context.params?.oid;
+    const oid = routeParamString(event.context.params?.oid);
     if (!oid) {
       return new Response("OID parameter required", { status: 400 });
     }
@@ -337,7 +347,7 @@ export const createHandler = (
   gitService.get("/blob/:oid", async (event) => {
     // middleware not working
     await client._.db.init();
-    const oid = event.context.params?.oid;
+    const oid = routeParamString(event.context.params?.oid);
     if (!oid) {
       return new Response("OID parameter required", { status: 400 });
     }
@@ -374,7 +384,7 @@ export const createHandler = (
   });
 
   gitService.get("/blob/:oid/raw", async (event) => {
-    const oid = event.context.params?.oid;
+    const oid = routeParamString(event.context.params?.oid);
     if (!oid) {
       return new Response("OID parameter required", { status: 400 });
     }
@@ -406,7 +416,7 @@ export const createHandler = (
   });
 
   gitService.get("/commit/:oid", async (event) => {
-    const oid = event.context.params?.oid;
+    const oid = routeParamString(event.context.params?.oid);
     if (!oid) {
       return new Response("OID parameter required", { status: 400 });
     }
@@ -427,8 +437,8 @@ export const createHandler = (
   });
 
   gitService.get("/merge-base/:ours/:theirs", async (event) => {
-    const ours = event.context.params?.ours;
-    const theirs = event.context.params?.theirs;
+    const ours = routeParamString(event.context.params?.ours);
+    const theirs = routeParamString(event.context.params?.theirs);
     if (!ours || !theirs) {
       return new Response("Both ours and theirs params required", {
         status: 400,
@@ -863,7 +873,7 @@ export const createHandler = (
 
   gitService.get("/pr/:ref", async (event) => {
     try {
-      const refParam = event.context.params?.ref;
+      const refParam = routeParamString(event.context.params?.ref);
       if (!refParam) {
         return new Response("Ref parameter required", { status: 400 });
       }
@@ -962,7 +972,7 @@ export const createHandler = (
       return Response.json(await getWorkbenchConfig(event));
     })
     .get("extensions/**:asset", async (event) => {
-      const asset = event.context.params?.asset;
+      const asset = routeParamString(event.context.params?.asset);
       if (!asset) {
         return new Response("No asset path", {
           status: 404,
@@ -975,7 +985,7 @@ export const createHandler = (
       return serveTr33ExtensionAsset(event, "package.json");
     })
     .get("extension/**:asset", async (event) => {
-      const asset = event.context.params?.asset;
+      const asset = routeParamString(event.context.params?.asset);
       if (!asset) {
         return new Response("No asset path", {
           status: 404,
@@ -988,8 +998,8 @@ export const createHandler = (
   // Same-origin proxy to main.vscode-cdn.net (module scripts need CORS; HTML needs CSP strip).
   const vscodeCdn = new H3();
   vscodeCdn.get("/:commit/**:asset", async (event) => {
-    const asset = event.context.params?.asset;
-    const commitParam = event.context.params?.commit;
+    const asset = routeParamString(event.context.params?.asset);
+    const commitParam = routeParamString(event.context.params?.commit);
     if (!asset || !commitParam) {
       return new Response("No asset path", { status: 404 });
     }

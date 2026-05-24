@@ -402,9 +402,9 @@ export class Config<C extends ConfigInput> {
     cache: Cache,
   ): { indexed: true; collection: string } | { indexed: false } {
     const { ref, oid, content } = args;
-    // Store paths without leading slashes; repo-root paths are e.g. "feature1.md" not "//feature1.md"
-    const path = args.path.replace(/^\/+/, "");
-    const maybeCollection = this.maybeBuildCollectionForPath(path);
+    // `filePath` (not `path`) avoids shadowing `node:path` in bundled server code.
+    const filePath = String(args.path).replace(/^\/+/, "");
+    const maybeCollection = this.maybeBuildCollectionForPath(filePath);
     if (!maybeCollection) {
       return { indexed: false };
     }
@@ -426,7 +426,7 @@ export class Config<C extends ConfigInput> {
       cache.filters.push({
         ...this.namespace,
         ref,
-        path,
+        path: filePath,
         field,
         key,
         value,
@@ -440,7 +440,7 @@ export class Config<C extends ConfigInput> {
     ) => {
       cache.entries.push({
         ref,
-        path,
+        path: filePath,
         variant,
         canonical,
         collection,
@@ -461,7 +461,7 @@ export class Config<C extends ConfigInput> {
       cache.connections.push({
         ...this.namespace,
         ref,
-        path,
+        path: filePath,
         field,
         key,
         to,
@@ -487,16 +487,17 @@ export class Config<C extends ConfigInput> {
           );
         },
         onConnection: (args) => {
+          const connectionTarget = String(args.value);
           let fullPath: string;
           // If path starts with './', treat it as root-relative
-          if (args.value.startsWith("./")) {
-            fullPath = normalize(args.value.slice(2));
-          } else if (args.value.startsWith("/")) {
+          if (connectionTarget.startsWith("./")) {
+            fullPath = normalize(connectionTarget.slice(2));
+          } else if (connectionTarget.startsWith("/")) {
             // Absolute path
-            fullPath = normalize(args.value);
+            fullPath = normalize(connectionTarget);
           } else {
             // Relative to current file's directory
-            fullPath = normalize(join(dirname(path), args.value));
+            fullPath = normalize(join(dirname(filePath), connectionTarget));
           }
           // Convert target path to canonical (strip variant path modifiers)
           let toCanonical = fullPath;
@@ -526,7 +527,7 @@ export class Config<C extends ConfigInput> {
             args.key.join("."),
             toCanonical,
             args.referencedAs ?? null,
-            args.value,
+            connectionTarget,
             args.collection,
           );
         },
@@ -543,7 +544,7 @@ export class Config<C extends ConfigInput> {
       // e.g. "a.fr.v1.md" should match locale:fr AND version:v1.
       // We progressively strip each matched modifier from the path to get the canonical.
       const matchedVariants: Record<string, string> = {};
-      let canonical = path;
+      let canonical = filePath;
 
       for (const [variantKey, variantConfig] of Object.entries(variants)) {
         if (!variantConfig.pathModifier) continue;
@@ -585,8 +586,8 @@ export class Config<C extends ConfigInput> {
         // These are fallbacks and WON'T override existing variant matches
         const defaultCombo = this.defaultVariant();
         if (defaultCombo) {
-          processVariant(defaultCombo, path);
-          addEntry(defaultCombo, path, name);
+          processVariant(defaultCombo, filePath);
+          addEntry(defaultCombo, filePath, name);
         }
         // for (const combo of allVariantCombos) {
         // 	console.log("combo", combo, path);
@@ -596,8 +597,8 @@ export class Config<C extends ConfigInput> {
       }
     } else {
       // No variants defined, use "__" as the variant
-      processVariant("__", path);
-      addEntry("__", path, name);
+      processVariant("__", filePath);
+      addEntry("__", filePath, name);
     }
 
     return {

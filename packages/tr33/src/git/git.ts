@@ -99,7 +99,7 @@ export class Git implements Gitable {
       ref: args.ref,
     });
     if (worktree?.rootTree) {
-      const rootTreeOid = worktree.rootTree?.oid;
+      const rootTreeOid = String(worktree.rootTree.oid);
       await this.writeEntries({
         ref: args.ref,
         entries: await this.trees.entriesFromTree({
@@ -278,7 +278,9 @@ export class Git implements Gitable {
     ref: string;
     entries: { oid: string; path: string }[];
   }) {
-    const entries = args.entries.filter((e) => this.config.matches(e.path));
+    const entries = args.entries
+      .map((e) => ({ oid: String(e.oid), path: String(e.path) }))
+      .filter((e) => this.config.matches(e.path));
     await this.ensureBlobs({ oids: entries.map((e) => e.oid) });
     const chunks = await this.chunkBlobs({
       blobs: Array.from(entries),

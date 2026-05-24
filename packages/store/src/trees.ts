@@ -229,8 +229,8 @@ export class Trees {
         await this.walk({ oid: entry.oid, path: fullPath, callback });
       } else {
         await callback({
-          oid: entry.oid,
-          path: fullPath,
+          oid: String(entry.oid),
+          path: String(fullPath),
           type: "blob",
         });
       }
