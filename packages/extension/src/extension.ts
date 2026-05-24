@@ -99,6 +99,7 @@ export async function activate(context: vscode.ExtensionContext) {
           isReadonly: false,
         }),
       );
+      await tr33FS.initializeWorkspace();
     } catch (error) {
       const detail =
         error instanceof Error ? error.message : String(error);

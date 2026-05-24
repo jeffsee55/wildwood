@@ -66,6 +66,19 @@ const routeParamString = (
   return String(value);
 };
 
+/** `**:asset` captures may arrive as a string or path segments. */
+const routeParamPath = (
+  value: string | number | string[] | undefined,
+): string | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    return value.map(String).join("/");
+  }
+  return String(value);
+};
+
 export const createHandler = (
   client: Tr33Client,
   options?: { currentRef?: string },
@@ -334,6 +347,13 @@ export const createHandler = (
         oid: oid.slice(0, 7),
         entryCount,
       });
+      if (entryCount === 0) {
+        console.warn("[tr33:git-api] GET /tree/:oid — empty tree", {
+          oid: oid.slice(0, 7),
+          org,
+          repo,
+        });
+      }
       return Response.json(treeEntry);
     } catch (error) {
       console.error("Failed to fetch tree:", error);
@@ -905,39 +925,50 @@ export const createHandler = (
     asset: string,
   ) => {
     setNoStoreHeaders(event);
-    if (asset === "package.json") {
-      return withVscodeEmbedCors(
-        event.req,
-        Response.json(extensionPkg, {
-          headers: { "content-type": "application/json" },
-        }),
+    try {
+      if (asset === "package.json") {
+        return withVscodeEmbedCors(
+          event.req,
+          Response.json(extensionPkg, {
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      if (asset === "package.nls.json") {
+        return withVscodeEmbedCors(
+          event.req,
+          Response.json(extensionNls, {
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      const bytes = await readBundledExtensionAsset(asset);
+      if (!bytes) {
+        console.error("[tr33:vscode] extension asset not found:", asset);
+        return new Response("Not found", {
+          status: 404,
+          headers: vscodeEmbedCorsHeaders(event.req),
+        });
+      }
+
+      const contentType = extensionAssetContentType(asset);
+      const headers = new Headers(vscodeEmbedCorsHeaders(event.req));
+      if (contentType) {
+        headers.set("content-type", contentType);
+      }
+      headers.set("cache-control", "public, max-age=3600");
+
+      return new Response(bytes, { status: 200, headers });
+    } catch (error) {
+      console.error("[tr33:vscode] extension asset failed:", asset, error);
+      return new Response(
+        `Failed to load extension asset: ${error instanceof Error ? error.message : String(error)}`,
+        {
+          status: 500,
+          headers: vscodeEmbedCorsHeaders(event.req),
+        },
       );
     }
-    if (asset === "package.nls.json") {
-      return withVscodeEmbedCors(
-        event.req,
-        Response.json(extensionNls, {
-          headers: { "content-type": "application/json" },
-        }),
-      );
-    }
-    const bytes = await readBundledExtensionAsset(asset);
-    if (!bytes) {
-      console.error("[tr33:vscode] extension asset not found:", asset);
-      return new Response("Not found", {
-        status: 404,
-        headers: vscodeEmbedCorsHeaders(event.req),
-      });
-    }
-
-    const contentType = extensionAssetContentType(asset);
-    const headers = new Headers(vscodeEmbedCorsHeaders(event.req));
-    if (contentType) {
-      headers.set("content-type", contentType);
-    }
-    headers.set("cache-control", "public, max-age=3600");
-
-    return new Response(bytes, { status: 200, headers });
   };
 
   // CORS for extension host on `*.vscode-cdn.net` loading `/api/vscode/extension/**`.
@@ -972,7 +1003,7 @@ export const createHandler = (
       return Response.json(await getWorkbenchConfig(event));
     })
     .get("extensions/**:asset", async (event) => {
-      const asset = routeParamString(event.context.params?.asset);
+      const asset = routeParamPath(event.context.params?.asset);
       if (!asset) {
         return new Response("No asset path", {
           status: 404,
@@ -985,7 +1016,7 @@ export const createHandler = (
       return serveTr33ExtensionAsset(event, "package.json");
     })
     .get("extension/**:asset", async (event) => {
-      const asset = routeParamString(event.context.params?.asset);
+      const asset = routeParamPath(event.context.params?.asset);
       if (!asset) {
         return new Response("No asset path", {
           status: 404,
@@ -998,7 +1029,7 @@ export const createHandler = (
   // Same-origin proxy to main.vscode-cdn.net (module scripts need CORS; HTML needs CSP strip).
   const vscodeCdn = new H3();
   vscodeCdn.get("/:commit/**:asset", async (event) => {
-    const asset = routeParamString(event.context.params?.asset);
+    const asset = routeParamPath(event.context.params?.asset);
     const commitParam = routeParamString(event.context.params?.commit);
     if (!asset || !commitParam) {
       return new Response("No asset path", { status: 404 });

@@ -163,6 +163,21 @@ export class Tr33FileSystemProvider
     return vscode.Uri.parse(`${SCHEME}:/${this.repo}/`);
   }
 
+  /** Load worktree + root tree before the workbench lists the workspace folder. */
+  async initializeWorkspace(): Promise<void> {
+    await this.fetchWorktreeState();
+    const rootOid = await this.getRootTreeOid();
+    const tree = await this.trees.getTree(rootOid);
+    logger("initializeWorkspace", {
+      ref: this.currentRef,
+      rootOid: rootOid.slice(0, 7),
+      entryCount: tree ? Object.keys(tree).length : 0,
+    });
+    this._emitter.fire([
+      { type: vscode.FileChangeType.Changed, uri: this.getRootUri() },
+    ]);
+  }
+
   async switchRef(
     newRef: string,
     options?: { notifyParent?: boolean },

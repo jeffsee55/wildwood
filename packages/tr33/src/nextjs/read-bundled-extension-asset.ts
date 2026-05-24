@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -32,6 +32,21 @@ function extensionAssetRoots(): string[] {
   return [...new Set(roots)];
 }
 
+let tr33DarkThemeBytes: Uint8Array | null = null;
+
+function getTr33DarkThemeBytes(): Uint8Array | null {
+  if (tr33DarkThemeBytes) {
+    return tr33DarkThemeBytes;
+  }
+  try {
+    const themePath = nodeRequire.resolve("tr33-vscode/themes/tr33-dark.json");
+    tr33DarkThemeBytes = new Uint8Array(readFileSync(themePath));
+    return tr33DarkThemeBytes;
+  } catch {
+    return null;
+  }
+}
+
 export function extensionAssetContentType(asset: string): string | undefined {
   const lower = asset.toLowerCase();
   if (lower.endsWith(".js")) {
@@ -57,6 +72,14 @@ export async function readBundledExtensionAsset(
     const bytes = getExtensionJsBytes();
     assetCache.set(assetPath, bytes);
     return bytes;
+  }
+
+  if (assetPath === "themes/tr33-dark.json") {
+    const bytes = getTr33DarkThemeBytes();
+    if (bytes) {
+      assetCache.set(assetPath, bytes);
+      return bytes;
+    }
   }
 
   for (const root of extensionAssetRoots()) {

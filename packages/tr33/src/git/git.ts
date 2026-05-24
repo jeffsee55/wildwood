@@ -42,11 +42,13 @@ export class Git implements Gitable {
   }
 
   async getTree(oid: string): Promise<TreeEntries | null> {
-    return (
-      (await this.db.trees.get({ oid })) ??
-      (await this.remote.fetchTree({ oid })) ??
-      null
-    );
+    const treeOid = String(oid);
+    const fromDb = await this.db.trees.get({ oid: treeOid });
+    if (fromDb && Object.keys(fromDb).length > 0) {
+      return fromDb;
+    }
+    const fromRemote = await this.remote.fetchTree({ oid: treeOid });
+    return fromRemote && Object.keys(fromRemote).length > 0 ? fromRemote : null;
   }
 
   async getBlob(oid: string): Promise<{ oid: string; content: string } | null> {
