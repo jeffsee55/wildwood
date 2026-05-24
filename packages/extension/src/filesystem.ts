@@ -173,6 +173,7 @@ export class Tr33FileSystemProvider
 
   /** Load worktree + root tree before the workbench lists the workspace folder. */
   async initializeWorkspace(): Promise<void> {
+    logger("initializeWorkspace: loading worktree and root tree");
     await this.fetchWorktreeState();
     const rootOid = await this.getRootTreeOid();
     const tree = await this.trees.getTree(rootOid);
@@ -739,7 +740,11 @@ export class Tr33FileSystemProvider
   async readDirectory(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
     const filePath = this.pathFromUri(uri);
     if (filePath === "" || filePath === ".") {
-      const entry = await this.resolve(uri);
+      let entry = await this.resolve(uri);
+      if (!entry?.type && this.commitTreeOid) {
+        await this.trees.getTree(this.commitTreeOid);
+        entry = await this.resolve(uri);
+      }
       if (entry?.type === "tree") {
         const entries = Object.entries(entry.entries).map(([name, child]) => [
           name,

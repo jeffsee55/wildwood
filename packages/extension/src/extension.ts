@@ -93,13 +93,13 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     try {
+      await tr33FS.initializeWorkspace();
       context.subscriptions.push(
         vscode.workspace.registerFileSystemProvider(SCHEME, tr33FS, {
           isCaseSensitive: true,
           isReadonly: false,
         }),
       );
-      await tr33FS.initializeWorkspace();
     } catch (error) {
       const detail =
         error instanceof Error ? error.message : String(error);

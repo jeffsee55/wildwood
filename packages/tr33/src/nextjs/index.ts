@@ -949,7 +949,7 @@ export const createHandler = (
       if (contentType) {
         headers.set("content-type", contentType);
       }
-      headers.set("cache-control", "public, max-age=3600");
+      headers.set("cache-control", "no-store");
 
       return new Response(bytes, { status: 200, headers });
     } catch (error) {
