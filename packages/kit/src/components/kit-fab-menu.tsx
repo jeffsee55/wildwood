@@ -146,6 +146,7 @@ export function KitFabMenu({
     hint?: string;
   } | null>(null);
   const installCheckRef = React.useRef(0);
+  const base = normalizeApiBase(apiBase);
 
   const recheckGitHubInstallation = React.useCallback(async () => {
     const checkId = ++installCheckRef.current;
@@ -211,7 +212,6 @@ export function KitFabMenu({
   /** Cookie + server props can lag behind a successful switch; keep UI + editor URL in sync immediately. */
   const [optimisticRef, setOptimisticRef] = React.useState<string | null>(null);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
-  const base = normalizeApiBase(apiBase);
   const displayRef = optimisticRef ?? activeRef ?? configRef;
 
   React.useEffect(() => {
