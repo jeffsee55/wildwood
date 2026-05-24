@@ -342,7 +342,7 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     logger(`Registered ${SCHEME} filesystem, SCM provider, and commands`);
-    void workingScm.refresh();
+    await workingScm.refresh();
   } catch (error) {
     const message =
       error instanceof Error

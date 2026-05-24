@@ -63,6 +63,7 @@ export class Tr33FileSystemProvider
   private repo: string;
   private configRef: string;
   private currentRef: string;
+  private apiBase: string;
   private apiUrl: string;
   private rootTreeOid: string | null = null;
   private commitTreeOid: string | null = null;
@@ -86,6 +87,7 @@ export class Tr33FileSystemProvider
     this.repo = ctx.repo;
     this.configRef = ctx.configRef;
     this.currentRef = ctx.currentRef;
+    this.apiBase = ctx.apiBase;
     this.apiUrl = `${ctx.apiBase}/api/git`;
     this.trees = new Trees({ gitable: this });
     logger("Tr33FileSystemProvider", {
@@ -111,7 +113,12 @@ export class Tr33FileSystemProvider
         );
         return null;
       }
-      return (await res.json()) as TreeEntries;
+      const tree = (await res.json()) as TreeEntries;
+      logger("getTree ok", {
+        oid: oid.slice(0, 7),
+        entryCount: Object.keys(tree).length,
+      });
+      return tree;
     } catch (e) {
       logger("getTree fetch failed", url, e);
       return null;
@@ -160,7 +167,8 @@ export class Tr33FileSystemProvider
   }
 
   getRootUri(): vscode.Uri {
-    return vscode.Uri.parse(`${SCHEME}:/${this.repo}/`);
+    const host = new URL(this.apiBase).host;
+    return vscode.Uri.parse(`${SCHEME}://${host}/${this.repo}/`);
   }
 
   /** Load worktree + root tree before the workbench lists the workspace folder. */
@@ -601,8 +609,17 @@ export class Tr33FileSystemProvider
     syncHostActiveRef?: boolean;
   }): Promise<void> {
     const data = await this.fetchRefData(this.currentRef, options);
-    this.commitTreeOid = data.commit.treeOid;
-    this.rootTreeOid = data.rootTreeOid ?? data.commit.treeOid;
+    const nextCommitOid = data.commit.treeOid;
+    const nextRootOid = data.rootTreeOid ?? data.commit.treeOid;
+    const changed =
+      this.commitTreeOid !== nextCommitOid || this.rootTreeOid !== nextRootOid;
+    this.commitTreeOid = nextCommitOid;
+    this.rootTreeOid = nextRootOid;
+    if (changed) {
+      this._emitter.fire([
+        { type: vscode.FileChangeType.Changed, uri: this.getRootUri() },
+      ]);
+    }
   }
 
   private async getRootTreeOid(): Promise<string> {
