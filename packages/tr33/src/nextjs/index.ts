@@ -4,6 +4,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { calculateBlobOid, calculateBlobOidFromBytes } from "tr33-store";
 import extensionPkg from "tr33-vscode/package.json" with { type: "json" };
+import extensionNls from "tr33-vscode/package.nls.json" with { type: "json" };
 import { H3, html, serveStatic, setResponseHeader } from "h3";
 import { z } from "zod/v4";
 import {
@@ -896,6 +897,14 @@ export const createHandler = (
       return withVscodeEmbedCors(
         event.req,
         Response.json(extensionPkg, {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }
+    if (asset === "package.nls.json") {
+      return withVscodeEmbedCors(
+        event.req,
+        Response.json(extensionNls, {
           headers: { "content-type": "application/json" },
         }),
       );

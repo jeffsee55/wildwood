@@ -12,6 +12,7 @@ const nextConfig: NextConfig = {
     "/api/*": [
       "packages/extension/**/*",
       "packages/tr33/bundled-extension/**/*",
+      "node_modules/tr33/bundled-extension/**/*",
     ],
   },
 };
