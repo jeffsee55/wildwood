@@ -218,7 +218,7 @@ export const createHandler = (
       folderUri: {
         scheme: "tr33-vfs",
         authority: event.url.host,
-        path: `/${repoFull}`,
+        path: `/${repoFull}/`,
       },
       additionalBuiltinExtensions: builtinExtensions,
       configurationDefaults: {

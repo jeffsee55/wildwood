@@ -182,9 +182,32 @@ export class Tr33FileSystemProvider
       rootOid: rootOid.slice(0, 7),
       entryCount: tree ? Object.keys(tree).length : 0,
     });
-    this._emitter.fire([
-      { type: vscode.FileChangeType.Changed, uri: this.getRootUri() },
-    ]);
+  }
+
+  /** Re-list explorer after `registerFileSystemProvider` (early events are ignored). */
+  refreshExplorer(): void {
+    const events: vscode.FileChangeEvent[] = [];
+    const seen = new Set<string>();
+    const push = (uri: vscode.Uri) => {
+      const key = uri.toString();
+      if (seen.has(key)) return;
+      seen.add(key);
+      events.push({ type: vscode.FileChangeType.Changed, uri });
+    };
+    push(this.getRootUri());
+    const root = this.getRootUri();
+    const withoutTrailing = root.path.replace(/\/+$/, "");
+    if (withoutTrailing !== root.path) {
+      push(root.with({ path: withoutTrailing }));
+    }
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      if (folder.uri.scheme === SCHEME) {
+        push(folder.uri);
+      }
+    }
+    if (events.length > 0) {
+      this._emitter.fire(events);
+    }
   }
 
   async switchRef(
@@ -634,8 +657,8 @@ export class Tr33FileSystemProvider
 
   private pathFromUri(uri: vscode.Uri): string {
     const prefix = `/${this.repo}`;
-    const p = uri.path;
-    if (p === prefix || p === `${prefix}/`) return "";
+    const p = uri.path.replace(/\/+$/, "") || "/";
+    if (p === prefix || p === "/") return "";
     if (p.startsWith(`${prefix}/`)) return p.slice(prefix.length + 1);
     return p.startsWith("/") ? p.slice(1) : p;
   }
@@ -690,6 +713,15 @@ export class Tr33FileSystemProvider
 
   async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
     const filePath = this.pathFromUri(uri);
+    if (filePath === "") {
+      await this.getRootTreeOid();
+      return {
+        type: vscode.FileType.Directory,
+        ctime: 0,
+        mtime: 0,
+        size: 0,
+      };
+    }
     const virtualGit = this.getVirtualGitPath(filePath);
     if (virtualGit) {
       return {
@@ -755,6 +787,12 @@ export class Tr33FileSystemProvider
         }
         return entries;
       }
+      logger("readDirectory: empty root", {
+        uri: uri.toString(),
+        path: uri.path,
+        filePath,
+        hasCommitTree: Boolean(this.commitTreeOid),
+      });
     }
     if (filePath === ".git") {
       return [["config", vscode.FileType.File]];

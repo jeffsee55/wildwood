@@ -100,6 +100,9 @@ export async function activate(context: vscode.ExtensionContext) {
           isReadonly: false,
         }),
       );
+      tr33FS.refreshExplorer();
+      queueMicrotask(() => tr33FS.refreshExplorer());
+      setTimeout(() => tr33FS.refreshExplorer(), 250);
     } catch (error) {
       const detail =
         error instanceof Error ? error.message : String(error);
