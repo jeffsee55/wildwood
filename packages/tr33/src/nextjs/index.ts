@@ -543,14 +543,14 @@ export const createHandler = (
         .parse(body);
 
       const files: Record<string, string | Uint8Array> = {};
-      for (const [path, content] of Object.entries(filesParam)) {
+      for (const [filePath, content] of Object.entries(filesParam)) {
         if (typeof content === "string") {
-          files[path] = content;
+          files[filePath] = content;
         } else {
           const bytes = Uint8Array.from(atob(content.base64), (c) =>
             c.charCodeAt(0),
           );
-          files[path] = bytes;
+          files[filePath] = bytes;
         }
       }
       const authError = await authorizeGitAction(event.req, {
@@ -566,12 +566,12 @@ export const createHandler = (
       });
 
       const filesWithOids: Record<string, string> = {};
-      for (const [path, content] of Object.entries(files)) {
+      for (const [filePath, content] of Object.entries(files)) {
         const oid =
           content instanceof Uint8Array
             ? await calculateBlobOidFromBytes(content)
             : await calculateBlobOid(content);
-        filesWithOids[path] = oid;
+        filesWithOids[filePath] = oid;
       }
 
       return Response.json({

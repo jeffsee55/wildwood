@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import path from "node:path";
+import { dirname, join } from "node:path";
 import { getTr33PackageRoot } from "@/nextjs/read-bundled-extension-asset";
 
 const nodeRequire = createRequire(import.meta.url);
@@ -17,16 +17,14 @@ export function getTr33ExtensionRoot(): string {
     if (!root) {
       return undefined;
     }
-    const pkg = path.join(root, "package.json");
+    const pkg = join(root, "package.json");
     if (existsSync(pkg)) {
       return root;
     }
     return undefined;
   };
 
-  const bundled = tryRoot(
-    path.join(getTr33PackageRoot(), "bundled-extension"),
-  );
+  const bundled = tryRoot(join(getTr33PackageRoot(), "bundled-extension"));
   if (bundled) {
     extensionRoot = bundled;
     return extensionRoot;
@@ -36,7 +34,7 @@ export function getTr33ExtensionRoot(): string {
     try {
       const resolved = resolve();
       if (!resolved.includes("[project]") && existsSync(resolved)) {
-        return path.dirname(resolved);
+        return dirname(resolved);
       }
     } catch {
       /* try next */
@@ -45,7 +43,7 @@ export function getTr33ExtensionRoot(): string {
   };
 
   const fromTr33Pkg = tryResolve(() => {
-    const tr33PkgJson = path.join(getTr33PackageRoot(), "package.json");
+    const tr33PkgJson = join(getTr33PackageRoot(), "package.json");
     return createRequire(tr33PkgJson).resolve("tr33-vscode/package.json");
   });
   if (fromTr33Pkg) {
@@ -63,10 +61,10 @@ export function getTr33ExtensionRoot(): string {
 
   const cwd = process.cwd();
   for (const candidate of [
-    path.join(cwd, "packages", "extension"),
-    path.join(cwd, "..", "..", "packages", "extension"),
-    path.join(cwd, "node_modules", "tr33-vscode"),
-    path.join(cwd, "node_modules", "tr33", "node_modules", "tr33-vscode"),
+    join(cwd, "packages", "extension"),
+    join(cwd, "..", "..", "packages", "extension"),
+    join(cwd, "node_modules", "tr33-vscode"),
+    join(cwd, "node_modules", "tr33", "node_modules", "tr33-vscode"),
   ]) {
     const root = tryRoot(candidate);
     if (root) {
