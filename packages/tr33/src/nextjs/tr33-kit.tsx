@@ -52,6 +52,8 @@ export type ToolbarProps = Tr33KitProps & {
   fallback?: ReactNode;
 };
 
+export type { KitAuthConfig };
+
 /**
  * Suspense boundary + {@link Tr33Kit} (reads `cookies()` inside the boundary).
  */

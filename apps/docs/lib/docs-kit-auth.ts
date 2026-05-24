@@ -1,4 +1,4 @@
-import type { KitAuthConfig } from "@tr33/kit";
+import type { KitAuthConfig } from "tr33/nextjs";
 
 /** Kit toolbar + editor install prompts for the docs GitHub App. */
 export function getDocsKitAuth(): KitAuthConfig | undefined {

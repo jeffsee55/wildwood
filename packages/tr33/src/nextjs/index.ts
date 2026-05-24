@@ -1305,6 +1305,7 @@ export function handle(
 
 export type { Tr33Client };
 export type {
+  KitAuthConfig,
   Tr33KitHostClient,
   Tr33KitProps,
   ToolbarProps,
