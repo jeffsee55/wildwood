@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { Tr33FileSystemProvider, generateBranchName, SCHEME } from "./filesystem";
 import { subscribeHostRef } from "./host-bridge";
+import { whenTr33ExtensionContextReady } from "./resolve-context";
 import { Tr33SourceControlProvider } from "./source-control";
 
 export const logger = (...args: unknown[]) => {
@@ -74,43 +75,58 @@ class Tr33ImageEditorProvider
 }
 
 export async function activate(context: vscode.ExtensionContext) {
-  logger("Activating...");
-  logger("Extension URI:", context.extensionUri);
+  try {
+    logger("Activating...", context.extensionUri.toString());
+    const resolved = await whenTr33ExtensionContextReady(
+      context.extensionUri,
+    );
+    const tr33FS = new Tr33FileSystemProvider(
+      context.extensionUri,
+      resolved,
+    );
 
-  const tr33FS = new Tr33FileSystemProvider(context.extensionUri);
+    const hostRefSub = subscribeHostRef((ref) => {
+      void tr33FS.switchRef(ref, { notifyParent: false });
+    });
+    context.subscriptions.push(
+      new vscode.Disposable(() => hostRefSub.dispose()),
+    );
 
-  const hostRefSub = subscribeHostRef((ref) => {
-    void tr33FS.switchRef(ref, { notifyParent: false });
-  });
-  context.subscriptions.push(new vscode.Disposable(() => hostRefSub.dispose()));
-
-  context.subscriptions.push(
-    vscode.workspace.registerFileSystemProvider(SCHEME, tr33FS, {
-      isCaseSensitive: true,
-      isReadonly: false,
-    }),
-  );
-
-  context.subscriptions.push(
-    tr33FS.onDidCreateBranch((branchName) => {
-      vscode.window.showInformationMessage(
-        `Created branch: ${branchName}`,
+    try {
+      context.subscriptions.push(
+        vscode.workspace.registerFileSystemProvider(SCHEME, tr33FS, {
+          isCaseSensitive: true,
+          isReadonly: false,
+        }),
       );
-    }),
-  );
+    } catch (error) {
+      const detail =
+        error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Tr33: failed to register "${SCHEME}" file system provider (${detail})`,
+        { cause: error },
+      );
+    }
 
-  context.subscriptions.push(
-    vscode.window.registerCustomEditorProvider(
+    context.subscriptions.push(
+      tr33FS.onDidCreateBranch((branchName) => {
+        vscode.window.showInformationMessage(
+          `Created branch: ${branchName}`,
+        );
+      }),
+    );
+
+    context.subscriptions.push(
+      vscode.window.registerCustomEditorProvider(
       "tr33.imagePreview",
       new Tr33ImageEditorProvider(tr33FS),
-      { supportsMultipleEditorsPerDocument: true },
-    ),
-  );
+        { supportsMultipleEditorsPerDocument: true },
+      ),
+    );
 
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "tr33.openMergeEditor",
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        "tr33.openMergeEditor",
       async (
         resourceUri: vscode.Uri,
         commitTreeOid: string,
@@ -126,11 +142,11 @@ export async function activate(context: vscode.ExtensionContext) {
           input2: { uri: input2, title: "Incoming" },
           output: resourceUri,
         });
-      },
-    ),
-  );
+        },
+      ),
+    );
 
-  const workingScm = new Tr33SourceControlProvider(context, tr33FS, {
+    const workingScm = new Tr33SourceControlProvider(context, tr33FS, {
     id: "tr33-scm",
     label: "Tr33",
     mode: "combined",
@@ -168,11 +184,11 @@ export async function activate(context: vscode.ExtensionContext) {
         title: "Create PR / Merge PR",
       },
     ],
-    showStatusBar: true,
-  });
+      showStatusBar: true,
+    });
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand("tr33.switchBranch", async () => {
+    context.subscriptions.push(
+      vscode.commands.registerCommand("tr33.switchBranch", async () => {
       const branches = await tr33FS.fetchBranches();
       const currentRef = tr33FS.getCurrentRef();
       const configRef = tr33FS.getConfigRef();
@@ -221,12 +237,12 @@ export async function activate(context: vscode.ExtensionContext) {
       const branch = picked.label.replace(/^\$\([^)]+\)\s*/, "");
       if (branch === currentRef) return;
       await tr33FS.switchRef(branch);
-      vscode.window.showInformationMessage(`Switched to branch: ${branch}`);
-    }),
-  );
+        vscode.window.showInformationMessage(`Switched to branch: ${branch}`);
+      }),
+    );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand("tr33.source-control.commit", () =>
+    context.subscriptions.push(
+      vscode.commands.registerCommand("tr33.source-control.commit", () =>
       workingScm.performCommit(),
     ),
     vscode.commands.registerCommand(
@@ -320,13 +336,20 @@ export async function activate(context: vscode.ExtensionContext) {
       } catch {
         /* cross-origin top */
       }
-      w.top.postMessage({ type: "tr33-kit-close-editor" }, targetOrigin);
-    }),
-  );
+        w.top.postMessage({ type: "tr33-kit-close-editor" }, targetOrigin);
+      }),
+    );
 
-  logger("Registered vscode-vfs filesystem, SCM provider, and commands");
-
-  await workingScm.refresh();
+    logger(`Registered ${SCHEME} filesystem, SCM provider, and commands`);
+    void workingScm.refresh();
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? (error.stack ?? error.message)
+        : String(error);
+    logger("Activation failed:", message);
+    throw error instanceof Error ? error : new Error(message);
+  }
 }
 
 export function deactivate() {}

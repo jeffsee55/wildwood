@@ -5,7 +5,7 @@
  * The workbench and extension host use **inline** scripts, **eval**, `blob:` workers,
  * and fetches to VS Code’s CDN. A hash-only policy in shipped HTML can block
  * `webWorkerExtensionHostIframe.html` → extension host never starts → no tr33
- * extension → `ENOPRO` for `vscode-vfs://`.
+ * extension → `ENOPRO` for `tr33-vfs://`.
  *
  * @see https://code.visualstudio.com/docs/remote/ssh (similar constraints for web)
  */
@@ -25,7 +25,7 @@ export const VSCODE_EMBED_DOCUMENT_CSP = [
 /**
  * `vscode-web` ships many HTML surfaces (e.g. `webWorkerExtensionHostIframe.html`, not
  * just `workbench.html` and `/editor`). Each must get this policy, or the extension
- * host iframe fails to run inline script → no tr33 extension → `ENOPRO` on `vscode-vfs://`.
+ * host iframe fails to run inline script → no tr33 extension → `ENOPRO` on `tr33-vfs://`.
  */
 export function stripBuiltInCspMetaFromHtml(html: string): string {
   return html.replace(

@@ -191,7 +191,7 @@ export const createHandler = (
         },
       },
       folderUri: {
-        scheme: "vscode-vfs",
+        scheme: "tr33-vfs",
         authority: event.url.host,
         path: `/${repoFull}`,
       },

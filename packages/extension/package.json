@@ -13,7 +13,7 @@
   ],
   "activationEvents": [
     "*",
-    "onFileSystem:vscode-vfs"
+    "onFileSystem:tr33-vfs"
   ],
   "capabilities": {
     "virtualWorkspaces": true,
@@ -229,7 +229,7 @@
         {
           "command": "tr33.closeEmbeddedEditor",
           "group": "navigation@100",
-          "when": "activeEditor && resourceScheme == vscode-vfs"
+          "when": "activeEditor && resourceScheme == tr33-vfs"
         }
       ],
       "scm/title": [

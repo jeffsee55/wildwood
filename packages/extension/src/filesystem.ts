@@ -11,8 +11,13 @@ import {
   notifyKitParentBranchChanged,
   notifyKitParentWorkspaceChanged,
 } from "./kit-parent";
+import {
+  type Tr33ExtensionContext,
+  resolveTr33ExtensionContext,
+} from "./resolve-context";
 
-export const SCHEME = "vscode-vfs";
+/** Distinct from VS Code's built-in `vscode-vfs` (Remote Repositories). */
+export const SCHEME = "tr33-vfs";
 
 /** Must match `TR33_SYNC_HOST_ACTIVE_REF_HEADER` in `tr33` (`preview-cookies.ts`). */
 const TR33_SYNC_HOST_ACTIVE_REF_HEADER = "x-tr33-sync-host-active-ref";
@@ -73,91 +78,20 @@ export class Tr33FileSystemProvider
 
   private _conflictPaths = new Set<string>();
 
-  constructor(extensionUri: vscode.Uri) {
-    const tr33Config = vscode.workspace.getConfiguration("tr33");
-    let repo: string | undefined;
-    let initialRef: string | undefined;
-    if (extensionUri.query) {
-      try {
-        const parsed = JSON.parse(extensionUri.query) as {
-          repo?: string;
-          ref?: string;
-        };
-        repo = parsed.repo;
-        initialRef = parsed.ref;
-      } catch {
-        const params = new URLSearchParams(extensionUri.query);
-        repo = params.get("repo") ?? undefined;
-        initialRef = params.get("ref") ?? undefined;
-      }
-    }
-    if (!repo) {
-      const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri;
-      const workspaceQuery = workspaceUri?.query;
-      if (workspaceQuery) {
-        const query = new URLSearchParams(workspaceQuery);
-        const queryRepo = query.get("repo");
-        const queryRef = query.get("ref");
-        if (queryRepo) {
-          repo = queryRepo;
-        }
-        if (queryRef) {
-          initialRef = queryRef;
-        }
-      }
-    }
-    if (!repo) {
-      repo = tr33Config.get<string>("repo");
-    }
-    if (!repo) {
-      const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri;
-      const pathParts = workspaceUri?.path.split("/").filter(Boolean) ?? [];
-      if (pathParts.length >= 2) {
-        repo = pathParts.join("/");
-      } else if (pathParts.length === 1) {
-        repo = pathParts[0];
-      }
-    }
-    if (!initialRef) {
-      initialRef = tr33Config.get<string>("headRef");
-    }
-    const workspaceQuery = vscode.workspace.workspaceFolders?.[0]?.uri?.query;
-    const extensionParams = extensionUri.query
-      ? new URLSearchParams(extensionUri.query)
-      : null;
-    const queryConfigRef =
-      (workspaceQuery
-        ? new URLSearchParams(workspaceQuery).get("baseRef")
-        : undefined) ??
-      extensionParams?.get("baseRef") ??
-      undefined;
-    const configRef =
-      queryConfigRef ??
-      tr33Config.get<string>("baseRef") ??
-      tr33Config.get<string>("ref", "main");
-    const currentRef = initialRef ?? configRef;
-    if (!repo || !configRef || !currentRef) {
-      throw new Error(
-        "Invalid extension context: cannot resolve repo/configRef/currentRef",
-      );
-    }
-    /*
-     * GitHub owner/repo are case-insensitive; workspace folder paths are not always
-     * canonical (e.g. macOS renames that only change casing). Normalizing keeps
-     * vscode-vfs URIs aligned with the repo id used by the git API and configuration.
-     */
-    this.repo = repo.toLowerCase();
-    this.configRef = configRef;
-    this.currentRef = currentRef;
-    const base = vscode.Uri.parse(
-      `${extensionUri.scheme}://${extensionUri.authority}`,
-    );
-    this.apiUrl = vscode.Uri.joinPath(base, "api", "git").toString();
+  constructor(
+    extensionUri: vscode.Uri,
+    resolved?: Tr33ExtensionContext,
+  ) {
+    const ctx = resolved ?? resolveTr33ExtensionContext(extensionUri);
+    this.repo = ctx.repo;
+    this.configRef = ctx.configRef;
+    this.currentRef = ctx.currentRef;
+    this.apiUrl = `${ctx.apiBase}/api/git`;
     this.trees = new Trees({ gitable: this });
     logger("Tr33FileSystemProvider", {
       repo: this.repo,
-      configRef,
-      currentRef,
+      configRef: ctx.configRef,
+      currentRef: ctx.currentRef,
       apiUrl: this.apiUrl,
     });
   }
