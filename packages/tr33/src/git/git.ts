@@ -43,12 +43,15 @@ export class Git implements Gitable {
 
   async getTree(oid: string): Promise<TreeEntries | null> {
     const treeOid = String(oid);
-    const fromDb = await this.db.trees.get({ oid: treeOid });
-    if (fromDb && Object.keys(fromDb).length > 0) {
-      return fromDb;
-    }
     const fromRemote = await this.remote.fetchTree({ oid: treeOid });
-    return fromRemote && Object.keys(fromRemote).length > 0 ? fromRemote : null;
+    const fromDb = await this.db.trees.get({ oid: treeOid });
+    const remote =
+      fromRemote && Object.keys(fromRemote).length > 0 ? fromRemote : null;
+    const local = fromDb && Object.keys(fromDb).length > 0 ? fromDb : null;
+    if (remote && local) {
+      return { ...remote, ...local };
+    }
+    return remote ?? local;
   }
 
   async getBlob(oid: string): Promise<{ oid: string; content: string } | null> {
@@ -437,36 +440,29 @@ export class Git implements Gitable {
       throw new Error("No unpushed commits found");
     }
 
-    const pushTrees: {
-      oid: string;
-      entries: Record<string, { type: "blob" | "tree"; oid: string }>;
+    const commitTrees: {
+      treeOid: string;
+      parentTreeOid: string | null;
+      paths: { path: string; oid: string; type: "blob" | "tree" }[];
     }[] = [];
     const blobOids = new Set<string>();
-    const collectedTreeOids = new Set<string>();
-
-    const collectTree = async (oid: string, path: string) => {
-      if (collectedTreeOids.has(oid)) return;
-      collectedTreeOids.add(oid);
-
-      const entries = await this.trees.getTree(oid);
-      if (!entries) {
-        throw new Error(
-          `Tree ${oid} not found in local DB at "${path}" — cannot push without all trees locally`,
-        );
-      }
-      pushTrees.push({ oid, entries });
-      for (const [name, entry] of Object.entries(entries)) {
-        const childPath = path ? `${path}/${name}` : name;
-        if (entry.type === "tree") {
-          await collectTree(entry.oid, childPath);
-        } else {
-          blobOids.add(entry.oid);
-        }
-      }
-    };
 
     for (const commit of unpushedCommits) {
-      await collectTree(commit.treeOid, "");
+      const parentCommit = commit.parent
+        ? await this.db.commits.get({ oid: commit.parent })
+        : null;
+      const paths = await this.trees.diffBlobPathsForPush({
+        baseTreeOid: parentCommit?.treeOid ?? null,
+        treeOid: commit.treeOid,
+      });
+      commitTrees.push({
+        treeOid: commit.treeOid,
+        parentTreeOid: parentCommit?.treeOid ?? null,
+        paths,
+      });
+      for (const entry of paths) {
+        blobOids.add(entry.oid);
+      }
     }
 
     // Only push blobs we have locally (DB or in-memory store).
@@ -485,13 +481,11 @@ export class Git implements Gitable {
       }
     }
 
-    pushTrees.reverse();
-
     const result = await this.remote.push({
       ref,
       commits: unpushedCommits,
       blobs,
-      trees: pushTrees,
+      commitTrees,
     });
 
     await this.db.refs.setRemoteCommitOid({

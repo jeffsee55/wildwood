@@ -1,6 +1,10 @@
 import { concatU8, encodeUtf8, hexToBytes, sha1Hex } from "./crypto";
 import type { CommitNode, TreeEntries } from "./types";
 
+/** Canonical git empty tree (same as `git hash-object -t tree /dev/null`). */
+export const GIT_EMPTY_TREE_OID =
+  "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
 export async function calculateBlobOid(content: string): Promise<string> {
 	const body = encodeUtf8(content);
 	const header = encodeUtf8(`blob ${body.length}\0`);

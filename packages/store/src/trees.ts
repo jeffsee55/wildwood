@@ -1,4 +1,8 @@
-import { calculateBlobOid, calculateTreeOid } from "./git-objects";
+import {
+  calculateBlobOid,
+  calculateTreeOid,
+  GIT_EMPTY_TREE_OID,
+} from "./git-objects";
 import { tryContentMerge } from "./merge";
 import type {
 	CommitAuthor,
@@ -202,7 +206,7 @@ export class Trees {
 
   private async getEmptyTreeOid(): Promise<string> {
     if (!this.emptyTreeOid) {
-      this.emptyTreeOid = await calculateTreeOid({});
+      this.emptyTreeOid = GIT_EMPTY_TREE_OID;
       this.treeStore.set(this.emptyTreeOid, {});
     }
     return this.emptyTreeOid;
@@ -246,6 +250,24 @@ export class Trees {
       },
     });
     return entries;
+  }
+
+  /** Blob paths that differ from the parent commit tree (for GitHub `base_tree` push). */
+  async diffBlobPathsForPush(args: {
+    baseTreeOid: string | null;
+    treeOid: string;
+  }): Promise<{ path: string; oid: string; type: "blob" | "tree" }[]> {
+    const childBlobs = (await this.entriesFromTree({ oid: args.treeOid })).filter(
+      (e) => e.type === "blob",
+    );
+    if (!args.baseTreeOid) {
+      return childBlobs;
+    }
+    const parentBlobs = (
+      await this.entriesFromTree({ oid: args.baseTreeOid })
+    ).filter((e) => e.type === "blob");
+    const parentByPath = new Map(parentBlobs.map((e) => [e.path, e.oid]));
+    return childBlobs.filter((e) => parentByPath.get(e.path) !== e.oid);
   }
 
   private async buildConflictValue(args: {
@@ -591,9 +613,10 @@ export class Trees {
           chain.push({ oid: treeOid, name });
           treeOid = child.oid;
         } else {
-          const emptyTree: TreeEntries = {};
-          const emptyOid = await calculateTreeOid(emptyTree);
-          this.treeStore.set(emptyOid, emptyTree);
+          const emptyOid = GIT_EMPTY_TREE_OID;
+          if (!this.treeStore.has(emptyOid)) {
+            this.treeStore.set(emptyOid, {});
+          }
           newOids.push(emptyOid);
           chain.push({ oid: treeOid, name });
           treeOid = emptyOid;

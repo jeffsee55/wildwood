@@ -91,9 +91,10 @@ export abstract class Remote {
     /** Commits ordered oldest-first (parents before children). */
     commits: Commit[];
     blobs: { oid: string; content: string }[];
-    trees: {
-      oid: string;
-      entries: Record<string, { type: "blob" | "tree"; oid: string }>;
+    commitTrees: {
+      treeOid: string;
+      parentTreeOid: string | null;
+      paths: { path: string; oid: string; type: "blob" | "tree" }[];
     }[];
   }): Promise<PushResult>;
 

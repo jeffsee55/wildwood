@@ -367,13 +367,14 @@ export class GitHubRemote extends Remote {
     ref: string;
     commits: Commit[];
     blobs: { oid: string; content: string }[];
-    trees: {
-      oid: string;
-      entries: Record<string, { type: "blob" | "tree"; oid: string }>;
+    commitTrees: {
+      treeOid: string;
+      parentTreeOid: string | null;
+      paths: { path: string; oid: string; type: "blob" | "tree" }[];
     }[];
   }): Promise<PushResult> {
     const { octokit } = await this.getGitHubClient();
-    const { ref, commits, blobs, trees } = args;
+    const { ref, commits, blobs, commitTrees } = args;
 
     // 1. Create blobs
     const blobOidMap = new Map<string, string>();
@@ -392,36 +393,35 @@ export class GitHubRemote extends Remote {
       blobOidMap.set(blob.oid, response.data.sha);
     }
 
-    // 2. Create trees (leaf-first so children exist before parents reference them)
+    // 2. Build each commit tree on GitHub via base_tree + flat paths (avoids local tree OID drift).
     const treeOidMap = new Map<string, string>();
-    for (const tree of trees) {
-      const treeItems = Object.entries(tree.entries).map(([name, entry]) => ({
-        path: name,
-        mode: entry.type === "tree" ? ("040000" as const) : ("100644" as const),
-        type: entry.type as "blob" | "tree",
-        sha:
-          treeOidMap.get(entry.oid) ?? blobOidMap.get(entry.oid) ?? entry.oid,
+    const commitTreeByOid = new Map(
+      commitTrees.map((spec) => [spec.treeOid, spec]),
+    );
+
+    for (const commit of commits) {
+      const spec = commitTreeByOid.get(commit.treeOid);
+      if (!spec) {
+        throw new Error(`Missing commit tree spec for ${commit.treeOid}`);
+      }
+      const baseTree =
+        spec.parentTreeOid != null
+          ? (treeOidMap.get(spec.parentTreeOid) ?? spec.parentTreeOid)
+          : undefined;
+      const treeItems = spec.paths.map((entry) => ({
+        path: entry.path,
+        mode: "100644" as const,
+        type: "blob" as const,
+        sha: blobOidMap.get(entry.oid) ?? entry.oid,
       }));
 
       const response = await octokit.git.createTree({
         owner: this.owner,
         repo: this.repo,
+        ...(baseTree ? { base_tree: baseTree } : {}),
         tree: treeItems,
       });
-      if (response.data.sha !== tree.oid) {
-        const localEntries = treeItems
-          .map((e) => `    ${e.mode} ${e.type} ${e.sha}\t${e.path}`)
-          .join("\n");
-        const ghEntries = (response.data.tree ?? [])
-          .map((e) => `    ${e.mode} ${e.type} ${e.sha}\t${e.path}`)
-          .join("\n");
-        throw new Error(
-          `Tree OID mismatch: expected ${tree.oid}, GitHub returned ${response.data.sha}\n` +
-            `  local entries:\n${localEntries}\n` +
-            `  github entries:\n${ghEntries}`,
-        );
-      }
-      treeOidMap.set(tree.oid, response.data.sha);
+      treeOidMap.set(commit.treeOid, response.data.sha);
     }
 
     // 3. Create commits (oldest-first, mapping parent OIDs to GitHub's)
