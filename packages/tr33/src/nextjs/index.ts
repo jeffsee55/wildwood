@@ -218,7 +218,7 @@ export const createHandler = (
       folderUri: {
         scheme: "tr33-vfs",
         authority: event.url.host,
-        path: `/${repoFull}/`,
+        path: "/",
       },
       additionalBuiltinExtensions: builtinExtensions,
       configurationDefaults: {
@@ -263,6 +263,51 @@ export const createHandler = (
       console.error("Failed to list branches:", error);
       return new Response(
         `Failed to list branches: ${error instanceof Error ? error.message : String(error)}`,
+        { status: 500 },
+      );
+    }
+  });
+
+  const warmEditorBootstrap = async (refName: string) => {
+    await client._.db.init();
+    const resolved = await git.resolveWorktreeForApi({ ref: refName });
+    const treeOid = resolved.rootTreeOid ?? resolved.commit.treeOid;
+    const tree = await git.getTree(treeOid);
+    const entryCount = tree ? Object.keys(tree).length : 0;
+    if (entryCount === 0) {
+      throw new Error(`Tree ${treeOid.slice(0, 7)} has no entries`);
+    }
+    return {
+      ready: true as const,
+      ref: refName,
+      commitTreeOid: resolved.commit.treeOid,
+      treeOid,
+      entryCount,
+    };
+  };
+
+  gitService.get("/editor-bootstrap", async (event) => {
+    const refName = event.url.searchParams.get("ref")?.trim();
+    if (!refName) {
+      return new Response("ref query parameter required", { status: 400 });
+    }
+    try {
+      const authError = await authorizeGitAction(event.req, {
+        type: "git.switchRef",
+        ref: refName,
+      });
+      if (authError) return authError;
+      tr33GitApiLog("GET /editor-bootstrap", { ref: refName, org, repo });
+      const payload = await warmEditorBootstrap(refName);
+      tr33GitApiLog("GET /editor-bootstrap — ok", {
+        ref: refName,
+        entryCount: payload.entryCount,
+      });
+      return Response.json(payload);
+    } catch (error) {
+      console.error("Failed to warm editor bootstrap:", error);
+      return new Response(
+        `Failed to warm editor: ${error instanceof Error ? error.message : String(error)}`,
         { status: 500 },
       );
     }
@@ -982,6 +1027,14 @@ export const createHandler = (
       setNoStoreHeaders(event);
       setResponseHeader(event, "Content-Security-Policy", VSCODE_EMBED_DOCUMENT_CSP);
       const workbenchConfig = await getWorkbenchConfig(event);
+      const headRef = workbenchConfig.configurationDefaults?.["tr33.headRef"];
+      if (typeof headRef === "string" && headRef.trim()) {
+        try {
+          await warmEditorBootstrap(headRef.trim());
+        } catch (error) {
+          console.error("[tr33:vscode] editor warm failed:", error);
+        }
+      }
       const vscodeWebCdn = await resolveVscodeWebCdn();
       const code = getCode({
         origin: event.url.origin,

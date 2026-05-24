@@ -58,6 +58,37 @@ export const getCode = (config: {
     const config = JSON.parse(
       document.getElementById("vscode-workbench-web-configuration").getAttribute("data-settings"),
     );
+    async function tr33WarmWorkspace() {
+      const defaults = config.configurationDefaults ?? {};
+      const ref = defaults["tr33.headRef"] ?? defaults["tr33.ref"] ?? "main";
+      const wtRes = await fetch(
+        new URL("/api/git/worktrees/" + encodeURIComponent(ref), window.location.origin),
+        { credentials: "include" },
+      );
+      if (!wtRes.ok) {
+        throw new Error("worktree warm failed: " + wtRes.status);
+      }
+      const wt = await wtRes.json();
+      const treeOid = wt.rootTreeOid ?? wt.commit.treeOid;
+      const treeRes = await fetch(
+        new URL("/api/git/tree/" + encodeURIComponent(treeOid), window.location.origin),
+        { credentials: "include" },
+      );
+      if (!treeRes.ok) {
+        throw new Error("tree warm failed: " + treeRes.status);
+      }
+      const tree = await treeRes.json();
+      const entryCount = Object.keys(tree).length;
+      if (entryCount === 0) {
+        throw new Error("tree warm returned no entries");
+      }
+      console.log("[tr33] workspace warm ok", { ref, entryCount });
+    }
+    try {
+      await tr33WarmWorkspace();
+    } catch (e) {
+      console.warn("[tr33] workspace warm failed (continuing)", e);
+    }
     const workspace = config.folderUri ? { folderUri: config.folderUri } : undefined;
     await create(document.body, {
       ...config,

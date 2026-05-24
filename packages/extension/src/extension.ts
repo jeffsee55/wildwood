@@ -100,9 +100,14 @@ export async function activate(context: vscode.ExtensionContext) {
           isReadonly: false,
         }),
       );
+      await tr33FS.bindWorkspaceFolder();
+      await tr33FS.probeWorkspaceListing();
       tr33FS.refreshExplorer();
       queueMicrotask(() => tr33FS.refreshExplorer());
       setTimeout(() => tr33FS.refreshExplorer(), 250);
+      void vscode.commands.executeCommand(
+        "workbench.files.action.refreshFilesExplorer",
+      );
     } catch (error) {
       const detail =
         error instanceof Error ? error.message : String(error);

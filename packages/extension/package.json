@@ -1,7 +1,7 @@
 {
   "name": "tr33-vscode",
   "description": "Tr33 for VS Code",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "jsee",
   "license": "MIT",
   "enabledApiProposals": [

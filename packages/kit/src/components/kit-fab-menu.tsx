@@ -148,56 +148,92 @@ export function KitFabMenu({
   const installCheckRef = React.useRef(0);
   const base = normalizeApiBase(apiBase);
 
-  const recheckGitHubInstallation = React.useCallback(async () => {
-    const checkId = ++installCheckRef.current;
-    setEditorBootstrap("checking");
-    setIframeReady(false);
-    setEditorIframeLoaded(false);
-    setInstallPrompt(null);
-    try {
-      const res = await fetch(`${base}/github/installation`, {
-        credentials: "include",
-      });
-      if (installCheckRef.current !== checkId) {
-        return;
-      }
+  const warmEditorWorktree = React.useCallback(
+    async (ref: string) => {
+      const res = await fetch(
+        `${base}/git/editor-bootstrap?ref=${encodeURIComponent(ref)}`,
+        { credentials: "include" },
+      );
       if (!res.ok) {
-        setEditorBootstrap("ready");
-        requestIdleCallback(() => {
-          if (installCheckRef.current === checkId) {
-            setIframeReady(true);
-          }
-        }, { timeout: 2000 });
-        return;
+        const body = await res.text().catch(() => "");
+        throw new Error(
+          body.trim() || `Failed to prepare workspace (${res.status})`,
+        );
       }
-      const data = (await res.json()) as GitHubInstallationResponse;
-      if (data.status === "not_installed") {
-        setInstallPrompt({
-          installUrl: data.installUrl,
-          repo: data.repo,
-          hint: data.hint,
+      const data = (await res.json()) as { ready?: boolean; entryCount?: number };
+      if (!data.ready) {
+        throw new Error("Repository tree is not ready yet");
+      }
+    },
+    [base],
+  );
+
+  const finishEditorBootstrap = React.useCallback((checkId: number) => {
+    setEditorBootstrap("ready");
+    requestIdleCallback(() => {
+      if (installCheckRef.current === checkId) {
+        setIframeReady(true);
+      }
+    }, { timeout: 2000 });
+  }, []);
+
+  const recheckGitHubInstallation = React.useCallback(
+    async (ref: string) => {
+      const checkId = ++installCheckRef.current;
+      setEditorBootstrap("checking");
+      setIframeReady(false);
+      setEditorIframeLoaded(false);
+      setInstallPrompt(null);
+      try {
+        const res = await fetch(`${base}/github/installation`, {
+          credentials: "include",
         });
-        setEditorBootstrap("blocked");
-        return;
-      }
-      setEditorBootstrap("ready");
-      requestIdleCallback(() => {
-        if (installCheckRef.current === checkId) {
-          setIframeReady(true);
+        if (installCheckRef.current !== checkId) {
+          return;
         }
-      }, { timeout: 2000 });
-    } catch {
-      if (installCheckRef.current !== checkId) {
-        return;
-      }
-      setEditorBootstrap("ready");
-      requestIdleCallback(() => {
-        if (installCheckRef.current === checkId) {
-          setIframeReady(true);
+        if (!res.ok) {
+          await warmEditorWorktree(ref);
+          if (installCheckRef.current !== checkId) {
+            return;
+          }
+          finishEditorBootstrap(checkId);
+          return;
         }
-      }, { timeout: 2000 });
-    }
-  }, [base]);
+        const data = (await res.json()) as GitHubInstallationResponse;
+        if (data.status === "not_installed") {
+          setInstallPrompt({
+            installUrl: data.installUrl,
+            repo: data.repo,
+            hint: data.hint,
+          });
+          setEditorBootstrap("blocked");
+          return;
+        }
+        await warmEditorWorktree(ref);
+        if (installCheckRef.current !== checkId) {
+          return;
+        }
+        finishEditorBootstrap(checkId);
+      } catch (error) {
+        if (installCheckRef.current !== checkId) {
+          return;
+        }
+        setGitError(
+          error instanceof Error
+            ? error.message
+            : "Failed to prepare the editor workspace",
+        );
+        setEditorBootstrap("idle");
+        setIframeReady(false);
+      }
+    },
+    [base, finishEditorBootstrap, warmEditorWorktree],
+  );
+
+  /** Cookie + server props can lag behind a successful switch; keep UI + editor URL in sync immediately. */
+  const [optimisticRef, setOptimisticRef] = React.useState<string | null>(null);
+  const iframeRef = React.useRef<HTMLIFrameElement>(null);
+  const displayRef = optimisticRef ?? activeRef ?? configRef;
 
   React.useEffect(() => {
     if (!editorOpen) {
@@ -207,12 +243,8 @@ export function KitFabMenu({
       setInstallPrompt(null);
       return;
     }
-    void recheckGitHubInstallation();
-  }, [editorOpen, recheckGitHubInstallation]);
-  /** Cookie + server props can lag behind a successful switch; keep UI + editor URL in sync immediately. */
-  const [optimisticRef, setOptimisticRef] = React.useState<string | null>(null);
-  const iframeRef = React.useRef<HTMLIFrameElement>(null);
-  const displayRef = optimisticRef ?? activeRef ?? configRef;
+    void recheckGitHubInstallation(displayRef);
+  }, [displayRef, editorOpen, recheckGitHubInstallation]);
 
   React.useEffect(() => {
     if (optimisticRef == null) return;
@@ -821,7 +853,7 @@ export function KitFabMenu({
                           type="button"
                           size="sm"
                           variant="secondary"
-                          onClick={() => void recheckGitHubInstallation()}
+                          onClick={() => void recheckGitHubInstallation(displayRef)}
                         >
                           I&apos;ve installed it
                         </Button>
@@ -847,7 +879,7 @@ export function KitFabMenu({
                         <p className="text-sm font-medium">Loading editor</p>
                         <p className="text-xs text-muted-foreground">
                           {editorBootstrap === "checking"
-                            ? "Checking GitHub App access…"
+                            ? "Preparing repository files and checking GitHub App access…"
                             : (
                               <>
                                 Fetching the VS Code workbench for{" "}

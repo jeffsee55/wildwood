@@ -168,7 +168,7 @@ export class Tr33FileSystemProvider
 
   getRootUri(): vscode.Uri {
     const host = new URL(this.apiBase).host;
-    return vscode.Uri.parse(`${SCHEME}://${host}/${this.repo}/`);
+    return vscode.Uri.parse(`${SCHEME}://${host}/`);
   }
 
   /** Load worktree + root tree before the workbench lists the workspace folder. */
@@ -182,6 +182,53 @@ export class Tr33FileSystemProvider
       rootOid: rootOid.slice(0, 7),
       entryCount: tree ? Object.keys(tree).length : 0,
     });
+  }
+
+  /** Align the workbench folder with the provider root (`tr33-vfs://host/`). */
+  async bindWorkspaceFolder(): Promise<void> {
+    const root = this.getRootUri();
+    const name = this.repo.split("/").pop() ?? this.repo;
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders?.length) {
+      const ok = await vscode.workspace.updateWorkspaceFolders(0, 0, {
+        uri: root,
+        name,
+      });
+      logger("bindWorkspaceFolder: added", { ok, uri: root.toString() });
+      return;
+    }
+    const first = folders[0].uri;
+    if (first.toString() !== root.toString()) {
+      const ok = await vscode.workspace.updateWorkspaceFolders(0, 1, {
+        uri: root,
+        name,
+      });
+      logger("bindWorkspaceFolder: replaced", {
+        ok,
+        from: first.toString(),
+        to: root.toString(),
+      });
+      return;
+    }
+    logger("bindWorkspaceFolder: already bound", root.toString());
+  }
+
+  async probeWorkspaceListing(): Promise<void> {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (!folder) {
+      logger("probe: no workspace folder");
+      return;
+    }
+    try {
+      const entries = await vscode.workspace.fs.readDirectory(folder.uri);
+      logger("probe readDirectory", {
+        uri: folder.uri.toString(),
+        entryCount: entries.length,
+        sample: entries.slice(0, 6).map(([name]) => name),
+      });
+    } catch (e) {
+      logger("probe readDirectory failed", folder.uri.toString(), e);
+    }
   }
 
   /** Re-list explorer after `registerFileSystemProvider` (early events are ignored). */
@@ -258,10 +305,6 @@ export class Tr33FileSystemProvider
       eventsMap.set(key, { type, uri });
     };
     markEvent(rootUri, vscode.FileChangeType.Changed);
-    markEvent(
-      vscode.Uri.parse(`${SCHEME}:/${this.repo}`),
-      vscode.FileChangeType.Changed,
-    );
 
     if (
       previousRootTreeOid &&
@@ -291,9 +334,8 @@ export class Tr33FileSystemProvider
       }
     }
 
-    const prefix = `/${this.repo}`;
     for (const doc of vscode.workspace.textDocuments) {
-      if (doc.uri.scheme === SCHEME && doc.uri.path.startsWith(prefix)) {
+      if (doc.uri.scheme === SCHEME) {
         markEvent(doc.uri, vscode.FileChangeType.Changed);
       }
     }
