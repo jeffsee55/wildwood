@@ -287,33 +287,26 @@ export const createHandler = (
         ref: refName,
       });
       if (authError) return authError;
-      await client._.git.switch({ ref: refName });
-      const worktree = await git.db.refs.get({ ref: refName });
-      if (!worktree) {
-        await client._.db.init();
-        const commit = await remote.fetchCommit({ ref: refName });
-        tr33GitApiLog("GET /worktrees — no local worktree row, using remote commit", {
-          ref: refName,
-          treeOid: commit.treeOid.slice(0, 7),
-        });
-        return Response.json({
-          commit: { oid: commit.oid, treeOid: commit.treeOid },
-          rootTreeOid: null,
-        });
+
+      const syncHost =
+        event.req.headers.get(TR33_SYNC_HOST_ACTIVE_REF_HEADER)?.trim() ===
+        "1";
+
+      if (syncHost) {
+        await client._.git.switch({ ref: refName });
       }
-      tr33GitApiLog("GET /worktrees — ok", {
-        ref: refName,
-        commitTree: worktree.commit.treeOid.slice(0, 7),
-        hasRootTree: Boolean(worktree.rootTree?.oid),
-      });
-      return Response.json({
-        commit: { oid: worktree.commit.oid, treeOid: worktree.commit.treeOid },
-        rootTreeOid:
-          worktree.rootTree?.oid &&
-          worktree.rootTree.oid !== worktree.commit.treeOid
-            ? worktree.rootTree.oid
-            : null,
-      });
+
+      await client._.db.init();
+      const resolved = await git.resolveWorktreeForApi({ ref: refName });
+      tr33GitApiLog(
+        syncHost ? "GET /worktrees — ok (indexed)" : "GET /worktrees — ok (read)",
+        {
+          ref: refName,
+          commitTree: resolved.commit.treeOid.slice(0, 7),
+          hasRootTree: Boolean(resolved.rootTreeOid),
+        },
+      );
+      return Response.json(resolved);
     } catch (error) {
       console.error("Failed to fetch worktree:", error);
       return new Response(
@@ -1140,14 +1133,18 @@ export const createHandler = (
   base.use(async (event, next) => {
     const pathname = event.url.pathname;
     const isVscodeApi = pathname.startsWith("/api/vscode/");
+    const requestOrigin = event.req.headers.get("origin");
     const corsHeaders = isVscodeApi
       ? vscodeEmbedCorsHeaders(event.req)
       : {
-          "Access-Control-Allow-Origin":
-            event.req.headers.get("origin") ?? "*",
+          "Access-Control-Allow-Origin": requestOrigin ?? "*",
+          ...(requestOrigin
+            ? { "Access-Control-Allow-Credentials": "true" }
+            : {}),
           "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS, POST",
           "Access-Control-Allow-Headers": "*",
           "Access-Control-Allow-Private-Network": "true",
+          Vary: "Origin",
         };
     if (event.req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders });

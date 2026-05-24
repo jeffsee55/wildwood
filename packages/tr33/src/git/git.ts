@@ -96,6 +96,39 @@ export class Git implements Gitable {
     await this.switch({ ref: name });
   }
 
+  /**
+   * Read-only worktree metadata for the VFS / `GET /worktrees/:ref`.
+   * Does not run `writeEntries` (full-repo indexing); use `switch()` when mutating.
+   */
+  async resolveWorktreeForApi(args: { ref: string }): Promise<{
+    commit: { oid: string; treeOid: string };
+    rootTreeOid: string | null;
+  }> {
+    let worktree = await this.db.refs.get({ ref: args.ref });
+
+    if (!worktree?.commit) {
+      const commit = await this.remote.fetchCommit({ ref: args.ref });
+      await this.db.commits.put(commit);
+      await this.db.commits.markPushed({ oid: commit.oid });
+      await this.db.refs.updateRemoteCommit({ ref: args.ref, commit });
+      worktree = await this.db.refs.get({ ref: args.ref });
+    }
+
+    if (!worktree?.commit) {
+      throw new Error(`Commit not found for ref ${args.ref}`);
+    }
+
+    const { commit } = worktree;
+    return {
+      commit: { oid: commit.oid, treeOid: commit.treeOid },
+      rootTreeOid:
+        worktree.rootTree?.oid &&
+        worktree.rootTree.oid !== commit.treeOid
+          ? worktree.rootTree.oid
+          : null,
+    };
+  }
+
   async switch(args: { ref: string }) {
     const worktree = await this.db.refs.get({
       ref: args.ref,
