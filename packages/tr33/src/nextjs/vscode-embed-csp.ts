@@ -95,6 +95,7 @@ export function gitObjectCacheHeaders(oid: string): Record<string, string> {
 /** Cacheable workbench shell — ref comes from same-origin `localStorage`, not this HTML. */
 export function vscodeEmbedEditorCacheHeaders(commit: string): Record<string, string> {
   return {
+    "content-type": "text/html; charset=utf-8",
     ...vscodeWebStaticCacheHeaders(commit),
     "content-security-policy": VSCODE_EMBED_DOCUMENT_CSP,
   };
