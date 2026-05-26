@@ -1,5 +1,5 @@
 ---
-title: Tr33
+title: Tr33!!!
 author: ../authors/jeff.md
 description: An introduction to Tr33, a Git-based content management system with a type-safe API for managing and querying Markdown and JSON content.
 ---
