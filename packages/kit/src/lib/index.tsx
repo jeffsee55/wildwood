@@ -34,6 +34,10 @@ export type KitProps = {
    */
   configRef?: string;
   /**
+   * Pinned VS Code web commit from the server (see {@link Tr33Kit}).
+   */
+  vscodeCommit?: string;
+  /**
    * Active ref from the `tr33-active-ref` cookie (read on the server). Omitted in client-only hosts.
    */
   activeRef?: string | null;
@@ -43,6 +47,7 @@ export type KitProps = {
 export const Kit = ({
   theme = "system",
   apiBase = "/api",
+  vscodeCommit,
   configRef = "main",
   activeRef = null,
   auth,
@@ -52,6 +57,7 @@ export const Kit = ({
       <ThemeProvider theme={theme}>
         <KitFabMenu
           apiBase={apiBase}
+          vscodeCommit={vscodeCommit}
           configRef={configRef}
           activeRef={activeRef}
           auth={auth}

@@ -88,6 +88,8 @@ function normalizeApiBase(base: string): string {
 
 type KitFabMenuProps = {
   apiBase?: string;
+  /** Pinned VS Code web commit — iframe loads `/vscode/editor/{commit}` directly. */
+  vscodeCommit?: string;
   /** Default ref when cookie is absent */
   configRef?: string;
   /** Active ref from cookie (server) */
@@ -122,8 +124,32 @@ type EditorBootstrapResponse = {
   vscodeCommit?: string;
 };
 
+type EditorGuardResponse = EditorBootstrapResponse;
+
+function editorIframeSrc(
+  origin: string,
+  base: string,
+  commit: string,
+): string {
+  return `${origin}${base}/vscode/editor/${commit}`;
+}
+
+function apiOrigin(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return window.location.origin;
+}
+
+function apiUrl(base: string, path: string): string {
+  const origin = apiOrigin();
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${origin}${base}${normalizedPath}`;
+}
+
 export function KitFabMenu({
   apiBase = "/api",
+  vscodeCommit,
   configRef = "main",
   activeRef = null,
   auth,
@@ -157,13 +183,16 @@ export function KitFabMenu({
   const [openState, setOpenState] = React.useState<EditorOpenState>({
     kind: "idle",
   });
+  const [editorGuard, setEditorGuard] = React.useState<EditorOpenState | null>(
+    null,
+  );
   const [editorIframeLoaded, setEditorIframeLoaded] = React.useState(false);
   const editorOpenRunRef = React.useRef(0);
   const iframeSrcRef = React.useRef<string | null>(null);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const base = normalizeApiBase(apiBase);
   const displayRef = activeRef ?? configRef;
-  const gitOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  const gitOrigin = apiOrigin();
 
   React.useEffect(() => {
     persistActiveRefToStorage(displayRef);
@@ -173,7 +202,7 @@ export function KitFabMenu({
     async (ref: string) => {
       const current = activeRef ?? configRef;
       if (ref === current) return;
-      const res = await fetch(`${base}/git/switch-branch`, {
+      const res = await fetch(apiUrl(base, "/git/switch-branch"), {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -191,15 +220,12 @@ export function KitFabMenu({
 
   const createDraftBranchRef = React.useCallback(async (): Promise<string> => {
     const name = generateBranchName();
-    const res = await fetch(
-      `${window.location.origin}${base}/git/create-branch`,
-      {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, baseRef: configRef }),
-      },
-    );
+    const res = await fetch(apiUrl(base, "/git/create-branch"), {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, baseRef: configRef }),
+    });
     if (!res.ok) {
       throw new Error(
         `Could not create draft branch: ${res.status} ${await res.text()}`,
@@ -217,6 +243,7 @@ export function KitFabMenu({
   runEditorOpenSequenceRef.current = async (refForOpen: string) => {
     const runId = ++editorOpenRunRef.current;
     setOpenState({ kind: "checking" });
+    setEditorGuard(null);
     setEditorIframeLoaded(false);
     try {
       let activeRef = refForOpen;
@@ -228,49 +255,97 @@ export function KitFabMenu({
         scheduleRefresh();
       }
 
-      // Mount VS Code immediately — bootstrap guards run in parallel below.
-      iframeSrcRef.current = `${window.location.origin}${base}/vscode/editor`;
-      setOpenState({ kind: "ready" });
-
-      const res = await fetch(`${base}/git/editor-bootstrap`, {
+      const guardsRes = await fetch(apiUrl(base, "/git/editor-guards"), {
         credentials: "include",
       });
       if (runId !== editorOpenRunRef.current) return;
-
-      const data = (await res.json()) as EditorBootstrapResponse;
-      if (!res.ok || data.status === "error") {
-        iframeSrcRef.current = null;
+      const guards = (await guardsRes.json()) as EditorGuardResponse;
+      if (!guardsRes.ok || guards.status === "error") {
         setOpenState({
           kind: "error",
           message:
-            data.message?.trim() ||
-            `Failed to prepare the editor (${res.status})`,
+            guards.message?.trim() ||
+            `Failed to prepare the editor (${guardsRes.status})`,
         });
         return;
       }
-      if (data.status === "not_configured") {
-        iframeSrcRef.current = null;
+      if (guards.status === "not_configured") {
         setOpenState({
           kind: "needs-setup",
-          repo: data.repo ?? refForOpen,
+          repo: guards.repo ?? refForOpen,
           message:
-            data.message?.trim() ||
+            guards.message?.trim() ||
             "GitHub App credentials are not configured on this deployment.",
         });
         return;
       }
-      if (data.status === "not_installed") {
-        iframeSrcRef.current = null;
+      if (guards.status === "not_installed") {
         setOpenState({
           kind: "needs-install",
-          repo: data.repo ?? refForOpen,
-          installUrl: data.installUrl,
+          repo: guards.repo ?? refForOpen,
+          installUrl: guards.installUrl,
           hint:
-            data.hint?.trim() ||
+            guards.hint?.trim() ||
             "Install the GitHub App on this repository to edit files.",
         });
         return;
       }
+
+      const commit = guards.vscodeCommit ?? vscodeCommit;
+      if (!commit) {
+        setOpenState({
+          kind: "error",
+          message: "VS Code web commit is not configured on this deployment.",
+        });
+        return;
+      }
+      if (!gitOrigin) {
+        setOpenState({
+          kind: "error",
+          message: "Editor cannot load outside the browser.",
+        });
+        return;
+      }
+
+      iframeSrcRef.current = editorIframeSrc(gitOrigin, base, commit);
+      setOpenState({ kind: "ready" });
+
+      void (async () => {
+        const res = await fetch(apiUrl(base, "/git/editor-bootstrap"), {
+          credentials: "include",
+        });
+        if (runId !== editorOpenRunRef.current) return;
+        const data = (await res.json()) as EditorBootstrapResponse;
+        if (!res.ok || data.status === "error") {
+          setEditorGuard({
+            kind: "error",
+            message:
+              data.message?.trim() ||
+              `Failed to verify the indexed repository (${res.status})`,
+          });
+          return;
+        }
+        if (data.status !== "ready") {
+          setEditorGuard(
+            data.status === "not_configured"
+              ? {
+                  kind: "needs-setup",
+                  repo: data.repo ?? refForOpen,
+                  message:
+                    data.message?.trim() ||
+                    "GitHub App credentials are not configured on this deployment.",
+                }
+              : {
+                  kind: "needs-install",
+                  repo: data.repo ?? refForOpen,
+                  installUrl: data.installUrl,
+                  hint:
+                    data.hint?.trim() ||
+                    "Install the GitHub App on this repository to edit files.",
+                },
+          );
+        }
+      })();
     } catch (error) {
       if (runId !== editorOpenRunRef.current) return;
       setOpenState({
@@ -292,6 +367,7 @@ export function KitFabMenu({
     if (!editorOpen) {
       editorOpenRunRef.current += 1;
       iframeSrcRef.current = null;
+      setEditorGuard(null);
       setOpenState({ kind: "idle" });
       setEditorIframeLoaded(false);
       return;
@@ -367,7 +443,7 @@ export function KitFabMenu({
     setBranchesLoading(true);
     setBranchesError(null);
     try {
-      const res = await fetch(`${gitOrigin}${base}/git/branches`, {
+      const res = await fetch(apiUrl(base, "/git/branches"), {
         credentials: "include",
       });
       if (!res.ok) {
@@ -465,6 +541,14 @@ export function KitFabMenu({
   }, [gitError]);
 
   const offDefaultRef = displayRef !== configRef;
+
+  const editorBlockingState: EditorOpenState | null =
+    openState.kind === "checking" ||
+    openState.kind === "needs-setup" ||
+    openState.kind === "needs-install" ||
+    openState.kind === "error"
+      ? openState
+      : editorGuard;
 
   React.useEffect(() => {
     setBranchCreateBase(configRef);
@@ -811,26 +895,26 @@ export function KitFabMenu({
                 src={iframeSrcRef.current}
               />
             ) : null}
-            {editorOpen && openState.kind !== "ready" ? (
+            {editorOpen && editorBlockingState ? (
               <div
                 className={cn(
                   "absolute inset-0 flex items-center justify-center bg-background text-foreground",
-                  openState.kind === "needs-install" ||
-                    openState.kind === "needs-setup" ||
-                    openState.kind === "error"
+                  editorBlockingState.kind === "needs-install" ||
+                    editorBlockingState.kind === "needs-setup" ||
+                    editorBlockingState.kind === "error"
                     ? "pointer-events-auto"
                     : "pointer-events-none",
                 )}
               >
                 <div className="flex w-[min(90vw,28rem)] flex-col items-center gap-4 rounded-xl border border-border bg-card/80 p-6 text-center shadow-lg backdrop-blur">
-                  {openState.kind === "needs-setup" ? (
+                  {editorBlockingState.kind === "needs-setup" ? (
                     <>
                       <div className="space-y-2">
                         <p className="text-sm font-medium">
                           GitHub App not configured
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {openState.message}
+                          {editorBlockingState.message}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           Set{" "}
@@ -851,29 +935,29 @@ export function KitFabMenu({
                         Close
                       </Button>
                     </>
-                  ) : openState.kind === "needs-install" ? (
+                  ) : editorBlockingState.kind === "needs-install" ? (
                     <>
                       <div className="space-y-2">
                         <p className="text-sm font-medium">
                           Install the GitHub App
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {openState.hint}
+                          {editorBlockingState.hint}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           On GitHub, choose{" "}
                           <strong>Only select repositories</strong> and pick{" "}
-                          <span className="font-mono">{openState.repo}</span>.
+                          <span className="font-mono">{editorBlockingState.repo}</span>.
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center justify-center gap-2">
-                        {openState.installUrl ? (
+                        {editorBlockingState.installUrl ? (
                           <Button
                             type="button"
                             size="sm"
                             onClick={() => {
                               window.open(
-                                openState.installUrl,
+                                editorBlockingState.installUrl,
                                 "_blank",
                                 "noopener,noreferrer",
                               );
@@ -891,7 +975,7 @@ export function KitFabMenu({
                           I&apos;ve installed it
                         </Button>
                       </div>
-                      {!openState.installUrl ? (
+                      {!editorBlockingState.installUrl ? (
                         <p className="text-xs text-muted-foreground">
                           Set{" "}
                           <code className="font-mono">GITHUB_APP_SLUG</code> on
@@ -900,14 +984,14 @@ export function KitFabMenu({
                         </p>
                       ) : null}
                     </>
-                  ) : openState.kind === "error" ? (
+                  ) : editorBlockingState.kind === "error" ? (
                     <>
                       <div className="space-y-2">
                         <p className="text-sm font-medium">
                           Could not open editor
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {openState.message}
+                          {editorBlockingState.message}
                         </p>
                       </div>
                       <div className="flex gap-2">
@@ -915,7 +999,10 @@ export function KitFabMenu({
                           type="button"
                           size="sm"
                           variant="secondary"
-                          onClick={() => void retryEditorOpen()}
+                          onClick={() => {
+                            setEditorGuard(null);
+                            void retryEditorOpen();
+                          }}
                         >
                           Retry
                         </Button>

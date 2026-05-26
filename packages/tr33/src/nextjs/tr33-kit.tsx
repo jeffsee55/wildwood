@@ -3,6 +3,7 @@ import { Kit } from "@tr33/kit";
 import { cookies } from "next/headers";
 import { type ReactNode, Suspense } from "react";
 import { resolveActiveRef, type Tr33ForActiveRef } from "./resolve-active-ref";
+import { resolveVscodeWebCdn } from "./vscode-web-cdn";
 
 /** Same as {@link Tr33ForActiveRef}. */
 export type Tr33KitHostClient = Tr33ForActiveRef;
@@ -24,11 +25,13 @@ export async function Tr33Kit({ tr33, apiBase, theme, auth }: Tr33KitProps) {
     tr33,
     cookies: cookieStore,
   });
+  const vscodeCommit = (await resolveVscodeWebCdn()).commit;
   return (
     <Kit
       apiBase={apiBase}
       configRef={tr33._.config.ref}
       activeRef={activeRef}
+      vscodeCommit={vscodeCommit}
       theme={theme}
       auth={auth}
     />

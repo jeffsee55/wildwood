@@ -2,7 +2,7 @@
 
 import extensionPkg from "tr33-vscode/package.json" with { type: "json" };
 import extensionNls from "tr33-vscode/package.nls.json" with { type: "json" };
-import { H3, html, serveStatic } from "h3";
+import { H3 } from "h3";
 import { z } from "zod/v4";
 import {
   type Tr33AuthAction,
@@ -56,15 +56,27 @@ const setNoStoreHeaders = (event: {
   event.node?.res?.setHeader("expires", "0");
 };
 
-const setCacheHeaders = (
-  event: {
-    node?: { res?: { setHeader: (k: string, v: string) => void } };
-  },
-  headers: Record<string, string>,
-) => {
-  for (const [key, value] of Object.entries(headers)) {
-    event.node?.res?.setHeader(key, value);
+/** Request origin for absolute URLs (FastURL may lack origin behind proxies). */
+const resolveEventOrigin = (event: {
+  url: URL;
+  req: { headers: { get: (name: string) => string | null } };
+}): string => {
+  const { origin } = event.url;
+  if (origin && origin !== "null") {
+    return origin;
   }
+  const host =
+    event.req.headers.get("x-forwarded-host") ??
+    event.req.headers.get("host");
+  if (!host) {
+    return "http://localhost";
+  }
+  const proto =
+    event.req.headers.get("x-forwarded-proto") ??
+    (host.startsWith("localhost") || host.startsWith("127.0.0.1")
+      ? "http"
+      : "https");
+  return `${proto}://${host}`;
 };
 
 /** Stable mount prefix (`/api/vscode`), regardless of `/editor` or `/editor/:commit`. */
@@ -164,9 +176,10 @@ export const createHandler = (
     url: URL;
     req: { headers: { get: (name: string) => string | null } };
   }) => {
+    const origin = resolveEventOrigin(event);
     const dir = resolveVscodeApiPrefix(event.url.pathname);
     const cdn = await resolveVscodeWebCdn();
-    const webEndpointBase = `${event.url.origin}${dir}/cdn/${cdn.commit}`;
+    const webEndpointBase = `${origin}${dir}/cdn/${cdn.commit}`;
     const comparisonRef = ref;
     /*
      * Builtin extension URL must be path-only: no `?query` here. VS Code joins
@@ -208,9 +221,9 @@ export const createHandler = (
           itemUrl: "https://open-vsx.org/vscode/item",
           resourceUrlTemplate:
             "https://openvsxorg.blob.core.windows.net/resources/{publisher}/{name}/{version}/{path}",
-          controlUrl: `${event.url.origin}${dir}/extensions/marketplace.json`,
+          controlUrl: `${origin}${dir}/extensions/marketplace.json`,
         },
-        chatParticipantRegistry: `${event.url.origin}${dir}/extensions/chat.json`,
+        chatParticipantRegistry: `${origin}${dir}/extensions/chat.json`,
         extensionEnabledApiProposals: {
           [`${pkg.publisher}.${pkg.name}`]: pkg.enabledApiProposals,
           nullExtensionDescription: pkg.enabledApiProposals,
@@ -289,43 +302,80 @@ export const createHandler = (
     };
   };
 
+  const resolveEditorGuards = async (): Promise<
+    | { status: "not_configured"; repo: string; message: string }
+    | {
+        status: "not_installed";
+        repo: string;
+        installUrl?: string;
+        hint: string;
+      }
+    | { status: "ready"; repo: string; vscodeCommit: string }
+  > => {
+    const vscodeWebCdn = await resolveVscodeWebCdn();
+    if (!(remote instanceof GitHubRemote)) {
+      return {
+        status: "not_configured",
+        repo: repoFull,
+        message:
+          "GitHub App credentials are not configured on this deployment. Set GITHUB_APP_ID and GITHUB_PRIVATE_KEY in Vercel, then redeploy.",
+      };
+    }
+    const installation = await remote.getRepoInstallationStatus();
+    if (installation.status === "not_installed") {
+      const appSlug = process.env.GITHUB_APP_SLUG?.trim();
+      return {
+        status: "not_installed",
+        repo: repoFull,
+        installUrl: appSlug
+          ? `https://github.com/apps/${appSlug}/installations/new`
+          : undefined,
+        hint: `Install the GitHub App on ${repoFull}. Choose "Only select repositories" and pick ${repo}.`,
+      };
+    }
+    if (installation.status === "not_configured") {
+      return {
+        status: "not_configured",
+        repo: repoFull,
+        message:
+          "GitHub App credentials are not configured on this deployment.",
+      };
+    }
+    return {
+      status: "ready",
+      repo: repoFull,
+      vscodeCommit: vscodeWebCdn.commit,
+    };
+  };
+
+  gitService.get("/editor-guards", async () => {
+    try {
+      return Response.json(await resolveEditorGuards());
+    } catch (error) {
+      console.error("Failed editor guards:", error);
+      return Response.json(
+        {
+          status: "error",
+          message:
+            error instanceof Error ? error.message : String(error),
+        },
+        { status: 500 },
+      );
+    }
+  });
+
   gitService.get("/editor-bootstrap", async (event) => {
     const cookies = cookiesFromCookieHeader(event.req.headers.get("cookie"));
     const refName = resolveActiveRef({ tr33: client, cookies });
     try {
-      if (!(remote instanceof GitHubRemote)) {
-        return Response.json({
-          status: "not_configured",
-          repo: repoFull,
-          message:
-            "GitHub App credentials are not configured on this deployment. Set GITHUB_APP_ID and GITHUB_PRIVATE_KEY in Vercel, then redeploy.",
-        });
-      }
-      const installation = await remote.getRepoInstallationStatus();
-      if (installation.status === "not_installed") {
-        const appSlug = process.env.GITHUB_APP_SLUG?.trim();
-        return Response.json({
-          status: "not_installed",
-          repo: repoFull,
-          installUrl: appSlug
-            ? `https://github.com/apps/${appSlug}/installations/new`
-            : undefined,
-          hint: `Install the GitHub App on ${repoFull}. Choose "Only select repositories" and pick ${repo}.`,
-        });
-      }
-      if (installation.status === "not_configured") {
-        return Response.json({
-          status: "not_configured",
-          repo: repoFull,
-          message:
-            "GitHub App credentials are not configured on this deployment.",
-        });
+      const guards = await resolveEditorGuards();
+      if (guards.status !== "ready") {
+        return Response.json(guards);
       }
       const payload = await checkEditorReady(refName);
-      const vscodeWebCdn = await resolveVscodeWebCdn();
       return Response.json({
         status: "ready",
-        vscodeCommit: vscodeWebCdn.commit,
+        vscodeCommit: guards.vscodeCommit,
         ...payload,
       });
     } catch (error) {
@@ -1187,15 +1237,17 @@ export const createHandler = (
     if (commitParam && commitParam !== vscodeWebCdn.commit) {
       return new Response("VS Code commit mismatch", { status: 404 });
     }
-    setCacheHeaders(event, vscodeEmbedEditorCacheHeaders(vscodeWebCdn.commit));
     const workbenchConfig = await getWorkbenchConfig(event);
     const code = getCode({
-      origin: event.url.origin,
+      origin: resolveEventOrigin(event),
       prefix: "/api/vscode",
       workbenchConfig,
       vscodeWebCdn,
     });
-    return html(event, code);
+    return new Response(code, {
+      status: 200,
+      headers: vscodeEmbedEditorCacheHeaders(vscodeWebCdn.commit),
+    });
   };
 
   vscode
@@ -1206,12 +1258,7 @@ export const createHandler = (
       }
       return serveEditorHtml(event, commitParam);
     })
-    .get("/editor", async (event) => {
-      setNoStoreHeaders(event);
-      const vscodeWebCdn = await resolveVscodeWebCdn();
-      const base = event.url.pathname.replace(/\/$/, "");
-      return Response.redirect(`${base}/${vscodeWebCdn.commit}`, 302);
-    })
+    .get("/editor", async (event) => serveEditorHtml(event))
     .get("/product.json", async (event) => {
       setNoStoreHeaders(event);
       return Response.json(await getWorkbenchConfig(event));
@@ -1313,7 +1360,7 @@ export const createHandler = (
     const cdn = await resolveVscodeWebCdn();
     const base = event.url.pathname.replace(/\/$/, "");
     return Response.redirect(
-      `${base}/${cdn.commit}/out/vs/code/browser/workbench/workbench.html`,
+      `${resolveEventOrigin(event)}${base}/${cdn.commit}/out/vs/code/browser/workbench/workbench.html`,
       302,
     );
   });
