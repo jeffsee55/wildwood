@@ -89,6 +89,13 @@ export class Tr33FileSystemProvider
   private apiUrl: string;
   private rootTreeOid: string | null = null;
   private commitTreeOid: string | null = null;
+  private worktreeCache = new Map<
+    string,
+    {
+      commit: { oid: string; treeOid: string };
+      rootTreeOid: string | null;
+    }
+  >();
 
   private _onDidChangeScm = new vscode.EventEmitter<void>();
   readonly onDidChangeScm = this._onDidChangeScm.event;
@@ -327,6 +334,7 @@ export class Tr33FileSystemProvider
     this.currentRef = newRef;
     this.rootTreeOid = null;
     this.commitTreeOid = null;
+    this.invalidateWorktreeCache(newRef);
     if (notifyParent) {
       await postSwitchBranch(this.apiUrl, newRef);
     }
@@ -435,26 +443,25 @@ export class Tr33FileSystemProvider
     return this.commitTreeOid;
   }
 
-  async fetchScmState(): Promise<ScmState> {
-    const [currentData, configData] = await Promise.all([
-      this.fetchRefData(this.currentRef),
-      this.currentRef !== this.configRef
-        ? this.fetchRefData(this.configRef)
-        : null,
-    ]);
+  async fetchScmState(options?: {
+    skipBranchDiff?: boolean;
+  }): Promise<ScmState> {
+    const needBranchDiff =
+      !options?.skipBranchDiff && this.currentRef !== this.configRef;
 
+    const currentData = await this.getRefWorktree(this.currentRef);
     this.commitTreeOid = currentData.commit.treeOid;
     this.rootTreeOid = currentData.rootTreeOid ?? currentData.commit.treeOid;
 
     const workingChanges =
       this.rootTreeOid !== this.commitTreeOid
-        ? await this.trees.diff2({
-            baseTreeOid: this.commitTreeOid,
-            currentTreeOid: this.rootTreeOid,
+        ? await this.trees.diffOverlay({
+            commitTreeOid: this.commitTreeOid,
+            overlayTreeOid: this.rootTreeOid,
           })
         : [];
 
-    if (!configData) {
+    if (!needBranchDiff) {
       return {
         commitTreeOid: this.commitTreeOid,
         configRefTreeOid: null,
@@ -464,6 +471,8 @@ export class Tr33FileSystemProvider
         conflicts: [],
       };
     }
+
+    const configData = await this.getRefWorktree(this.configRef);
 
     const configRefTreeOid = configData.commit.treeOid;
 
@@ -561,6 +570,7 @@ export class Tr33FileSystemProvider
 
     this.rootTreeOid = null;
     this.commitTreeOid = null;
+    this.invalidateWorktreeCache(this.currentRef);
     await this.fetchWorktreeState();
     this._onDidChangeScm.fire();
     notifyKitParentWorkspaceChanged();
@@ -665,6 +675,7 @@ export class Tr33FileSystemProvider
     }
     this.rootTreeOid = null;
     this.commitTreeOid = null;
+    this.invalidateWorktreeCache(this.currentRef);
     await this.fetchWorktreeState();
     this._onDidChangeScm.fire();
     notifyKitParentWorkspaceChanged();
@@ -693,7 +704,26 @@ export class Tr33FileSystemProvider
       commitTreeOid: data.commit.treeOid.slice(0, 7),
       rootTreeOid: data.rootTreeOid?.slice(0, 7) ?? null,
     });
+    this.worktreeCache.set(ref, data);
     return data;
+  }
+
+  /** Cached worktree metadata — one network fetch per ref per session. */
+  private async getRefWorktree(ref: string): Promise<{
+    commit: { oid: string; treeOid: string };
+    rootTreeOid: string | null;
+  }> {
+    const cached = this.worktreeCache.get(ref);
+    if (cached) return cached;
+    return this.fetchRefData(ref);
+  }
+
+  private invalidateWorktreeCache(ref?: string): void {
+    if (ref) {
+      this.worktreeCache.delete(ref);
+      return;
+    }
+    this.worktreeCache.clear();
   }
 
   private async fetchMergeBase(
@@ -717,7 +747,7 @@ export class Tr33FileSystemProvider
   }
 
   private async fetchWorktreeState(): Promise<void> {
-    const data = await this.fetchRefData(this.currentRef);
+    const data = await this.getRefWorktree(this.currentRef);
     const nextCommitOid = data.commit.treeOid;
     const nextRootOid = data.rootTreeOid ?? data.commit.treeOid;
     const changed =

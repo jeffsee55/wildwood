@@ -368,14 +368,11 @@ export const createHandler = (
     const cookies = cookiesFromCookieHeader(event.req.headers.get("cookie"));
     const refName = resolveActiveRef({ tr33: client, cookies });
     try {
-      const guards = await resolveEditorGuards();
-      if (guards.status !== "ready") {
-        return Response.json(guards);
-      }
       const payload = await checkEditorReady(refName);
+      const vscodeWebCdn = await resolveVscodeWebCdn();
       return Response.json({
         status: "ready",
-        vscodeCommit: guards.vscodeCommit,
+        vscodeCommit: vscodeWebCdn.commit,
         ...payload,
       });
     } catch (error) {

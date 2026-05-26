@@ -349,7 +349,17 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     logger(`Registered ${SCHEME} filesystem, SCM provider, and commands`);
-    await workingScm.refresh();
+    queueMicrotask(() => {
+      void workingScm.refresh({ skipBranchDiff: true });
+    });
+    const scheduleFullScmRefresh = () => {
+      void workingScm.refresh();
+    };
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(scheduleFullScmRefresh, { timeout: 5000 });
+    } else {
+      setTimeout(scheduleFullScmRefresh, 2000);
+    }
   } catch (error) {
     const message =
       error instanceof Error

@@ -110,10 +110,10 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
     }, 500);
   }
 
-  async refresh(): Promise<void> {
+  async refresh(options?: { skipBranchDiff?: boolean }): Promise<void> {
     try {
       const rootUri = this._fs.getRootUri();
-      const state = await this._fs.fetchScmState();
+      const state = await this._fs.fetchScmState(options);
 
       this._hasUncommittedChanges = state.workingChanges.length > 0;
       this._workingChangesGroup.label = "Uncommitted changes";

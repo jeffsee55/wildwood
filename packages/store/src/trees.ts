@@ -230,6 +230,108 @@ export class Trees {
     return result;
   }
 
+  /**
+   * Diff a sparse overlay tree against a full commit tree.
+   * Only walks paths present in the overlay — keys absent from the overlay are
+   * not treated as deletions from the commit tree.
+   */
+  async diffOverlay(args: {
+    commitTreeOid: string;
+    overlayTreeOid: string;
+  }): Promise<Diff2Entry[]> {
+    if (args.commitTreeOid === args.overlayTreeOid) return [];
+    return this.diffOverlayAt(args, "");
+  }
+
+  private async diffOverlayAt(
+    args: { commitTreeOid: string; overlayTreeOid: string },
+    pathPrefix: string,
+  ): Promise<Diff2Entry[]> {
+    const overlayEntries = (await this.getTree(args.overlayTreeOid)) ?? {};
+    const result: Diff2Entry[] = [];
+
+    for (const [name, overlay] of Object.entries(overlayEntries)) {
+      const path = pathPrefix ? `${pathPrefix}/${name}` : name;
+      const commitAt = await this.lookup(args.commitTreeOid, path);
+
+      if (!commitAt) {
+        if (overlay.type === "blob") {
+          result.push({ status: "added", path, oid: overlay.oid });
+        } else {
+          await this.walk({
+            oid: overlay.oid,
+            path,
+            callback: async (entry) => {
+              if (entry.type === "blob") {
+                result.push({
+                  status: "added",
+                  path: entry.path,
+                  oid: entry.oid,
+                });
+              }
+            },
+          });
+        }
+        continue;
+      }
+
+      if (overlay.type === "blob" && commitAt.type === "blob") {
+        if (overlay.oid !== commitAt.oid) {
+          result.push({
+            status: "modified",
+            path,
+            baseOid: commitAt.oid,
+            currentOid: overlay.oid,
+          });
+        }
+        continue;
+      }
+
+      if (overlay.type === "tree" && commitAt.type === "tree") {
+        if (overlay.oid !== commitAt.oid) {
+          result.push(
+            ...(await this.diffOverlayAt(
+              { commitTreeOid: commitAt.oid, overlayTreeOid: overlay.oid },
+              path,
+            )),
+          );
+        }
+        continue;
+      }
+
+      if (commitAt.type === "blob") {
+        result.push({ status: "removed", path, oid: commitAt.oid });
+      } else {
+        result.push(
+          ...(await this.diff2({
+            baseTreeOid: commitAt.oid,
+            currentTreeOid: await this.getEmptyTreeOid(),
+            pathPrefix: path,
+          })),
+        );
+      }
+      if (overlay.type === "blob") {
+        result.push({ status: "added", path, oid: overlay.oid });
+      } else {
+        await this.walk({
+          oid: overlay.oid,
+          path,
+          callback: async (entry) => {
+            if (entry.type === "blob") {
+              result.push({
+                status: "added",
+                path: entry.path,
+                oid: entry.oid,
+              });
+            }
+          },
+        });
+      }
+    }
+
+    return result;
+  }
+
   private async getEmptyTreeOid(): Promise<string> {
     if (!this.emptyTreeOid) {
       this.emptyTreeOid = GIT_EMPTY_TREE_OID;

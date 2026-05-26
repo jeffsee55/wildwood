@@ -247,18 +247,28 @@ export function KitFabMenu({
     setEditorIframeLoaded(false);
     try {
       let activeRef = refForOpen;
+      let guardsRes: Response;
+
       if (refForOpen === configRef) {
-        activeRef = await createDraftBranchRef();
+        const [draftRef, guardsResponse] = await Promise.all([
+          createDraftBranchRef(),
+          fetch(apiUrl(base, "/git/editor-guards"), {
+            credentials: "include",
+          }),
+        ]);
         if (runId !== editorOpenRunRef.current) return;
+        activeRef = draftRef;
         persistActiveRefToStorage(activeRef);
         notifyExtensionActiveRef(activeRef);
         scheduleRefresh();
+        guardsRes = guardsResponse;
+      } else {
+        guardsRes = await fetch(apiUrl(base, "/git/editor-guards"), {
+          credentials: "include",
+        });
+        if (runId !== editorOpenRunRef.current) return;
       }
 
-      const guardsRes = await fetch(apiUrl(base, "/git/editor-guards"), {
-        credentials: "include",
-      });
-      if (runId !== editorOpenRunRef.current) return;
       const guards = (await guardsRes.json()) as EditorGuardResponse;
       if (!guardsRes.ok || guards.status === "error") {
         setOpenState({
@@ -323,27 +333,6 @@ export function KitFabMenu({
               data.message?.trim() ||
               `Failed to verify the indexed repository (${res.status})`,
           });
-          return;
-        }
-        if (data.status !== "ready") {
-          setEditorGuard(
-            data.status === "not_configured"
-              ? {
-                  kind: "needs-setup",
-                  repo: data.repo ?? refForOpen,
-                  message:
-                    data.message?.trim() ||
-                    "GitHub App credentials are not configured on this deployment.",
-                }
-              : {
-                  kind: "needs-install",
-                  repo: data.repo ?? refForOpen,
-                  installUrl: data.installUrl,
-                  hint:
-                    data.hint?.trim() ||
-                    "Install the GitHub App on this repository to edit files.",
-                },
-          );
         }
       })();
     } catch (error) {
