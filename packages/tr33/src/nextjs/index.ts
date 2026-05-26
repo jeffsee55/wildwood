@@ -66,6 +66,16 @@ const setCacheHeaders = (
   }
 };
 
+/** Stable mount prefix (`/api/vscode`), regardless of `/editor` or `/editor/:commit`. */
+const resolveVscodeApiPrefix = (pathname: string): string => {
+  const marker = "/vscode";
+  const i = pathname.indexOf(marker);
+  if (i < 0) {
+    return "/api/vscode";
+  }
+  return pathname.slice(0, i + marker.length);
+};
+
 /** H3 may coerce all-digit path params to numbers (e.g. GitHub installation ids). */
 const routeParamString = (
   value: string | number | undefined,
@@ -153,7 +163,7 @@ export const createHandler = (
     url: URL;
     req: { headers: { get: (name: string) => string | null } };
   }) => {
-    const dir = event.url.pathname.split("/").slice(0, -1).join("/");
+    const dir = resolveVscodeApiPrefix(event.url.pathname);
     const cdn = await resolveVscodeWebCdn();
     const webEndpointBase = `${event.url.origin}${dir}/cdn/${cdn.commit}`;
     const comparisonRef = ref;
