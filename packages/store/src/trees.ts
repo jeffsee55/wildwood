@@ -84,6 +84,18 @@ export class Trees {
     return null;
   }
 
+  /** In-memory trees produced by `applyEntriesToTree` for persistence without re-fetching. */
+  exportTreesForPersist(oids: string[]): { oid: string; entries: TreeEntries }[] {
+    const out: { oid: string; entries: TreeEntries }[] = [];
+    for (const oid of oids) {
+      const entries = this.treeStore.get(oid);
+      if (entries !== undefined) {
+        out.push({ oid, entries });
+      }
+    }
+    return out;
+  }
+
   async resolve(
     rootOid: string,
     path: string,
@@ -594,6 +606,7 @@ export class Trees {
     rootTreeOid: string;
     entries: { oid: string; path: string }[];
   }): Promise<ApplyTreesResult> {
+    /** `trees` in the result lists only **new** oids (leaf, ancestors, optional empty dir). */
     let rootOid = rootTreeOid;
     const newOids: string[] = [];
 

@@ -17,6 +17,24 @@ import {
 } from "@/types";
 import { formatZodErrorForUser } from "@/zod/format-zod-for-user";
 
+export type GitAddResult = {
+  files: Record<string, string>;
+  rootTreeOid: string;
+};
+
+function gitAddTimer(ref: string, onProgress?: (message: string) => void) {
+  const started = Date.now();
+  let stepAt = started;
+  return (step: string) => {
+    const now = Date.now();
+    console.info(
+      `[tr33:git-add] ref=${ref} ${step} +${now - stepAt}ms (${now - started}ms total)`,
+    );
+    onProgress?.(step);
+    stepAt = now;
+  };
+}
+
 export class Git implements Gitable {
   config: Config<ConfigInput>;
   db: LibsqlDatabase;
@@ -197,19 +215,31 @@ export class Git implements Gitable {
   async add({
     ref,
     files,
+    onProgress,
   }: {
     ref: string;
     files: Record<string, string | Uint8Array>;
-  }): Promise<void> {
+    onProgress?: (message: string) => void;
+  }): Promise<GitAddResult> {
+    const tick = gitAddTimer(ref, onProgress);
+    const filePaths = Object.keys(files);
+    tick(
+      filePaths.length === 1
+        ? `Preparing ${filePaths[0]}…`
+        : `Preparing ${filePaths.length} files…`,
+    );
+
     const entries: { oid: string; path: string; content: string }[] = [];
     const textEntries: { oid: string; path: string }[] = [];
     const blobsToPersist: { oid: string; content: string }[] = [];
+    const filesWithOids: Record<string, string> = {};
 
     for (const [path, content] of Object.entries(files)) {
       const isBinary = content instanceof Uint8Array;
       const oid = isBinary
         ? await calculateBlobOidFromBytes(content)
         : await calculateBlobOid(content);
+      filesWithOids[path] = oid;
       const tracked = this.config.matches(path);
 
       if (tracked && !isBinary) {
@@ -218,6 +248,7 @@ export class Git implements Gitable {
         this.blobStore.set(oid, content);
         blobsToPersist.push({ oid, content });
       } else {
+        tick(`Uploading ${path} to GitHub…`);
         await this.remote.createBlob({
           content: isBinary ? content : new TextEncoder().encode(content),
         });
@@ -230,13 +261,15 @@ export class Git implements Gitable {
     }
 
     if (blobsToPersist.length > 0) {
+      tick("Storing blob in database…");
       await this.db.blobs.batchPut(blobsToPersist);
     }
 
     const worktree = await this.db.refs.get({ ref });
     if (!worktree) {
+      tick(`Loading worktree for ${ref} (first save may take a while)…`);
       await this.switch({ ref });
-      return this.add({ ref, files });
+      return this.add({ ref, files, onProgress });
     }
 
     const rootTreeOid = worktree.rootTree?.oid || worktree.commit?.treeOid;
@@ -244,13 +277,68 @@ export class Git implements Gitable {
       throw new Error(`No root tree OID found for ${ref}`);
     }
 
+    tick("Updating repository tree…");
     const trees = await this.trees.applyEntriesToTree({
       rootTreeOid,
       entries,
     });
 
-    await this.writeEntries({ ref, entries: textEntries });
+    await this.writeEntries({
+      ref,
+      entries: textEntries,
+      onProgress: tick,
+    });
+    tick("Saving tree objects…");
     await this.ensureTrees({ ref, trees });
+    tick("Save complete");
+    return { files: filesWithOids, rootTreeOid: trees.rootOid };
+  }
+
+  /**
+   * Persist client-computed worktree state, then index only the saved file(s).
+   *
+   * - `trees`: only **new** tree objects (leaf + ancestors along changed paths).
+   * - `changedFiles`: explicit save list — path cannot be inferred from trees alone.
+   */
+  async patchWorktree(args: {
+    ref: string;
+    rootTreeOid: string;
+    /** New/changed git tree objects computed on the client. */
+    trees: { oid: string; entries: import("tr33-store").TreeEntries }[];
+    /** File(s) written this save — drives blob storage + collection index. */
+    changedFiles: { path: string; oid: string; content: string }[];
+  }): Promise<{ rootTreeOid: string }> {
+    const started = Date.now();
+    const worktree = await this.db.refs.get({ ref: args.ref });
+    if (!worktree) {
+      throw new Error(
+        `Worktree for ref "${args.ref}" is not loaded. Create or switch to the branch first.`,
+      );
+    }
+    const blobs = args.changedFiles.map(({ oid, content }) => ({
+      oid,
+      content,
+    }));
+    if (blobs.length > 0) {
+      await this.db.blobs.batchPut(blobs);
+    }
+    if (args.trees.length > 0) {
+      await this.db.trees.batchPut(args.trees);
+    }
+    await this.db.refs.setTreeOid({
+      ref: args.ref,
+      treeOid: args.rootTreeOid,
+    });
+    const indexMs = Date.now();
+    await this.indexChangedFiles({
+      ref: args.ref,
+      changedFiles: args.changedFiles,
+    });
+    const paths = args.changedFiles.map((f) => f.path).join(", ");
+    console.info(
+      `[tr33:patch-worktree] ref=${args.ref} files=[${paths}] trees=${args.trees.length} persist=${indexMs - started}ms index=${Date.now() - indexMs}ms total=${Date.now() - started}ms`,
+    );
+    return { rootTreeOid: args.rootTreeOid };
   }
 
   async findMany(
@@ -317,17 +405,32 @@ export class Git implements Gitable {
   async writeEntries(args: {
     ref: string;
     entries: { oid: string; path: string }[];
+    onProgress?: (message: string) => void;
   }) {
+    const report = (message: string) => args.onProgress?.(message);
     const entries = args.entries
       .map((e) => ({ oid: String(e.oid), path: String(e.path) }))
       .filter((e) => this.config.matches(e.path));
-    await this.ensureBlobs({ oids: entries.map((e) => e.oid) });
+    if (entries.length === 0) {
+      return;
+    }
+    report("Ensuring collection blobs…");
+    await this.ensureBlobs({
+      oids: entries.map((e) => e.oid),
+      onProgress: report,
+    });
     const chunks = await this.chunkBlobs({
       blobs: Array.from(entries),
       size: 2,
     });
     const cache = this.createCache();
-    for (const chunk of chunks) {
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      report(
+        chunks.length === 1
+          ? "Indexing collections…"
+          : `Indexing collections (${i + 1}/${chunks.length})…`,
+      );
       const blobs = await this.db.blobs.batchGet({
         oids: chunk.map((b) => b.oid),
       });
@@ -357,6 +460,58 @@ export class Git implements Gitable {
       }
     }
     await this.db.writeCache({ status: "dirty", cache });
+    report("Indexed collections");
+  }
+
+  /** Index only the saved collection file(s) — content comes from the client. */
+  async indexChangedFiles(args: {
+    ref: string;
+    changedFiles: { path: string; oid: string; content: string }[];
+    onProgress?: (message: string) => void;
+  }) {
+    const report = (message: string) => args.onProgress?.(message);
+    const files = args.changedFiles
+      .map((f) => ({
+        oid: String(f.oid),
+        path: String(f.path),
+        content: f.content,
+      }))
+      .filter((f) => this.config.matches(f.path));
+    if (files.length === 0) {
+      return;
+    }
+    report(
+      files.length === 1
+        ? `Indexing ${files[0].path}…`
+        : `Indexing ${files.length} collection files…`,
+    );
+    const cache = this.createCache();
+    for (const { oid, path, content } of files) {
+      this.config.index({ oid, content, path, ref: args.ref }, cache);
+    }
+    await this.db.writeCache({
+      status: "dirty",
+      cache,
+      skipSiblingCopy: true,
+    });
+    report("Indexed collections");
+  }
+
+  /** @deprecated Use `indexChangedFiles` for editor saves. */
+  async writeEntriesFromContent(args: {
+    ref: string;
+    entries: { oid: string; path: string; content: string }[];
+    onProgress?: (message: string) => void;
+  }) {
+    return this.indexChangedFiles({
+      ref: args.ref,
+      changedFiles: args.entries.map((e) => ({
+        path: e.path,
+        oid: e.oid,
+        content: e.content,
+      })),
+      onProgress: args.onProgress,
+    });
   }
 
   async commit(args: {
@@ -631,19 +786,10 @@ export class Git implements Gitable {
     ref: string;
     trees: import("tr33-store").ApplyTreesResult;
   }) {
-    const treesToSave: {
-      oid: string;
-      entries: Record<string, { type: "blob" | "tree"; oid: string }>;
-    }[] = [];
-    await Promise.all(
-      args.trees.trees.map(async (oid) => {
-        const tree = await this.trees.getTree(oid);
-        if (tree) {
-          treesToSave.push({ oid, entries: tree });
-        }
-      }),
-    );
-    await this.db.trees.batchPut(treesToSave);
+    const treesToSave = this.trees.exportTreesForPersist(args.trees.trees);
+    if (treesToSave.length > 0) {
+      await this.db.trees.batchPut(treesToSave);
+    }
     await this.db.refs.setTreeOid({
       ref: args.ref,
       treeOid: args.trees.rootOid,
@@ -654,7 +800,13 @@ export class Git implements Gitable {
     });
   }
 
-  async ensureBlobs({ oids }: { oids: string[] }) {
+  async ensureBlobs({
+    oids,
+    onProgress,
+  }: {
+    oids: string[];
+    onProgress?: (message: string) => void;
+  }) {
     const dbBlobs = await this.db.blobs.batchGet({
       oids,
     });
@@ -665,6 +817,13 @@ export class Git implements Gitable {
       if (dbBlob) return false;
       return true;
     });
+    if (blobsToGetFromRemote.length > 0) {
+      onProgress?.(
+        blobsToGetFromRemote.length === 1
+          ? "Fetching blob from GitHub…"
+          : `Fetching ${blobsToGetFromRemote.length} blobs from GitHub…`,
+      );
+    }
     const blobsFromRemote = await this.remote.fetchBlobs({
       oids: blobsToGetFromRemote,
     });

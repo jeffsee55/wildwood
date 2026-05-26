@@ -34,6 +34,7 @@ export type Tr33AuthAction =
   | { type: "git.switchRef"; ref: string }
   | { type: "git.createBranch"; name: string; baseRef?: string }
   | { type: "git.add"; ref: string; paths: string[] }
+  | { type: "git.patchWorktree"; ref: string; paths: string[] }
   | { type: "git.commit"; ref: string; message: string }
   | { type: "git.discard"; ref: string }
   | { type: "git.push"; ref: string }

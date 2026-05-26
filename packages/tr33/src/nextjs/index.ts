@@ -1,6 +1,5 @@
 // import extension from "tr33-vscode";
 
-import { calculateBlobOid, calculateBlobOidFromBytes } from "tr33-store";
 import extensionPkg from "tr33-vscode/package.json" with { type: "json" };
 import extensionNls from "tr33-vscode/package.nls.json" with { type: "json" };
 import { H3, html, serveStatic, setResponseHeader } from "h3";
@@ -588,9 +587,10 @@ export const createHandler = (
   gitService.post("/add", async (event) => {
     try {
       const body = await event.req.json();
-      const { ref: refParam, files: filesParam } = z
+      const { ref: refParam, files: filesParam, stream: streamProgress } = z
         .object({
           ref: z.string(),
+          stream: z.boolean().optional(),
           files: z.record(
             z.string(),
             z.union([z.string(), z.object({ base64: z.string() })]),
@@ -616,28 +616,123 @@ export const createHandler = (
       });
       if (authError) return authError;
 
-      await client._.git.add({
+      if (streamProgress) {
+        const encoder = new TextEncoder();
+        const bodyStream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const emit = (payload: Record<string, unknown>) => {
+              controller.enqueue(
+                encoder.encode(`${JSON.stringify(payload)}\n`),
+              );
+            };
+            try {
+              const addResult = await client._.git.add({
+                ref: refParam,
+                files,
+                onProgress: (message) => {
+                  emit({ type: "progress", message });
+                },
+              });
+              emit({
+                type: "done",
+                ref: refParam,
+                files: addResult.files,
+                rootTreeOid: addResult.rootTreeOid,
+              });
+            } catch (error) {
+              emit({
+                type: "error",
+                message:
+                  error instanceof Error ? error.message : String(error),
+              });
+            } finally {
+              controller.close();
+            }
+          },
+        });
+        return new Response(bodyStream, {
+          headers: {
+            "Content-Type": "application/x-ndjson",
+            "Cache-Control": "no-store",
+          },
+        });
+      }
+
+      const addResult = await client._.git.add({
         ref: refParam,
         files,
       });
 
-      const filesWithOids: Record<string, string> = {};
-      for (const [filePath, content] of Object.entries(files)) {
-        const oid =
-          content instanceof Uint8Array
-            ? await calculateBlobOidFromBytes(content)
-            : await calculateBlobOid(content);
-        filesWithOids[filePath] = oid;
-      }
-
       return Response.json({
         ref: refParam,
-        files: filesWithOids,
+        files: addResult.files,
+        rootTreeOid: addResult.rootTreeOid,
       });
     } catch (error) {
       console.error("Failed to add files:", error);
       return new Response(
         `Failed to add files: ${error instanceof Error ? error.message : String(error)}`,
+        { status: 500 },
+      );
+    }
+  });
+
+  const gitTreeEntrySchema = z.object({
+    type: z.enum(["blob", "tree"]),
+    oid: z.string(),
+  });
+
+  gitService.post("/patch-worktree", async (event) => {
+    try {
+      const body = await event.req.json();
+      const parsed = z
+        .object({
+          ref: z.string(),
+          rootTreeOid: z.string(),
+          /** File(s) saved — explicit paths; not derivable from tree blobs alone. */
+          changedFiles: z
+            .array(
+              z.object({
+                path: z.string(),
+                oid: z.string(),
+                content: z.string(),
+              }),
+            )
+            .default([]),
+          /** Only new/changed tree objects along the saved path(s). */
+          trees: z
+            .array(
+              z.object({
+                oid: z.string(),
+                entries: z.record(z.string(), gitTreeEntrySchema),
+              }),
+            )
+            .default([]),
+        })
+        .parse(body);
+
+      const authError = await authorizeGitAction(event.req, {
+        type: "git.patchWorktree",
+        ref: parsed.ref,
+        paths:
+          parsed.changedFiles.length > 0
+            ? parsed.changedFiles.map((f) => f.path)
+            : ["."],
+      });
+      if (authError) return authError;
+
+      const result = await client._.git.patchWorktree({
+        ref: parsed.ref,
+        rootTreeOid: parsed.rootTreeOid,
+        trees: parsed.trees,
+        changedFiles: parsed.changedFiles,
+      });
+
+      return Response.json(result);
+    } catch (error) {
+      console.error("Failed to patch worktree:", error);
+      return new Response(
+        `Failed to patch worktree: ${error instanceof Error ? error.message : String(error)}`,
         { status: 500 },
       );
     }
@@ -1316,7 +1411,7 @@ async function withNextTr33Response(
   if (
     mutationTag &&
     request.method === "POST" &&
-    /\/git\/(add|commit|discard|merge|pull)\/?$/.test(pathname)
+    /\/git\/(commit|discard|merge|pull)\/?$/.test(pathname)
   ) {
     const { revalidateTag } = await import("next/cache");
     revalidateTag(mutationTag, "default");

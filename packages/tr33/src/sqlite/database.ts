@@ -83,7 +83,12 @@ export class LibsqlDatabase {
     connections: [],
   };
 
-  writeCache = async (args: { status: string; cache: Cache }) => {
+  writeCache = async (args: {
+    status: string;
+    cache: Cache;
+    /** Skip variant sibling copy — use on incremental editor saves. */
+    skipSiblingCopy?: boolean;
+  }) => {
     const { cache } = args;
     const filters = cache.filters;
     if (filters.length > 0) {
@@ -160,23 +165,23 @@ export class LibsqlDatabase {
           },
         });
     }
-    const canonicals = new Set(cache.entries.map((entry) => entry.canonical));
-    const entries2 = await this.drizzle.query.entries.findMany({
-      where: {
-        path: { in: Array.from(canonicals) },
-      },
-      with: {
-        siblings: true,
-      },
-    });
-    for (const entry of entries2) {
-      // console.log(entry.path, entry.variant);
-      // console.log(entry.siblings.map((sibling) => sibling.path));
-      const missingCombos = this.config.findMissingCombos(
-        entry.siblings.map((sibling) => sibling.path),
-      );
-      for (const missingCombo of missingCombos) {
-        await this.entries.copy(missingCombo);
+    if (!args.skipSiblingCopy) {
+      const canonicals = new Set(cache.entries.map((entry) => entry.canonical));
+      const entries2 = await this.drizzle.query.entries.findMany({
+        where: {
+          path: { in: Array.from(canonicals) },
+        },
+        with: {
+          siblings: true,
+        },
+      });
+      for (const entry of entries2) {
+        const missingCombos = this.config.findMissingCombos(
+          entry.siblings.map((sibling) => sibling.path),
+        );
+        for (const missingCombo of missingCombos) {
+          await this.entries.copy(missingCombo);
+        }
       }
     }
 

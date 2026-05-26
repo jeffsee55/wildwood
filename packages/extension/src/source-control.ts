@@ -43,6 +43,7 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
   private _prActionsSupported = true;
   private _hasUncommittedChanges = false;
   private _disposables: vscode.Disposable[] = [];
+  private _refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -82,7 +83,7 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
 
     this._disposables.push(
       this._sourceControl,
-      fs.onDidChangeScm(() => this.refresh()),
+      fs.onDidChangeScm(() => this.scheduleRefresh()),
     );
 
     context.subscriptions.push(...this._disposables);
@@ -98,6 +99,16 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
   }
 
   // ── Public API ─────────────────────────────────────────────────────
+
+  private scheduleRefresh(): void {
+    if (this._refreshTimer) {
+      clearTimeout(this._refreshTimer);
+    }
+    this._refreshTimer = setTimeout(() => {
+      this._refreshTimer = null;
+      void this.refresh();
+    }, 500);
+  }
 
   async refresh(): Promise<void> {
     try {

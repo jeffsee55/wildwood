@@ -48,7 +48,19 @@ export function notifyKitParentBranchChanged(ref: string): void {
 }
 
 /** After save/commit/discard: notify Kit to soft-refresh RSC (`router.refresh()`). */
+let workspaceNotifyTimer: ReturnType<typeof setTimeout> | null = null;
+
 export function notifyKitParentWorkspaceChanged(): void {
+  if (workspaceNotifyTimer) {
+    clearTimeout(workspaceNotifyTimer);
+  }
+  workspaceNotifyTimer = setTimeout(() => {
+    workspaceNotifyTimer = null;
+    notifyKitParentWorkspaceChangedNow();
+  }, 800);
+}
+
+function notifyKitParentWorkspaceChangedNow(): void {
   if (typeof BroadcastChannel !== "undefined") {
     try {
       const bc = new BroadcastChannel(TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL);

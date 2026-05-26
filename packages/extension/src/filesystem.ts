@@ -4,6 +4,8 @@ import {
   type Gitable,
   type TreeEntries,
   Trees,
+  calculateBlobOid,
+  calculateBlobOidFromBytes,
 } from "tr33-store";
 import * as vscode from "vscode";
 import { logger } from "./extension";
@@ -11,6 +13,8 @@ import {
   notifyKitParentBranchChanged,
   notifyKitParentWorkspaceChanged,
 } from "./kit-parent";
+import { postAddWithProgress } from "./add-with-progress";
+import { postPatchWorktree, treesForPatch } from "./patch-worktree";
 import {
   type Tr33ExtensionContext,
   resolveTr33ExtensionContext,
@@ -877,13 +881,6 @@ export class Tr33FileSystemProvider
       throw vscode.FileSystemError.NoPermissions(uri);
     }
 
-    if (this.currentRef === this.configRef) {
-      const newBranch = generateBranchName();
-      await this.createBranch(newBranch, this.configRef);
-      await this.switchRef(newBranch);
-      this._onDidCreateBranch.fire(newBranch);
-    }
-
     const path = this.pathFromUri(uri);
     const isBinary = content.includes(0x00);
     const filePayload: string | { base64: string } = isBinary
@@ -900,21 +897,71 @@ export class Tr33FileSystemProvider
       }
     }
 
-    const res = await fetch(`${this.apiUrl}/add`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ref: this.currentRef,
-        files: { [path]: filePayload },
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Failed to write: ${res.status}: ${err}`);
-    }
-    this._conflictPaths.delete(path);
-    this.rootTreeOid = null;
-    await this.fetchWorktreeState();
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Window,
+        title: `Saving ${path}`,
+        cancellable: false,
+      },
+      async (progress) => {
+        if (this.currentRef === this.configRef) {
+          progress.report({ message: "Creating draft branch…" });
+          const newBranch = generateBranchName();
+          await this.createBranch(newBranch, this.configRef);
+          progress.report({ message: `Switching to ${newBranch}…` });
+          await this.switchRef(newBranch);
+          this._onDidCreateBranch.fire(newBranch);
+        }
+
+        if (isBinary) {
+          progress.report({ message: "Uploading binary via legacy add…" });
+          const addResult = await postAddWithProgress(
+            this.apiUrl,
+            {
+              ref: this.currentRef,
+              files: { [path]: filePayload },
+            },
+            (message) => progress.report({ message }),
+          );
+          this._conflictPaths.delete(path);
+          this.rootTreeOid = addResult.rootTreeOid;
+          this._emitter.fire([
+            { type: vscode.FileChangeType.Changed, uri: this.getRootUri() },
+          ]);
+          return;
+        }
+
+        progress.report({ message: "Computing tree locally…" });
+        const rootTreeOid = await this.getRootTreeOid();
+        const blobOid = isBinary
+          ? await calculateBlobOidFromBytes(content)
+          : await calculateBlobOid(filePayload as string);
+        const applied = await this.trees.applyEntriesToTree({
+          rootTreeOid,
+          entries: [{ oid: blobOid, path }],
+        });
+        const trees = treesForPatch(
+          this.trees.exportTreesForPersist(applied.trees),
+          { omitEmptyTree: true },
+        );
+        progress.report({
+          message: `Uploading ${trees.length} changed tree(s) and indexing ${path}…`,
+        });
+        const textContent = filePayload as string;
+        const patchResult = await postPatchWorktree(this.apiUrl, {
+          ref: this.currentRef,
+          rootTreeOid: applied.rootOid,
+          changedFiles: [{ path, oid: blobOid, content: textContent }],
+          trees,
+        });
+
+        this._conflictPaths.delete(path);
+        this.rootTreeOid = patchResult.rootTreeOid;
+        this._emitter.fire([
+          { type: vscode.FileChangeType.Changed, uri: this.getRootUri() },
+        ]);
+      },
+    );
 
     this._onDidChangeScm.fire();
     notifyKitParentWorkspaceChanged();

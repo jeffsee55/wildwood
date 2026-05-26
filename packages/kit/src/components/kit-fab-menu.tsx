@@ -139,7 +139,7 @@ export function KitFabMenu({
       React.startTransition(() => {
         router.refresh();
       });
-    }, 100);
+    }, 800);
   }, [router]);
   const portalContainer = useShadowContainer();
   const [editorOpen, setEditorOpen] = React.useState(false);
