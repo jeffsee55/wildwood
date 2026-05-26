@@ -173,10 +173,8 @@ export class Tr33FileSystemProvider
     });
   }
 
-  private async persistTreesToCache(oids: string[]): Promise<void> {
-    for (const { oid, entries } of this.trees.exportTreesForPersist(oids)) {
-      await this.objectCache.putTree(this.repo, oid, entries);
-    }
+  async putTree(oid: string, entries: TreeEntries): Promise<void> {
+    await this.objectCache.putTree(this.repo, oid, entries);
   }
 
   async getCommit(oid: string): Promise<CommitNode | null> {
@@ -220,24 +218,11 @@ export class Tr33FileSystemProvider
     await this.fetchWorktreeState();
     await this.ensureDraftBranch();
     const rootOid = await this.getRootTreeOid();
-    const seeded = await this.objectCache.seedTreeStore({
-      repo: this.repo,
-      rootOid,
-      treeStore: this.trees.treeStore,
-    });
-    if (this.commitTreeOid && this.commitTreeOid !== rootOid) {
-      await this.objectCache.seedTreeStore({
-        repo: this.repo,
-        rootOid: this.commitTreeOid,
-        treeStore: this.trees.treeStore,
-      });
-    }
     const tree = await this.trees.getTree(rootOid);
     logger("initializeWorkspace", {
       ref: this.currentRef,
       rootOid: rootOid.slice(0, 7),
       entryCount: tree ? Object.keys(tree).length : 0,
-      seededFromCache: seeded,
     });
   }
 
@@ -593,7 +578,6 @@ export class Tr33FileSystemProvider
     }
 
     this.rootTreeOid = this.commitTreeOid;
-    this.trees.treeStore.clear();
     this._onDidChangeScm.fire();
     notifyKitParentWorkspaceChanged();
   }
@@ -984,7 +968,7 @@ export class Tr33FileSystemProvider
           entries: [{ oid: blobOid, path }],
         });
         const trees = treesForPatch(
-          this.trees.exportTreesForPersist(applied.trees),
+          await this.trees.exportTreesForPersist(applied.trees),
           { omitEmptyTree: true },
         );
         progress.report({
@@ -1001,7 +985,6 @@ export class Tr33FileSystemProvider
         this._conflictPaths.delete(path);
         this.rootTreeOid = patchResult.rootTreeOid;
         await this.objectCache.putBlobRaw(this.repo, blobOid, content);
-        await this.persistTreesToCache(applied.trees);
         this._emitter.fire([
           { type: vscode.FileChangeType.Changed, uri: this.getRootUri() },
         ]);

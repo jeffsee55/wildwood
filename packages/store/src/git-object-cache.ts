@@ -51,10 +51,9 @@ export function getGitObjectCache(): GitObjectCache {
 	return shared;
 }
 
+/** Same-origin IndexedDB cache for immutable git trees and blobs (browser only). */
 export class GitObjectCache {
 	private dbPromise: Promise<IDBDatabase | null> | null = null;
-	private treeMem = new Map<string, TreeEntries>();
-	private blobMem = new Map<string, Uint8Array>();
 	private treeInflight = new Map<string, Promise<TreeEntries | null>>();
 	private blobInflight = new Map<string, Promise<Uint8Array | null>>();
 
@@ -107,25 +106,20 @@ export class GitObjectCache {
 
 	async hasTree(repo: string, oid: string): Promise<boolean> {
 		const key = gitObjectCacheKey(repo, oid);
-		if (this.treeMem.has(key)) return true;
 		const record = await this.readRecord<TreeRecord>(TREES_STORE, key);
 		return record != null;
 	}
 
+	/** Read tree from IndexedDB only. */
 	async getTree(repo: string, oid: string): Promise<TreeEntries | null> {
 		const key = gitObjectCacheKey(repo, oid);
-		const mem = this.treeMem.get(key);
-		if (mem) return mem;
-
 		const record = await this.readRecord<TreeRecord>(TREES_STORE, key);
-		if (!record) return null;
-		this.treeMem.set(key, record.entries);
-		return record.entries;
+		return record?.entries ?? null;
 	}
 
+	/** Idempotent write — safe while the editor is loading and saving. */
 	async putTree(repo: string, oid: string, entries: TreeEntries): Promise<void> {
 		const key = gitObjectCacheKey(repo, oid);
-		this.treeMem.set(key, entries);
 		await this.writeRecord(TREES_STORE, {
 			id: key,
 			repo: repo.toLowerCase(),
@@ -135,6 +129,7 @@ export class GitObjectCache {
 		} satisfies TreeRecord);
 	}
 
+	/** IndexedDB → network fetcher → IndexedDB (deduped in-flight). */
 	async fetchTree(
 		repo: string,
 		oid: string,
@@ -160,25 +155,21 @@ export class GitObjectCache {
 		return promise;
 	}
 
+	/** Read blob bytes from IndexedDB only. */
 	async getBlobRaw(repo: string, oid: string): Promise<Uint8Array | null> {
 		const key = gitObjectCacheKey(repo, oid);
-		const mem = this.blobMem.get(key);
-		if (mem) return mem;
-
 		const record = await this.readRecord<BlobRecord>(BLOBS_STORE, key);
 		if (!record) return null;
-		const bytes = base64ToUint8(record.base64);
-		this.blobMem.set(key, bytes);
-		return bytes;
+		return base64ToUint8(record.base64);
 	}
 
+	/** Idempotent write. */
 	async putBlobRaw(
 		repo: string,
 		oid: string,
 		bytes: Uint8Array,
 	): Promise<void> {
 		const key = gitObjectCacheKey(repo, oid);
-		this.blobMem.set(key, bytes);
 		await this.writeRecord(BLOBS_STORE, {
 			id: key,
 			repo: repo.toLowerCase(),
@@ -188,6 +179,7 @@ export class GitObjectCache {
 		} satisfies BlobRecord);
 	}
 
+	/** IndexedDB → network fetcher → IndexedDB (deduped in-flight). */
 	async fetchBlobRaw(
 		repo: string,
 		oid: string,
@@ -211,38 +203,5 @@ export class GitObjectCache {
 		});
 		this.blobInflight.set(key, promise);
 		return promise;
-	}
-
-	/** Warm in-memory `Trees.treeStore` from IndexedDB for a root OID (BFS, cache hits only). */
-	async seedTreeStore(args: {
-		repo: string;
-		rootOid: string;
-		treeStore: Map<string, TreeEntries>;
-		maxNodes?: number;
-	}): Promise<number> {
-		const maxNodes = args.maxNodes ?? 512;
-		const queue = [args.rootOid];
-		const seen = new Set<string>();
-		let loaded = 0;
-
-		while (queue.length > 0 && loaded < maxNodes) {
-			const oid = queue.shift()!;
-			if (seen.has(oid)) continue;
-			seen.add(oid);
-
-			const tree = await this.getTree(args.repo, oid);
-			if (!tree) continue;
-
-			if (!args.treeStore.has(oid)) {
-				args.treeStore.set(oid, tree);
-				loaded++;
-			}
-			for (const entry of Object.values(tree)) {
-				if (entry.type === "tree") {
-					queue.push(entry.oid);
-				}
-			}
-		}
-		return loaded;
 	}
 }

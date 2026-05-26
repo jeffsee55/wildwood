@@ -30,10 +30,6 @@ export type KitProps = {
    */
   apiBase?: string;
   /**
-   * GitHub owner/repo for IndexedDB git object cache keys.
-   */
-  repo?: string;
-  /**
    * Default git ref label from host config when no `tr33-active-ref` cookie exists.
    */
   configRef?: string;
@@ -47,7 +43,6 @@ export type KitProps = {
 export const Kit = ({
   theme = "system",
   apiBase = "/api",
-  repo,
   configRef = "main",
   activeRef = null,
   auth,
@@ -57,7 +52,6 @@ export const Kit = ({
       <ThemeProvider theme={theme}>
         <KitFabMenu
           apiBase={apiBase}
-          repo={repo}
           configRef={configRef}
           activeRef={activeRef}
           auth={auth}

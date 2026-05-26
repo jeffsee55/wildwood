@@ -798,7 +798,7 @@ export class Git implements Gitable {
     ref: string;
     trees: import("tr33-store").ApplyTreesResult;
   }) {
-    const treesToSave = this.trees.exportTreesForPersist(args.trees.trees);
+    const treesToSave = await this.trees.exportTreesForPersist(args.trees.trees);
     if (treesToSave.length > 0) {
       await this.db.trees.batchPut(treesToSave);
     }

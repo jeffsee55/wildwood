@@ -17,6 +17,8 @@ export interface Gitable {
   getBlob(oid: string): Promise<{ oid: string; content: string } | null>;
   getCommit(oid: string): Promise<CommitNode | null>;
   paths: string[];
+  /** Persist a tree locally (IndexedDB in the browser; in-memory on server). */
+  putTree?(oid: string, entries: TreeEntries): Promise<void>;
 }
 
 
@@ -73,27 +75,39 @@ export class Trees {
 	}
 
   async getTree(oid: string): Promise<TreeEntries | null> {
-    const cached = this.treeStore.get(oid);
-    if (cached) return cached;
-
-    const tree = await this.gitable.getTree(oid);
-    if (tree) {
-      this.treeStore.set(oid, tree);
-      return tree;
-    }
-    return null;
+    return this.gitable.getTree(oid);
   }
 
-  /** In-memory trees produced by `applyEntriesToTree` for persistence without re-fetching. */
-  exportTreesForPersist(oids: string[]): { oid: string; entries: TreeEntries }[] {
+  /** Trees produced by `applyEntriesToTree` — read back from the gitable store. */
+  async exportTreesForPersist(
+    oids: string[],
+  ): Promise<{ oid: string; entries: TreeEntries }[]> {
     const out: { oid: string; entries: TreeEntries }[] = [];
     for (const oid of oids) {
+      if (this.gitable.putTree) {
+        const entries = await this.getTree(oid);
+        if (entries) {
+          out.push({ oid, entries });
+        }
+        continue;
+      }
       const entries = this.treeStore.get(oid);
       if (entries !== undefined) {
         out.push({ oid, entries });
       }
     }
     return out;
+  }
+
+  private async persistTree(
+    oid: string,
+    entries: TreeEntries,
+  ): Promise<void> {
+    if (this.gitable.putTree) {
+      await this.gitable.putTree(oid, entries);
+      return;
+    }
+    this.treeStore.set(oid, entries);
   }
 
   async resolve(
@@ -219,7 +233,7 @@ export class Trees {
   private async getEmptyTreeOid(): Promise<string> {
     if (!this.emptyTreeOid) {
       this.emptyTreeOid = GIT_EMPTY_TREE_OID;
-      this.treeStore.set(this.emptyTreeOid, {});
+      await this.persistTree(this.emptyTreeOid, {});
     }
     return this.emptyTreeOid;
   }
@@ -594,7 +608,7 @@ export class Trees {
     }
 
     const oid = await calculateTreeOid(result);
-    this.treeStore.set(oid, result);
+    await this.persistTree(oid, result);
     newTreeOids.push(oid);
     return oid;
   }
@@ -631,9 +645,7 @@ export class Trees {
           treeOid = child.oid;
         } else {
           const emptyOid = GIT_EMPTY_TREE_OID;
-          if (!this.treeStore.has(emptyOid)) {
-            this.treeStore.set(emptyOid, {});
-          }
+          await this.persistTree(emptyOid, {});
           newOids.push(emptyOid);
           chain.push({ oid: treeOid, name });
           treeOid = emptyOid;
@@ -651,19 +663,19 @@ export class Trees {
         [fileName]: { type: "blob" as const, oid: entry.oid },
       };
       let newOid = await calculateTreeOid(updated);
-      this.treeStore.set(newOid, updated);
+      await this.persistTree(newOid, updated);
       newOids.push(newOid);
 
       for (let i = chain.length - 1; i >= 0; i--) {
         const { oid: parentOid, name } = chain[i];
-        const parent = this.treeStore.get(parentOid);
+        const parent = await this.getTree(parentOid);
         if (!parent) throw new Error(`Parent not found: ${parentOid}`);
         const updatedParent = {
           ...parent,
           [name]: { type: "tree" as const, oid: newOid },
         };
         newOid = await calculateTreeOid(updatedParent);
-        this.treeStore.set(newOid, updatedParent);
+        await this.persistTree(newOid, updatedParent);
         newOids.push(newOid);
       }
       rootOid = newOid;

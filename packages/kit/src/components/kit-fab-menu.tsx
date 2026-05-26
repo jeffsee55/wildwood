@@ -20,7 +20,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { generateBranchName } from "@/lib/generate-branch-name";
-import { warmGitObjectCache } from "@/lib/warm-git-object-cache";
 import { useShadowContainer } from "@/lib/shadow-root";
 import { cn } from "@/lib/utils";
 
@@ -89,8 +88,6 @@ function normalizeApiBase(base: string): string {
 
 type KitFabMenuProps = {
   apiBase?: string;
-  /** GitHub owner/repo — IndexedDB cache key prefix */
-  repo?: string;
   /** Default ref when cookie is absent */
   configRef?: string;
   /** Active ref from cookie (server) */
@@ -127,7 +124,6 @@ type EditorBootstrapResponse = {
 
 export function KitFabMenu({
   apiBase = "/api",
-  repo,
   configRef = "main",
   activeRef = null,
   auth,
@@ -172,16 +168,6 @@ export function KitFabMenu({
   React.useEffect(() => {
     persistActiveRefToStorage(displayRef);
   }, [displayRef]);
-
-  React.useEffect(() => {
-    if (!repo || !gitOrigin) return;
-    void warmGitObjectCache({
-      origin: gitOrigin,
-      apiBase: base,
-      repo,
-      ref: displayRef,
-    });
-  }, [base, displayRef, gitOrigin, repo]);
 
   const switchBranchCookie = React.useCallback(
     async (ref: string) => {
@@ -242,15 +228,9 @@ export function KitFabMenu({
         scheduleRefresh();
       }
 
-      if (repo && gitOrigin) {
-        await warmGitObjectCache({
-          origin: gitOrigin,
-          apiBase: base,
-          repo,
-          ref: activeRef,
-        });
-      }
-      if (runId !== editorOpenRunRef.current) return;
+      // Mount VS Code immediately — bootstrap guards run in parallel below.
+      iframeSrcRef.current = `${window.location.origin}${base}/vscode/editor`;
+      setOpenState({ kind: "ready" });
 
       const res = await fetch(`${base}/git/editor-bootstrap`, {
         credentials: "include",
@@ -259,6 +239,7 @@ export function KitFabMenu({
 
       const data = (await res.json()) as EditorBootstrapResponse;
       if (!res.ok || data.status === "error") {
+        iframeSrcRef.current = null;
         setOpenState({
           kind: "error",
           message:
@@ -268,6 +249,7 @@ export function KitFabMenu({
         return;
       }
       if (data.status === "not_configured") {
+        iframeSrcRef.current = null;
         setOpenState({
           kind: "needs-setup",
           repo: data.repo ?? refForOpen,
@@ -278,6 +260,7 @@ export function KitFabMenu({
         return;
       }
       if (data.status === "not_installed") {
+        iframeSrcRef.current = null;
         setOpenState({
           kind: "needs-install",
           repo: data.repo ?? refForOpen,
@@ -288,12 +271,6 @@ export function KitFabMenu({
         });
         return;
       }
-
-      iframeSrcRef.current =
-        data.vscodeCommit ?
-          `${window.location.origin}${base}/vscode/editor/${data.vscodeCommit}`
-        : `${window.location.origin}${base}/vscode/editor`;
-      setOpenState({ kind: "ready" });
     } catch (error) {
       if (runId !== editorOpenRunRef.current) return;
       setOpenState({
@@ -824,8 +801,8 @@ export function KitFabMenu({
               <iframe
                 ref={iframeRef}
                 title="VS Code"
-                loading="lazy"
-                fetchPriority="low"
+                loading="eager"
+                fetchPriority="high"
                 className={cn(
                   "h-full min-h-0 w-full flex-1 border-0 transition-opacity duration-300",
                   editorIframeLoaded ? "opacity-100" : "opacity-0",
