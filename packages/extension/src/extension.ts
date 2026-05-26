@@ -40,18 +40,16 @@ class Tr33ImageEditorProvider
       return;
     }
 
-    const apiUrl = this.fs.getApiUrl();
-    const res = await fetch(`${apiUrl}/blob/${blobOid}/raw`);
-    if (!res.ok) {
+    const bytes = await this.fs.readBlobBytes(blobOid);
+    if (!bytes) {
       webviewPanel.webview.html =
         "<!DOCTYPE html><html><body><p>Failed to load image</p></body></html>";
       return;
     }
 
-    const bytes = new Uint8Array(await res.arrayBuffer());
     let binary = "";
     for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
+      binary += String.fromCharCode(bytes[i]!);
     }
     const base64 = btoa(binary);
 

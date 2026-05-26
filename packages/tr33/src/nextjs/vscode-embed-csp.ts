@@ -82,6 +82,16 @@ export function vscodeWebStaticCacheHeaders(commit: string): Record<string, stri
   };
 }
 
+/** Git trees/blobs keyed by OID — safe to cache immutably in browser and CDN. */
+export function gitObjectCacheHeaders(oid: string): Record<string, string> {
+  return {
+    "cache-control": "public, max-age=31536000, immutable",
+    "cdn-cache-control": "public, max-age=31536000, immutable",
+    "vercel-cdn-cache-control": "public, max-age=31536000, immutable",
+    "x-git-oid": oid,
+  };
+}
+
 /** Cacheable workbench shell — ref comes from same-origin `localStorage`, not this HTML. */
 export function vscodeEmbedEditorCacheHeaders(commit: string): Record<string, string> {
   return {

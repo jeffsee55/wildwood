@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { generateBranchName } from "@/lib/generate-branch-name";
+import { warmGitObjectCache } from "@/lib/warm-git-object-cache";
 import { useShadowContainer } from "@/lib/shadow-root";
 import { cn } from "@/lib/utils";
 
@@ -88,6 +89,8 @@ function normalizeApiBase(base: string): string {
 
 type KitFabMenuProps = {
   apiBase?: string;
+  /** GitHub owner/repo — IndexedDB cache key prefix */
+  repo?: string;
   /** Default ref when cookie is absent */
   configRef?: string;
   /** Active ref from cookie (server) */
@@ -124,6 +127,7 @@ type EditorBootstrapResponse = {
 
 export function KitFabMenu({
   apiBase = "/api",
+  repo,
   configRef = "main",
   activeRef = null,
   auth,
@@ -163,13 +167,26 @@ export function KitFabMenu({
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const base = normalizeApiBase(apiBase);
   const displayRef = activeRef ?? configRef;
+  const gitOrigin = typeof window !== "undefined" ? window.location.origin : "";
 
   React.useEffect(() => {
     persistActiveRefToStorage(displayRef);
   }, [displayRef]);
 
+  React.useEffect(() => {
+    if (!repo || !gitOrigin) return;
+    void warmGitObjectCache({
+      origin: gitOrigin,
+      apiBase: base,
+      repo,
+      ref: displayRef,
+    });
+  }, [base, displayRef, gitOrigin, repo]);
+
   const switchBranchCookie = React.useCallback(
     async (ref: string) => {
+      const current = activeRef ?? configRef;
+      if (ref === current) return;
       const res = await fetch(`${base}/git/switch-branch`, {
         method: "POST",
         credentials: "include",
@@ -183,7 +200,7 @@ export function KitFabMenu({
         );
       }
     },
-    [base],
+    [base, activeRef, configRef],
   );
 
   const createDraftBranchRef = React.useCallback(async (): Promise<string> => {
@@ -220,13 +237,20 @@ export function KitFabMenu({
       if (refForOpen === configRef) {
         activeRef = await createDraftBranchRef();
         if (runId !== editorOpenRunRef.current) return;
-      }
-      await switchBranchCookie(activeRef);
-      if (runId !== editorOpenRunRef.current) return;
-      if (activeRef !== refForOpen) {
+        persistActiveRefToStorage(activeRef);
         notifyExtensionActiveRef(activeRef);
         scheduleRefresh();
       }
+
+      if (repo && gitOrigin) {
+        await warmGitObjectCache({
+          origin: gitOrigin,
+          apiBase: base,
+          repo,
+          ref: activeRef,
+        });
+      }
+      if (runId !== editorOpenRunRef.current) return;
 
       const res = await fetch(`${base}/git/editor-bootstrap`, {
         credentials: "include",
@@ -361,8 +385,6 @@ export function KitFabMenu({
   const [gitError, setGitError] = React.useState<string | null>(null);
   const gitBusyRef = React.useRef(false);
 
-  const gitOrigin = typeof window !== "undefined" ? window.location.origin : "";
-
   const loadBranches = React.useCallback(async () => {
     if (!gitOrigin) return;
     setBranchesLoading(true);
@@ -444,7 +466,6 @@ export function KitFabMenu({
       setBranches((prev) =>
         prev.includes(trimmed) ? prev : [...prev, trimmed].sort(),
       );
-      await switchBranchCookie(trimmed);
       notifyExtensionActiveRef(trimmed);
       scheduleRefresh();
     } catch (e) {

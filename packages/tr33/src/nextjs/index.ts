@@ -16,6 +16,7 @@ import {
   VSCODE_EMBED_HTML_RESPONSE_HEADERS,
   vscodeEmbedCorsHeaders,
   vscodeEmbedEditorCacheHeaders,
+  gitObjectCacheHeaders,
   vscodeWebStaticCacheHeaders,
   withVscodeEmbedCors,
 } from "@/nextjs/vscode-embed-csp";
@@ -438,7 +439,9 @@ export const createHandler = (
           repo,
         });
       }
-      return Response.json(treeEntry);
+      return Response.json(treeEntry, {
+        headers: gitObjectCacheHeaders(oid),
+      });
     } catch (error) {
       console.error("Failed to fetch tree:", error);
       return new Response(
@@ -460,11 +463,14 @@ export const createHandler = (
       // First, try to get from local database
       const localBlobs = await client._.git.db.blobs.batchGet({ oids: [oid] });
       if (localBlobs.length > 0) {
-        return Response.json({
-          type: "blob",
-          oid: localBlobs[0].oid,
-          content: localBlobs[0].content,
-        });
+        return Response.json(
+          {
+            type: "blob",
+            oid: localBlobs[0].oid,
+            content: localBlobs[0].content,
+          },
+          { headers: gitObjectCacheHeaders(oid) },
+        );
       }
 
       // If not found locally, fetch from remote
@@ -473,11 +479,14 @@ export const createHandler = (
         return new Response("Blob not found", { status: 404 });
       }
 
-      return Response.json({
-        type: "blob",
-        oid: blobs[0].oid,
-        content: blobs[0].content,
-      });
+      return Response.json(
+        {
+          type: "blob",
+          oid: blobs[0].oid,
+          content: blobs[0].content,
+        },
+        { headers: gitObjectCacheHeaders(oid) },
+      );
     } catch (error) {
       console.error("Failed to fetch blob:", error);
       return new Response(
@@ -498,7 +507,10 @@ export const createHandler = (
       const localBlobs = await client._.git.db.blobs.batchGet({ oids: [oid] });
       if (localBlobs.length > 0) {
         return new Response(new TextEncoder().encode(localBlobs[0].content), {
-          headers: { "Content-Type": "application/octet-stream" },
+          headers: {
+            "Content-Type": "application/octet-stream",
+            ...gitObjectCacheHeaders(oid),
+          },
         });
       }
 
@@ -508,7 +520,10 @@ export const createHandler = (
         return new Response("Blob not found", { status: 404 });
       }
       return new Response(new Uint8Array(raw), {
-        headers: { "Content-Type": "application/octet-stream" },
+        headers: {
+          "Content-Type": "application/octet-stream",
+          ...gitObjectCacheHeaders(oid),
+        },
       });
     } catch (error) {
       console.error("Failed to fetch raw blob:", error);

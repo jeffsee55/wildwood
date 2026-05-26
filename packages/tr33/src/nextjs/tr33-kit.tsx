@@ -27,6 +27,7 @@ export async function Tr33Kit({ tr33, apiBase, theme, auth }: Tr33KitProps) {
   return (
     <Kit
       apiBase={apiBase}
+      repo={`${tr33._.config.org}/${tr33._.config.repo}`}
       configRef={tr33._.config.ref}
       activeRef={activeRef}
       theme={theme}

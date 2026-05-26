@@ -19,6 +19,12 @@ export {
 } from "./trees";
 
 export {
+	GitObjectCache,
+	getGitObjectCache,
+	gitObjectCacheKey,
+} from "./git-object-cache";
+
+export {
 	calculateBlobOid,
 	calculateBlobOidFromBytes,
 	calculateCommitOid,

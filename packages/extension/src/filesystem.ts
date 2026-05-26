@@ -6,6 +6,7 @@ import {
   Trees,
   calculateBlobOid,
   calculateBlobOidFromBytes,
+  getGitObjectCache,
 } from "tr33-store";
 import * as vscode from "vscode";
 import { logger } from "./extension";
@@ -97,6 +98,7 @@ export class Tr33FileSystemProvider
 
   paths: string[] = [];
   trees: Trees;
+  private objectCache = getGitObjectCache();
 
   private _conflictPaths = new Set<string>();
 
@@ -122,43 +124,58 @@ export class Tr33FileSystemProvider
   // ── Gitable (raw data source — Trees caches on top) ────────────────
 
   async getTree(oid: string): Promise<TreeEntries | null> {
-    const url = `${this.apiUrl}/tree/${encodeURIComponent(String(oid))}`;
-    try {
-      const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) {
-        logger(
-          "getTree HTTP error",
-          res.status,
-          url,
-          await res.text().catch(() => ""),
-        );
+    return this.objectCache.fetchTree(this.repo, oid, async () => {
+      const url = `${this.apiUrl}/tree/${encodeURIComponent(String(oid))}`;
+      try {
+        const res = await fetch(url, { credentials: "include" });
+        if (!res.ok) {
+          logger(
+            "getTree HTTP error",
+            res.status,
+            url,
+            await res.text().catch(() => ""),
+          );
+          return null;
+        }
+        const tree = (await res.json()) as TreeEntries;
+        logger("getTree ok", {
+          oid: oid.slice(0, 7),
+          entryCount: Object.keys(tree).length,
+        });
+        return tree;
+      } catch (e) {
+        logger("getTree fetch failed", url, e);
         return null;
       }
-      const tree = (await res.json()) as TreeEntries;
-      logger("getTree ok", {
-        oid: oid.slice(0, 7),
-        entryCount: Object.keys(tree).length,
-      });
-      return tree;
-    } catch (e) {
-      logger("getTree fetch failed", url, e);
-      return null;
-    }
+    });
   }
 
   async getBlob(oid: string): Promise<{ oid: string; content: string } | null> {
-    const url = `${this.apiUrl}/blob/${encodeURIComponent(String(oid))}`;
-    try {
-      const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) {
-        logger("getBlob HTTP error", res.status, url);
+    const raw = await this.fetchBlobRaw(oid);
+    if (!raw) return null;
+    return { oid, content: new TextDecoder().decode(raw) };
+  }
+
+  private async fetchBlobRaw(oid: string): Promise<Uint8Array | null> {
+    return this.objectCache.fetchBlobRaw(this.repo, oid, async () => {
+      const url = `${this.apiUrl}/blob/${encodeURIComponent(String(oid))}/raw`;
+      try {
+        const res = await fetch(url, { credentials: "include" });
+        if (!res.ok) {
+          logger("getBlob HTTP error", res.status, url);
+          return null;
+        }
+        return new Uint8Array(await res.arrayBuffer());
+      } catch (e) {
+        logger("getBlob fetch failed", url, e);
         return null;
       }
-      const data = (await res.json()) as { content: string };
-      return { oid, content: data.content };
-    } catch (e) {
-      logger("getBlob fetch failed", url, e);
-      return null;
+    });
+  }
+
+  private async persistTreesToCache(oids: string[]): Promise<void> {
+    for (const { oid, entries } of this.trees.exportTreesForPersist(oids)) {
+      await this.objectCache.putTree(this.repo, oid, entries);
     }
   }
 
@@ -170,6 +187,11 @@ export class Tr33FileSystemProvider
     } catch {
       return null;
     }
+  }
+
+  /** Read blob bytes (IndexedDB → network, deduped). */
+  async readBlobBytes(oid: string): Promise<Uint8Array | null> {
+    return this.fetchBlobRaw(oid);
   }
 
   // ── Ref management ──────────────────────────────────────────────────
@@ -198,11 +220,24 @@ export class Tr33FileSystemProvider
     await this.fetchWorktreeState();
     await this.ensureDraftBranch();
     const rootOid = await this.getRootTreeOid();
+    const seeded = await this.objectCache.seedTreeStore({
+      repo: this.repo,
+      rootOid,
+      treeStore: this.trees.treeStore,
+    });
+    if (this.commitTreeOid && this.commitTreeOid !== rootOid) {
+      await this.objectCache.seedTreeStore({
+        repo: this.repo,
+        rootOid: this.commitTreeOid,
+        treeStore: this.trees.treeStore,
+      });
+    }
     const tree = await this.trees.getTree(rootOid);
     logger("initializeWorkspace", {
       ref: this.currentRef,
       rootOid: rootOid.slice(0, 7),
       entryCount: tree ? Object.keys(tree).length : 0,
+      seededFromCache: seeded,
     });
   }
 
@@ -882,9 +917,9 @@ export class Tr33FileSystemProvider
       ? await this.lookupBlobOidFromTree(oid, uri)
       : await this.lookupBlobOid(uri);
     if (!blobOid) throw vscode.FileSystemError.FileNotFound(uri);
-    const res = await fetch(`${this.apiUrl}/blob/${blobOid}/raw`);
-    if (!res.ok) throw vscode.FileSystemError.FileNotFound(uri);
-    return new Uint8Array(await res.arrayBuffer());
+    const bytes = await this.fetchBlobRaw(blobOid);
+    if (!bytes) throw vscode.FileSystemError.FileNotFound(uri);
+    return bytes;
   }
 
   async writeFile(
@@ -931,6 +966,8 @@ export class Tr33FileSystemProvider
           );
           this._conflictPaths.delete(path);
           this.rootTreeOid = addResult.rootTreeOid;
+          const binaryOid = await calculateBlobOidFromBytes(content);
+          await this.objectCache.putBlobRaw(this.repo, binaryOid, content);
           this._emitter.fire([
             { type: vscode.FileChangeType.Changed, uri: this.getRootUri() },
           ]);
@@ -963,6 +1000,8 @@ export class Tr33FileSystemProvider
 
         this._conflictPaths.delete(path);
         this.rootTreeOid = patchResult.rootTreeOid;
+        await this.objectCache.putBlobRaw(this.repo, blobOid, content);
+        await this.persistTreesToCache(applied.trees);
         this._emitter.fire([
           { type: vscode.FileChangeType.Changed, uri: this.getRootUri() },
         ]);
