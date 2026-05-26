@@ -19,8 +19,24 @@ import {
 /** Distinct from VS Code's built-in `vscode-vfs` (Remote Repositories). */
 export const SCHEME = "tr33-vfs";
 
-/** Must match `TR33_SYNC_HOST_ACTIVE_REF_HEADER` in `tr33` (`preview-cookies.ts`). */
-const TR33_SYNC_HOST_ACTIVE_REF_HEADER = "x-tr33-sync-host-active-ref";
+
+async function postSwitchBranch(
+  apiUrl: string,
+  ref: string,
+): Promise<void> {
+  const res = await fetch(`${apiUrl}/switch-branch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ref }),
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `Failed to switch branch to ${ref}: ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`,
+    );
+  }
+}
 
 const BRANCH_CITIES = [
   "jakarta", "istanbul", "cairo", "mumbai", "tokyo", "seoul", "lima",
@@ -284,9 +300,10 @@ export class Tr33FileSystemProvider
     this.currentRef = newRef;
     this.rootTreeOid = null;
     this.commitTreeOid = null;
-    await this.fetchWorktreeState({
-      syncHostActiveRef: notifyParent,
-    });
+    if (notifyParent) {
+      await postSwitchBranch(this.apiUrl, newRef);
+    }
+    await this.fetchWorktreeState();
     const nextRootTreeOid = this.rootTreeOid;
 
     const rootUri = this.getRootUri();
@@ -617,23 +634,13 @@ export class Tr33FileSystemProvider
 
   // ── Internal helpers ────────────────────────────────────────────────
 
-  private async fetchRefData(
-    ref: string,
-    options?: { syncHostActiveRef?: boolean },
-  ): Promise<{
+  private async fetchRefData(ref: string): Promise<{
     commit: { oid: string; treeOid: string };
     rootTreeOid: string | null;
   }> {
-    const headers: Record<string, string> = {};
-    if (options?.syncHostActiveRef) {
-      headers[TR33_SYNC_HOST_ACTIVE_REF_HEADER] = "1";
-    }
     const url = `${this.apiUrl}/worktrees/${encodeURIComponent(ref)}`;
-    logger(
-      "GET worktrees",
-      { ref, syncHost: Boolean(options?.syncHostActiveRef), url },
-    );
-    const res = await fetch(url, { credentials: "include", headers });
+    logger("GET worktrees", { ref, url });
+    const res = await fetch(url, { credentials: "include" });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       logger("GET worktrees failed", res.status, body.slice(0, 500));
@@ -671,10 +678,8 @@ export class Tr33FileSystemProvider
     }
   }
 
-  private async fetchWorktreeState(options?: {
-    syncHostActiveRef?: boolean;
-  }): Promise<void> {
-    const data = await this.fetchRefData(this.currentRef, options);
+  private async fetchWorktreeState(): Promise<void> {
+    const data = await this.fetchRefData(this.currentRef);
     const nextCommitOid = data.commit.treeOid;
     const nextRootOid = data.rootTreeOid ?? data.commit.treeOid;
     const changed =

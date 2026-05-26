@@ -81,7 +81,7 @@ const routeParamPath = (
 
 export const createHandler = (
   client: Tr33Client,
-  options?: { currentRef?: string },
+  _options?: { currentRef?: string },
 ) => {
   const base = new H3();
   const app = new H3();
@@ -92,7 +92,6 @@ export const createHandler = (
   const repo = git.config.repo;
   const repoFull = `${org}/${repo}`;
   const ref = git.config.ref;
-  const serverCurrentRef = options?.currentRef;
   const remote = git.remote;
   const pkg = extensionPkgSchema.parse(extensionPkg);
 
@@ -149,27 +148,10 @@ export const createHandler = (
     const webEndpointBase = `${event.url.origin}${dir}/cdn/${cdn.commit}`;
     const comparisonRef = ref;
     const cookies = cookiesFromCookieHeader(event.req.headers.get("cookie"));
-    const explicitActiveRefCookie = cookies
-      .get(TR33_ACTIVE_REF_COOKIE)
-      ?.value?.trim();
-    const refFromCookie = resolveActiveRef({
+    const currentRef = resolveActiveRef({
       tr33: client,
       cookies,
     });
-    const queryRef = event.url.searchParams.get("ref")?.trim();
-    /*
-     * Prefer `tr33-active-ref` over `?ref=` when the cookie is set. The Kit iframe always
-     * adds `?ref=` from server props; after a branch switch the cookie updates immediately
-     * while RSC may still serve stale `activeRef`, so query would otherwise win and open
-     * the editor on the wrong worktree.
-     */
-    const currentRef =
-      serverCurrentRef ??
-      (explicitActiveRefCookie
-        ? explicitActiveRefCookie
-        : queryRef
-          ? queryRef
-          : refFromCookie);
     /*
      * Builtin extension URL must be path-only: no `?query` here. VS Code joins
      * `.../extension` + `/package.json`; a `?` in the path becomes `%3F` and requests
@@ -268,14 +250,16 @@ export const createHandler = (
     }
   });
 
-  const warmEditorBootstrap = async (refName: string) => {
+  const checkEditorReady = async (refName: string) => {
     await client._.db.init();
     const resolved = await git.resolveWorktreeForApi({ ref: refName });
     const treeOid = resolved.rootTreeOid ?? resolved.commit.treeOid;
     const tree = await git.getTree(treeOid);
     const entryCount = tree ? Object.keys(tree).length : 0;
     if (entryCount === 0) {
-      throw new Error(`Tree ${treeOid.slice(0, 7)} has no entries`);
+      throw new Error(
+        `Repository tree for "${refName}" is not indexed yet. Redeploy after build prefetch completes.`,
+      );
     }
     return {
       ready: true as const,
@@ -287,27 +271,72 @@ export const createHandler = (
   };
 
   gitService.get("/editor-bootstrap", async (event) => {
-    const refName = event.url.searchParams.get("ref")?.trim();
-    if (!refName) {
-      return new Response("ref query parameter required", { status: 400 });
-    }
+    const cookies = cookiesFromCookieHeader(event.req.headers.get("cookie"));
+    const refName = resolveActiveRef({ tr33: client, cookies });
     try {
+      if (!(remote instanceof GitHubRemote)) {
+        return Response.json({
+          status: "not_configured",
+          repo: repoFull,
+          message:
+            "GitHub App credentials are not configured on this deployment. Set GITHUB_APP_ID and GITHUB_PRIVATE_KEY in Vercel, then redeploy.",
+        });
+      }
+      const installation = await remote.getRepoInstallationStatus();
+      if (installation.status === "not_installed") {
+        const appSlug = process.env.GITHUB_APP_SLUG?.trim();
+        return Response.json({
+          status: "not_installed",
+          repo: repoFull,
+          installUrl: appSlug
+            ? `https://github.com/apps/${appSlug}/installations/new`
+            : undefined,
+          hint: `Install the GitHub App on ${repoFull}. Choose "Only select repositories" and pick ${repo}.`,
+        });
+      }
+      if (installation.status === "not_configured") {
+        return Response.json({
+          status: "not_configured",
+          repo: repoFull,
+          message:
+            "GitHub App credentials are not configured on this deployment.",
+        });
+      }
+      const payload = await checkEditorReady(refName);
+      return Response.json({ status: "ready", ...payload });
+    } catch (error) {
+      console.error("Failed editor bootstrap:", error);
+      return Response.json(
+        {
+          status: "error",
+          message:
+            error instanceof Error ? error.message : String(error),
+        },
+        { status: 500 },
+      );
+    }
+  });
+
+  gitService.post("/switch-branch", async (event) => {
+    try {
+      const body = await event.req.json();
+      const { ref: refParam } = z.object({ ref: z.string() }).parse(body);
+      const refName = refParam.trim();
+      if (!refName) {
+        return new Response("ref is required", { status: 400 });
+      }
       const authError = await authorizeGitAction(event.req, {
         type: "git.switchRef",
         ref: refName,
       });
       if (authError) return authError;
-      tr33GitApiLog("GET /editor-bootstrap", { ref: refName, org, repo });
-      const payload = await warmEditorBootstrap(refName);
-      tr33GitApiLog("GET /editor-bootstrap — ok", {
-        ref: refName,
-        entryCount: payload.entryCount,
-      });
-      return Response.json(payload);
+      await client._.db.init();
+      await git.resolveWorktreeForApi({ ref: refName });
+      return Response.json({ ok: true, ref: refName });
     } catch (error) {
-      console.error("Failed to warm editor bootstrap:", error);
+      console.error("Failed to switch branch:", error);
       return new Response(
-        `Failed to warm editor: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to switch branch: ${error instanceof Error ? error.message : String(error)}`,
         { status: 500 },
       );
     }
@@ -333,24 +362,13 @@ export const createHandler = (
       });
       if (authError) return authError;
 
-      const syncHost =
-        event.req.headers.get(TR33_SYNC_HOST_ACTIVE_REF_HEADER)?.trim() ===
-        "1";
-
-      if (syncHost) {
-        await client._.git.switch({ ref: refName });
-      }
-
       await client._.db.init();
       const resolved = await git.resolveWorktreeForApi({ ref: refName });
-      tr33GitApiLog(
-        syncHost ? "GET /worktrees — ok (indexed)" : "GET /worktrees — ok (read)",
-        {
-          ref: refName,
-          commitTree: resolved.commit.treeOid.slice(0, 7),
-          hasRootTree: Boolean(resolved.rootTreeOid),
-        },
-      );
+      tr33GitApiLog("GET /worktrees — ok (read)", {
+        ref: refName,
+        commitTree: resolved.commit.treeOid.slice(0, 7),
+        hasRootTree: Boolean(resolved.rootTreeOid),
+      });
       return Response.json(resolved);
     } catch (error) {
       console.error("Failed to fetch worktree:", error);
@@ -1027,14 +1045,6 @@ export const createHandler = (
       setNoStoreHeaders(event);
       setResponseHeader(event, "Content-Security-Policy", VSCODE_EMBED_DOCUMENT_CSP);
       const workbenchConfig = await getWorkbenchConfig(event);
-      const headRef = workbenchConfig.configurationDefaults?.["tr33.headRef"];
-      if (typeof headRef === "string" && headRef.trim()) {
-        try {
-          await warmEditorBootstrap(headRef.trim());
-        } catch (error) {
-          console.error("[tr33:vscode] editor warm failed:", error);
-        }
-      }
       const vscodeWebCdn = await resolveVscodeWebCdn();
       const code = getCode({
         origin: event.url.origin,
@@ -1240,7 +1250,7 @@ export type Tr33NextHandlerOptions = HandleOptions & {
  * Preview exit, `tr33-active-ref` cookie on branch-changing routes — applied after H3 `fetch`.
  *
  * - **`POST …/tr33/preview`** — clears **`tr33-active-ref`**
- * - **`POST …/git/create-branch`** / **`GET …/git/worktrees/:ref`** (+ sync header) — sets cookie
+ * - **`POST …/git/create-branch`** / **`POST …/git/switch-branch`** — sets cookie
  */
 const tr33NextLog = (...args: unknown[]) => {
   console.info("[tr33:next]", ...args);
@@ -1331,12 +1341,18 @@ async function withNextTr33Response(
         return response;
       }
     }
-  } else if (request.method === "GET") {
-    const m = pathname.match(/\/git\/worktrees\/([^/]+)\/?$/);
-    if (m) {
-      branch = decodeURIComponent(m[1]);
-      setActiveRefCookie =
-        request.headers.get(TR33_SYNC_HOST_ACTIVE_REF_HEADER)?.trim() === "1";
+  } else if (
+    request.method === "POST" &&
+    /\/git\/switch-branch\/?$/.test(pathname)
+  ) {
+    try {
+      const data = (await response.clone().json()) as { ref?: string };
+      if (typeof data.ref === "string" && data.ref.trim()) {
+        branch = data.ref.trim();
+        setActiveRefCookie = true;
+      }
+    } catch {
+      return response;
     }
   }
 
@@ -1347,10 +1363,6 @@ async function withNextTr33Response(
   tr33NextLog("set tr33-active-ref cookie + response wrap", {
     branch,
     pathname,
-    syncHeader:
-      request.method === "GET"
-        ? request.headers.get(TR33_SYNC_HOST_ACTIVE_REF_HEADER)
-        : undefined,
   });
 
   const cacheTag = options?.revalidateTagOnDraftExit;

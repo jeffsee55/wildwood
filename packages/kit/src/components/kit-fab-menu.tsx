@@ -29,10 +29,6 @@ const TR33_KIT_CLOSE_MESSAGE = "tr33-kit-close-editor";
 const TR33_KIT_BRANCH_CHANGED_MESSAGE = "tr33-kit-branch-changed";
 /** Must match `notifyKitParentWorkspaceChanged` in packages/extension. */
 const TR33_KIT_WORKSPACE_CHANGED_MESSAGE = "tr33-kit-workspace-changed";
-/** Session-scoped ref when opening the editor off the default config ref (tab survives navigations). */
-const TR33_KIT_SESSION_EDITOR_REF_KEY = "tr33.kit.sessionEditorRef";
-/** Must match `TR33_SYNC_HOST_ACTIVE_REF_HEADER` in `tr33` (`preview-cookies`). */
-const TR33_SYNC_HOST_ACTIVE_REF_HEADER = "x-tr33-sync-host-active-ref";
 /**
  * Same-origin BroadcastChannel name — must match `subscribeHostRef` in `tr33-vscode` (`host-bridge.ts`).
  */
@@ -80,13 +76,6 @@ function normalizeApiBase(base: string): string {
   return b.startsWith("/") ? b : `/${b}`;
 }
 
-type GitHubInstallationResponse = {
-  status: "installed" | "not_installed" | "not_configured";
-  repo?: string;
-  installUrl?: string;
-  hint?: string;
-};
-
 type KitFabMenuProps = {
   apiBase?: string;
   /** Default ref when cookie is absent */
@@ -94,6 +83,32 @@ type KitFabMenuProps = {
   /** Active ref from cookie (server) */
   activeRef?: string | null;
   auth?: KitAuthConfig;
+};
+
+type EditorOpenState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | {
+      kind: "needs-setup";
+      repo: string;
+      message: string;
+    }
+  | {
+      kind: "needs-install";
+      repo: string;
+      installUrl?: string;
+      hint: string;
+    }
+  | { kind: "error"; message: string }
+  | { kind: "ready" };
+
+type EditorBootstrapResponse = {
+  status: "ready" | "not_configured" | "not_installed" | "error";
+  repo?: string;
+  message?: string;
+  installUrl?: string;
+  hint?: string;
+  entryCount?: number;
 };
 
 export function KitFabMenu({
@@ -128,132 +143,113 @@ export function KitFabMenu({
   }, [router]);
   const portalContainer = useShadowContainer();
   const [editorOpen, setEditorOpen] = React.useState(false);
-  /** While the editor overlay is open, keep iframe `src` stable so ref sync from the extension does not remount VS Code (only update on open or Kit-driven branch switch). */
-  const [embedRefLocked, setEmbedRefLocked] = React.useState<string | null>(
-    null,
-  );
-  const editorOpenRef = React.useRef(editorOpen);
-  editorOpenRef.current = editorOpen;
-  /** Defer iframe mount until GitHub App install is confirmed (when applicable). */
-  const [iframeReady, setIframeReady] = React.useState(false);
+  const [openState, setOpenState] = React.useState<EditorOpenState>({
+    kind: "idle",
+  });
   const [editorIframeLoaded, setEditorIframeLoaded] = React.useState(false);
-  const [editorBootstrap, setEditorBootstrap] = React.useState<
-    "idle" | "checking" | "blocked" | "ready"
-  >("idle");
-  const [installPrompt, setInstallPrompt] = React.useState<{
-    installUrl?: string;
-    repo?: string;
-    hint?: string;
-  } | null>(null);
-  const installCheckRef = React.useRef(0);
+  const editorOpenRunRef = React.useRef(0);
+  const iframeSrcRef = React.useRef<string | null>(null);
+  const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const base = normalizeApiBase(apiBase);
+  const displayRef = activeRef ?? configRef;
 
-  const warmEditorWorktree = React.useCallback(
+  const switchBranchCookie = React.useCallback(
     async (ref: string) => {
-      const res = await fetch(
-        `${base}/git/editor-bootstrap?ref=${encodeURIComponent(ref)}`,
-        { credentials: "include" },
-      );
+      const res = await fetch(`${base}/git/switch-branch`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref }),
+      });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
         throw new Error(
-          body.trim() || `Failed to prepare workspace (${res.status})`,
+          body.trim() || `Could not switch to branch "${ref}" (${res.status})`,
         );
-      }
-      const data = (await res.json()) as { ready?: boolean; entryCount?: number };
-      if (!data.ready) {
-        throw new Error("Repository tree is not ready yet");
       }
     },
     [base],
   );
 
-  const finishEditorBootstrap = React.useCallback((checkId: number) => {
-    setEditorBootstrap("ready");
-    requestIdleCallback(() => {
-      if (installCheckRef.current === checkId) {
-        setIframeReady(true);
-      }
-    }, { timeout: 2000 });
-  }, []);
+  const runEditorOpenSequenceRef = React.useRef<
+    (refForOpen: string) => Promise<void>
+  >(async () => {});
+  runEditorOpenSequenceRef.current = async (refForOpen: string) => {
+    const runId = ++editorOpenRunRef.current;
+    setOpenState({ kind: "checking" });
+    setEditorIframeLoaded(false);
+    try {
+      await switchBranchCookie(refForOpen);
+      if (runId !== editorOpenRunRef.current) return;
 
-  const recheckGitHubInstallation = React.useCallback(
-    async (ref: string) => {
-      const checkId = ++installCheckRef.current;
-      setEditorBootstrap("checking");
-      setIframeReady(false);
-      setEditorIframeLoaded(false);
-      setInstallPrompt(null);
-      try {
-        const res = await fetch(`${base}/github/installation`, {
-          credentials: "include",
+      const res = await fetch(`${base}/git/editor-bootstrap`, {
+        credentials: "include",
+      });
+      if (runId !== editorOpenRunRef.current) return;
+
+      const data = (await res.json()) as EditorBootstrapResponse;
+      if (!res.ok || data.status === "error") {
+        setOpenState({
+          kind: "error",
+          message:
+            data.message?.trim() ||
+            `Failed to prepare the editor (${res.status})`,
         });
-        if (installCheckRef.current !== checkId) {
-          return;
-        }
-        if (!res.ok) {
-          await warmEditorWorktree(ref);
-          if (installCheckRef.current !== checkId) {
-            return;
-          }
-          finishEditorBootstrap(checkId);
-          return;
-        }
-        const data = (await res.json()) as GitHubInstallationResponse;
-        if (data.status === "not_installed") {
-          setInstallPrompt({
-            installUrl: data.installUrl,
-            repo: data.repo,
-            hint: data.hint,
-          });
-          setEditorBootstrap("blocked");
-          return;
-        }
-        await warmEditorWorktree(ref);
-        if (installCheckRef.current !== checkId) {
-          return;
-        }
-        finishEditorBootstrap(checkId);
-      } catch (error) {
-        if (installCheckRef.current !== checkId) {
-          return;
-        }
-        setGitError(
+        return;
+      }
+      if (data.status === "not_configured") {
+        setOpenState({
+          kind: "needs-setup",
+          repo: data.repo ?? refForOpen,
+          message:
+            data.message?.trim() ||
+            "GitHub App credentials are not configured on this deployment.",
+        });
+        return;
+      }
+      if (data.status === "not_installed") {
+        setOpenState({
+          kind: "needs-install",
+          repo: data.repo ?? refForOpen,
+          installUrl: data.installUrl,
+          hint:
+            data.hint?.trim() ||
+            "Install the GitHub App on this repository to edit files.",
+        });
+        return;
+      }
+
+      iframeSrcRef.current = `${window.location.origin}${base}/vscode/editor`;
+      setOpenState({ kind: "ready" });
+    } catch (error) {
+      if (runId !== editorOpenRunRef.current) return;
+      setOpenState({
+        kind: "error",
+        message:
           error instanceof Error
             ? error.message
             : "Failed to prepare the editor workspace",
-        );
-        setEditorBootstrap("idle");
-        setIframeReady(false);
-      }
-    },
-    [base, finishEditorBootstrap, warmEditorWorktree],
-  );
+      });
+    }
+  };
 
-  /** Cookie + server props can lag behind a successful switch; keep UI + editor URL in sync immediately. */
-  const [optimisticRef, setOptimisticRef] = React.useState<string | null>(null);
-  const iframeRef = React.useRef<HTMLIFrameElement>(null);
-  const displayRef = optimisticRef ?? activeRef ?? configRef;
+  const retryEditorOpen = React.useCallback(() => {
+    if (!editorOpen) return;
+    void runEditorOpenSequenceRef.current(displayRef);
+  }, [displayRef, editorOpen]);
 
   React.useEffect(() => {
     if (!editorOpen) {
-      installCheckRef.current += 1;
-      setEditorBootstrap("idle");
-      setIframeReady(false);
-      setInstallPrompt(null);
+      editorOpenRunRef.current += 1;
+      iframeSrcRef.current = null;
+      setOpenState({ kind: "idle" });
+      setEditorIframeLoaded(false);
       return;
     }
-    void recheckGitHubInstallation(displayRef);
-  }, [displayRef, editorOpen, recheckGitHubInstallation]);
-
-  React.useEffect(() => {
-    if (optimisticRef == null) return;
-    const serverRef = activeRef ?? configRef;
-    if (serverRef === optimisticRef) {
-      kitLog("clear optimisticRef (server caught up)", { serverRef });
-      setOptimisticRef(null);
-    }
-  }, [activeRef, configRef, optimisticRef]);
+    void runEditorOpenSequenceRef.current(displayRef);
+    // Only re-run when the overlay opens/closes — not when displayRef changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ref captured at open
+  }, [editorOpen]);
 
   const hostRefChannelRef = React.useRef<BroadcastChannel | null>(null);
   React.useEffect(() => {
@@ -277,7 +273,6 @@ export function KitFabMenu({
       const ref = typeof ev.data?.ref === "string" ? ev.data.ref.trim() : "";
       if (ref.length === 0) return;
       kitLog("BroadcastChannel extension→host", ref);
-      setOptimisticRef(ref);
       scheduleRefresh();
     };
     return () => bc.close();
@@ -356,24 +351,8 @@ export function KitFabMenu({
       gitBusyRef.current = true;
       setBranchBusy(true);
       try {
-        const res = await fetch(
-          `${window.location.origin}${base}/git/worktrees/${encodeURIComponent(ref)}`,
-          {
-            credentials: "include",
-            headers: { [TR33_SYNC_HOST_ACTIVE_REF_HEADER]: "1" },
-          },
-        );
-        if (!res.ok) {
-          setGitError(
-            `Could not switch branch: ${res.status} ${await res.text()}`,
-          );
-          return;
-        }
-        setOptimisticRef(ref);
+        await switchBranchCookie(ref);
         notifyExtensionActiveRef(ref);
-        if (editorOpenRef.current) {
-          setEmbedRefLocked(ref);
-        }
         scheduleRefresh();
       } catch (e) {
         setGitError(e instanceof Error ? e.message : String(e));
@@ -382,7 +361,7 @@ export function KitFabMenu({
         setBranchBusy(false);
       }
     },
-    [base, displayRef, notifyExtensionActiveRef, scheduleRefresh],
+    [displayRef, notifyExtensionActiveRef, scheduleRefresh, switchBranchCookie],
   );
 
   const createBranch = React.useCallback(async () => {
@@ -415,11 +394,8 @@ export function KitFabMenu({
       setBranches((prev) =>
         prev.includes(trimmed) ? prev : [...prev, trimmed].sort(),
       );
-      setOptimisticRef(trimmed);
+      await switchBranchCookie(trimmed);
       notifyExtensionActiveRef(trimmed);
-      if (editorOpenRef.current) {
-        setEmbedRefLocked(trimmed);
-      }
       scheduleRefresh();
     } catch (e) {
       setGitError(e instanceof Error ? e.message : String(e));
@@ -427,7 +403,7 @@ export function KitFabMenu({
       gitBusyRef.current = false;
       setBranchBusy(false);
     }
-  }, [base, configRef, displayRef, notifyExtensionActiveRef, scheduleRefresh]);
+  }, [base, configRef, displayRef, notifyExtensionActiveRef, scheduleRefresh, switchBranchCookie]);
 
   React.useEffect(() => {
     if (!gitError) return;
@@ -454,40 +430,10 @@ export function KitFabMenu({
     );
   }, [displayRef, configRef]);
 
-  const editorSrc = React.useMemo(() => {
-    if (typeof window === "undefined") {
-      return "";
-    }
-    const u = new URL(`${window.location.origin}${base}/vscode/editor`);
-    const refParam =
-      editorOpen && embedRefLocked !== null ? embedRefLocked : displayRef;
-    u.searchParams.set("ref", refParam);
-    return u.toString();
-  }, [base, displayRef, editorOpen, embedRefLocked]);
-
-  React.useEffect(() => {
-    if (editorOpen) {
-      setEditorIframeLoaded(false);
-    }
-  }, [editorOpen, editorSrc]);
-
   const openEditor = React.useCallback(() => {
-    if (typeof window !== "undefined") {
-      try {
-        if (offDefaultRef) {
-          sessionStorage.setItem(TR33_KIT_SESSION_EDITOR_REF_KEY, displayRef);
-        } else {
-          sessionStorage.removeItem(TR33_KIT_SESSION_EDITOR_REF_KEY);
-        }
-      } catch {
-        /* quota / private mode */
-      }
-    }
     notifyExtensionActiveRef(displayRef);
-    setEmbedRefLocked(displayRef);
-    setEditorIframeLoaded(false);
     setEditorOpen(true);
-  }, [displayRef, notifyExtensionActiveRef, offDefaultRef]);
+  }, [displayRef, notifyExtensionActiveRef]);
 
   React.useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -522,8 +468,7 @@ export function KitFabMenu({
         const ref =
           typeof event.data.ref === "string" ? event.data.ref.trim() : "";
         if (ref.length > 0) {
-          kitLog("setOptimisticRef", ref);
-          setOptimisticRef(ref);
+          kitLog("branch-changed from editor", ref);
         }
         scheduleRefresh();
         return;
@@ -541,7 +486,6 @@ export function KitFabMenu({
       ) {
         return;
       }
-      setEmbedRefLocked(null);
       setEditorOpen(false);
     };
     window.addEventListener("message", onMessage);
@@ -554,7 +498,6 @@ export function KitFabMenu({
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setEmbedRefLocked(null);
         setEditorOpen(false);
       }
     };
@@ -563,7 +506,7 @@ export function KitFabMenu({
   }, [editorOpen]);
 
   const shell =
-    portalContainer && editorSrc ? (
+    portalContainer ? (
       <>
         <div
           className="pointer-events-none absolute bottom-6 right-6 z-[2147483646]"
@@ -739,7 +682,6 @@ export function KitFabMenu({
                           credentials: "include",
                         },
                       );
-                      setOptimisticRef(null);
                       scheduleRefresh();
                     } catch {
                       /* ignore */
@@ -763,7 +705,21 @@ export function KitFabMenu({
                       className="w-auto max-w-[min(100vw-2rem,26rem)] p-0"
                       container={portalContainer ?? undefined}
                     >
-                      <KitAuthPanel auth={auth} />
+                      <KitAuthPanel auth={auth} mode="session" />
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger className="text-xs">
+                      Developer
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent
+                      side="left"
+                      align="end"
+                      sideOffset={8}
+                      className="w-auto max-w-[min(100vw-2rem,26rem)] p-0"
+                      container={portalContainer ?? undefined}
+                    >
+                      <KitAuthPanel auth={auth} mode="dev-setup" />
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
                 </>
@@ -789,14 +745,11 @@ export function KitFabMenu({
               variant="secondary"
               className="absolute top-0 left-0 z-10 flex h-[35px] w-[35px] min-h-[35px] min-w-[35px] shrink-0 items-center justify-center rounded-none rounded-br-md border border-r border-b bg-background/95 p-0 shadow-sm backdrop-blur hover:bg-accent"
               aria-label="Close embedded editor"
-              onClick={() => {
-                setEmbedRefLocked(null);
-                setEditorOpen(false);
-              }}
+              onClick={() => setEditorOpen(false)}
             >
               <X className="size-4" aria-hidden />
             </Button>
-            {editorOpen && editorBootstrap === "ready" && iframeReady ? (
+            {editorOpen && openState.kind === "ready" && iframeSrcRef.current ? (
               <iframe
                 ref={iframeRef}
                 title="VS Code"
@@ -807,40 +760,72 @@ export function KitFabMenu({
                   editorIframeLoaded ? "opacity-100" : "opacity-0",
                 )}
                 onLoad={() => setEditorIframeLoaded(true)}
-                src={editorSrc}
+                src={iframeSrcRef.current}
               />
             ) : null}
-            {editorOpen &&
-            (editorBootstrap !== "ready" ||
-              !editorIframeLoaded) ? (
+            {editorOpen && openState.kind !== "ready" ? (
               <div
                 className={cn(
                   "absolute inset-0 flex items-center justify-center bg-background text-foreground",
-                  editorBootstrap === "blocked"
+                  openState.kind === "needs-install" ||
+                    openState.kind === "needs-setup" ||
+                    openState.kind === "error"
                     ? "pointer-events-auto"
                     : "pointer-events-none",
                 )}
               >
                 <div className="flex w-[min(90vw,28rem)] flex-col items-center gap-4 rounded-xl border border-border bg-card/80 p-6 text-center shadow-lg backdrop-blur">
-                  {editorBootstrap === "blocked" ? (
+                  {openState.kind === "needs-setup" ? (
+                    <>
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">
+                          GitHub App not configured
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {openState.message}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Set{" "}
+                          <code className="font-mono">GITHUB_APP_ID</code>,{" "}
+                          <code className="font-mono">GITHUB_PRIVATE_KEY</code>,
+                          and{" "}
+                          <code className="font-mono">GITHUB_APP_SLUG</code> on
+                          Vercel, then redeploy. The editor cannot save until
+                          then.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setEditorOpen(false)}
+                      >
+                        Close
+                      </Button>
+                    </>
+                  ) : openState.kind === "needs-install" ? (
                     <>
                       <div className="space-y-2">
                         <p className="text-sm font-medium">
                           Install the GitHub App
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {installPrompt?.hint ??
-                            `Tr33 needs the GitHub App on ${installPrompt?.repo ?? "this repository"} before the editor can load.`}
+                          {openState.hint}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          On GitHub, choose{" "}
+                          <strong>Only select repositories</strong> and pick{" "}
+                          <span className="font-mono">{openState.repo}</span>.
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center justify-center gap-2">
-                        {installPrompt?.installUrl ? (
+                        {openState.installUrl ? (
                           <Button
                             type="button"
                             size="sm"
                             onClick={() => {
                               window.open(
-                                installPrompt.installUrl,
+                                openState.installUrl,
                                 "_blank",
                                 "noopener,noreferrer",
                               );
@@ -853,12 +838,12 @@ export function KitFabMenu({
                           type="button"
                           size="sm"
                           variant="secondary"
-                          onClick={() => void recheckGitHubInstallation(displayRef)}
+                          onClick={() => void retryEditorOpen()}
                         >
                           I&apos;ve installed it
                         </Button>
                       </div>
-                      {!installPrompt?.installUrl ? (
+                      {!openState.installUrl ? (
                         <p className="text-xs text-muted-foreground">
                           Set{" "}
                           <code className="font-mono">GITHUB_APP_SLUG</code> on
@@ -866,6 +851,35 @@ export function KitFabMenu({
                           install page.
                         </p>
                       ) : null}
+                    </>
+                  ) : openState.kind === "error" ? (
+                    <>
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">
+                          Could not open editor
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {openState.message}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => void retryEditorOpen()}
+                        >
+                          Retry
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setEditorOpen(false)}
+                        >
+                          Close
+                        </Button>
+                      </div>
                     </>
                   ) : (
                     <>
@@ -878,15 +892,9 @@ export function KitFabMenu({
                       <div className="space-y-1">
                         <p className="text-sm font-medium">Loading editor</p>
                         <p className="text-xs text-muted-foreground">
-                          {editorBootstrap === "checking"
-                            ? "Preparing repository files and checking GitHub App access…"
-                            : (
-                              <>
-                                Fetching the VS Code workbench for{" "}
-                                <span className="font-mono">{displayRef}</span>
-                                . This can take a moment on a slow network.
-                              </>
-                            )}
+                          Preparing{" "}
+                          <span className="font-mono">{displayRef}</span> from
+                          the indexed repository…
                         </p>
                       </div>
                     </>

@@ -606,7 +606,11 @@ export class Trees {
       let treeOid = rootOid;
       for (const name of dirs) {
         const tree = await this.getTree(treeOid);
-        if (!tree) throw new Error(`Tree not found: ${treeOid}`);
+        if (!tree) {
+          throw new Error(
+            `Tree not found while applying entry "${entry.path}" at "${name}" (${treeOid})`,
+          );
+        }
 
         const child = tree[name];
         if (child && child.type === "tree") {
@@ -623,7 +627,12 @@ export class Trees {
         }
       }
 
-      const leaf = (await this.getTree(treeOid)) ?? {};
+      const leaf = await this.getTree(treeOid);
+      if (!leaf) {
+        throw new Error(
+          `Tree not found while applying entry "${entry.path}" (${treeOid})`,
+        );
+      }
       const updated = {
         ...leaf,
         [fileName]: { type: "blob" as const, oid: entry.oid },

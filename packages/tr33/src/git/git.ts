@@ -43,15 +43,16 @@ export class Git implements Gitable {
 
   async getTree(oid: string): Promise<TreeEntries | null> {
     const treeOid = String(oid);
-    const fromRemote = await this.remote.fetchTree({ oid: treeOid });
     const fromDb = await this.db.trees.get({ oid: treeOid });
-    const remote =
-      fromRemote && Object.keys(fromRemote).length > 0 ? fromRemote : null;
-    const local = fromDb && Object.keys(fromDb).length > 0 ? fromDb : null;
-    if (remote && local) {
-      return { ...remote, ...local };
+    if (fromDb && Object.keys(fromDb).length > 0) {
+      return fromDb;
     }
-    return remote ?? local;
+    const fromRemote = await this.remote.fetchTree({ oid: treeOid });
+    if (fromRemote && Object.keys(fromRemote).length > 0) {
+      await this.db.trees.batchPut([{ oid: treeOid, entries: fromRemote }]);
+      return fromRemote;
+    }
+    return null;
   }
 
   async getBlob(oid: string): Promise<{ oid: string; content: string } | null> {
@@ -61,6 +62,7 @@ export class Git implements Gitable {
     }
     const fromRemote = await this.remote.fetchBlobs({ oids: [oid] });
     if (fromRemote.length > 0) {
+      await this.db.blobs.batchPut(fromRemote);
       return fromRemote[0];
     }
     return null;
