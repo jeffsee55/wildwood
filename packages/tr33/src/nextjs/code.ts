@@ -1,3 +1,4 @@
+import { TR33_ACTIVE_REF_STORAGE_KEY } from "@/nextjs/active-ref-storage";
 import type { VscodeWebCdn } from "@/nextjs/vscode-web-cdn";
 import { vscodeCdnProxyAssetUrl } from "@/nextjs/vscode-web-cdn";
 
@@ -58,6 +59,15 @@ export const getCode = (config: {
     const config = JSON.parse(
       document.getElementById("vscode-workbench-web-configuration").getAttribute("data-settings"),
     );
+    try {
+      const storedRef = localStorage.getItem(${JSON.stringify(TR33_ACTIVE_REF_STORAGE_KEY)});
+      if (typeof storedRef === "string" && storedRef.trim().length > 0) {
+        config.configurationDefaults = config.configurationDefaults ?? {};
+        config.configurationDefaults["tr33.headRef"] = storedRef.trim();
+      }
+    } catch {
+      /* private mode / blocked storage */
+    }
     const workspace = config.folderUri ? { folderUri: config.folderUri } : undefined;
     await create(document.body, {
       ...config,

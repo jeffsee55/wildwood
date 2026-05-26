@@ -2,7 +2,7 @@
 
 import extensionPkg from "tr33-vscode/package.json" with { type: "json" };
 import extensionNls from "tr33-vscode/package.nls.json" with { type: "json" };
-import { H3, html, serveStatic, setResponseHeader } from "h3";
+import { H3, html, serveStatic } from "h3";
 import { z } from "zod/v4";
 import {
   type Tr33AuthAction,
@@ -13,9 +13,9 @@ import { GitHubRemote } from "@/git/remote/github";
 import { getCode } from "@/nextjs/code";
 import {
   stripBuiltInCspMetaFromHtml,
-  VSCODE_EMBED_DOCUMENT_CSP,
   VSCODE_EMBED_HTML_RESPONSE_HEADERS,
   vscodeEmbedCorsHeaders,
+  vscodeEmbedEditorCacheHeaders,
   vscodeWebStaticCacheHeaders,
   withVscodeEmbedCors,
 } from "@/nextjs/vscode-embed-csp";
@@ -53,6 +53,17 @@ const setNoStoreHeaders = (event: {
   );
   event.node?.res?.setHeader("pragma", "no-cache");
   event.node?.res?.setHeader("expires", "0");
+};
+
+const setCacheHeaders = (
+  event: {
+    node?: { res?: { setHeader: (k: string, v: string) => void } };
+  },
+  headers: Record<string, string>,
+) => {
+  for (const [key, value] of Object.entries(headers)) {
+    event.node?.res?.setHeader(key, value);
+  }
 };
 
 /** H3 may coerce all-digit path params to numbers (e.g. GitHub installation ids). */
@@ -146,11 +157,6 @@ export const createHandler = (
     const cdn = await resolveVscodeWebCdn();
     const webEndpointBase = `${event.url.origin}${dir}/cdn/${cdn.commit}`;
     const comparisonRef = ref;
-    const cookies = cookiesFromCookieHeader(event.req.headers.get("cookie"));
-    const currentRef = resolveActiveRef({
-      tr33: client,
-      cookies,
-    });
     /*
      * Builtin extension URL must be path-only: no `?query` here. VS Code joins
      * `.../extension` + `/package.json`; a `?` in the path becomes `%3F` and requests
@@ -161,6 +167,9 @@ export const createHandler = (
      * string once, so `&` becomes `%26` and `URLSearchParams` no longer splits params —
      * the extension FS then mis-parses repo/ref. Path is `/owner/repo`; refs live in
      * `configurationDefaults` (`tr33.*`) and are read by Tr33FileSystemProvider.
+     *
+     * `tr33.headRef` defaults to the deployment ref here; the workbench boot script and
+     * extension read `localStorage` (`tr33.activeRef`) so this HTML stays cacheable.
      */
     const builtinExtensions: {
       scheme: string;
@@ -205,7 +214,7 @@ export const createHandler = (
       configurationDefaults: {
         "workbench.colorTheme": "Tr33 Dark",
         "tr33.repo": repoFull,
-        "tr33.headRef": currentRef,
+        "tr33.headRef": comparisonRef,
         "tr33.baseRef": comparisonRef,
         "workbench.editorAssociations": {
           "*.png": "tr33.imagePreview",
@@ -302,7 +311,12 @@ export const createHandler = (
         });
       }
       const payload = await checkEditorReady(refName);
-      return Response.json({ status: "ready", ...payload });
+      const vscodeWebCdn = await resolveVscodeWebCdn();
+      return Response.json({
+        status: "ready",
+        vscodeCommit: vscodeWebCdn.commit,
+        ...payload,
+      });
     } catch (error) {
       console.error("Failed editor bootstrap:", error);
       return Response.json(
@@ -318,6 +332,7 @@ export const createHandler = (
 
   gitService.post("/switch-branch", async (event) => {
     try {
+      const started = Date.now();
       const body = await event.req.json();
       const { ref: refParam } = z.object({ ref: z.string() }).parse(body);
       const refName = refParam.trim();
@@ -329,8 +344,12 @@ export const createHandler = (
         ref: refName,
       });
       if (authError) return authError;
-      await client._.db.init();
-      await git.resolveWorktreeForApi({ ref: refName });
+      // Cookie-only switch — no indexing, no GitHub, no schema init.
+      const exists = await git.db.refs.get({ ref: refName });
+      if (!exists) {
+        return new Response(`Ref "${refName}" not found`, { status: 404 });
+      }
+      console.info(`[tr33:switch-branch] ref=${refName} ${Date.now() - started}ms`);
       return Response.json({ ok: true, ref: refName });
     } catch (error) {
       console.error("Failed to switch branch:", error);
@@ -1135,19 +1154,38 @@ export const createHandler = (
     return response;
   });
 
+  const serveEditorHtml = async (
+    event: Parameters<Parameters<H3["get"]>[1]>[0],
+    commitParam?: string,
+  ) => {
+    const vscodeWebCdn = await resolveVscodeWebCdn();
+    if (commitParam && commitParam !== vscodeWebCdn.commit) {
+      return new Response("VS Code commit mismatch", { status: 404 });
+    }
+    setCacheHeaders(event, vscodeEmbedEditorCacheHeaders(vscodeWebCdn.commit));
+    const workbenchConfig = await getWorkbenchConfig(event);
+    const code = getCode({
+      origin: event.url.origin,
+      prefix: "/api/vscode",
+      workbenchConfig,
+      vscodeWebCdn,
+    });
+    return html(event, code);
+  };
+
   vscode
+    .get("/editor/:commit", async (event) => {
+      const commitParam = routeParamString(event.context.params?.commit);
+      if (!commitParam) {
+        return new Response("VS Code commit required", { status: 400 });
+      }
+      return serveEditorHtml(event, commitParam);
+    })
     .get("/editor", async (event) => {
       setNoStoreHeaders(event);
-      setResponseHeader(event, "Content-Security-Policy", VSCODE_EMBED_DOCUMENT_CSP);
-      const workbenchConfig = await getWorkbenchConfig(event);
       const vscodeWebCdn = await resolveVscodeWebCdn();
-      const code = getCode({
-        origin: event.url.origin,
-        prefix: "/api/vscode",
-        workbenchConfig,
-        vscodeWebCdn,
-      });
-      return html(event, code);
+      const base = event.url.pathname.replace(/\/$/, "");
+      return Response.redirect(`${base}/${vscodeWebCdn.commit}`, 302);
     })
     .get("/product.json", async (event) => {
       setNoStoreHeaders(event);

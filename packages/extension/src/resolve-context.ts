@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { readActiveRefFromStorage } from "./host-bridge";
 import { logger } from "./extension";
 
 export type Tr33ExtensionContext = {
@@ -62,6 +63,10 @@ export function resolveTr33ExtensionContext(
     } else if (pathParts.length === 1) {
       repo = pathParts[0];
     }
+  }
+
+  if (!initialRef) {
+    initialRef = readActiveRefFromStorage();
   }
 
   if (!initialRef) {

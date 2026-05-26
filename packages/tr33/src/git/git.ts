@@ -99,10 +99,8 @@ export class Git implements Gitable {
   // --- Core operations ---
 
   async createBranch({ name, base }: { name: string; base: string }) {
-    const baseRef = await this.db.refs.get({ ref: base });
-    if (!baseRef) {
-      await this.switch({ ref: base });
-    }
+    const started = Date.now();
+    await this.ensureRefInDb({ ref: base });
     const refData = await this.db.refs.get({ ref: base });
     if (!refData) throw new Error(`Base ref "${base}" not found`);
     await this.db.refs.updateCommit({ ref: name, commit: refData.commit });
@@ -116,7 +114,21 @@ export class Git implements Gitable {
         await this.db.refs.updateVersions({ ref: name, versions: v });
       }
     }
-    await this.switch({ ref: name });
+    console.info(
+      `[tr33:create-branch] name=${name} base=${base} ${Date.now() - started}ms (no full switch/index)`,
+    );
+  }
+
+  /** Ensure a ref row + commit exist in Turso without indexing the whole tree. */
+  async ensureRefInDb({ ref }: { ref: string }) {
+    const worktree = await this.db.refs.get({ ref });
+    if (worktree?.commit) {
+      return;
+    }
+    const commit = await this.remote.fetchCommit({ ref });
+    await this.db.commits.put(commit);
+    await this.db.commits.markPushed({ oid: commit.oid });
+    await this.db.refs.updateRemoteCommit({ ref, commit });
   }
 
   /**

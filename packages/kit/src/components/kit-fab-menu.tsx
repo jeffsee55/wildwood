@@ -40,6 +40,16 @@ const TR33_EXTENSION_TO_HOST_REF_CHANNEL = "tr33-extension-to-host";
 /** Must match `TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL` in `host-bridge.ts`. */
 const TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL =
   "tr33-extension-workspace-changed";
+/** Same-origin localStorage key — must match `host-bridge.ts` / `active-ref-storage.ts`. */
+const TR33_ACTIVE_REF_STORAGE_KEY = "tr33.activeRef";
+
+const persistActiveRefToStorage = (ref: string): void => {
+  try {
+    localStorage.setItem(TR33_ACTIVE_REF_STORAGE_KEY, ref);
+  } catch {
+    /* private mode / blocked storage */
+  }
+};
 
 const kitLog = (...args: unknown[]) => {
   console.info("[tr33:kit]", ...args);
@@ -109,6 +119,7 @@ type EditorBootstrapResponse = {
   installUrl?: string;
   hint?: string;
   entryCount?: number;
+  vscodeCommit?: string;
 };
 
 export function KitFabMenu({
@@ -153,6 +164,10 @@ export function KitFabMenu({
   const base = normalizeApiBase(apiBase);
   const displayRef = activeRef ?? configRef;
 
+  React.useEffect(() => {
+    persistActiveRefToStorage(displayRef);
+  }, [displayRef]);
+
   const switchBranchCookie = React.useCallback(
     async (ref: string) => {
       const res = await fetch(`${base}/git/switch-branch`, {
@@ -171,6 +186,28 @@ export function KitFabMenu({
     [base],
   );
 
+  const createDraftBranchRef = React.useCallback(async (): Promise<string> => {
+    const name = generateBranchName();
+    const res = await fetch(
+      `${window.location.origin}${base}/git/create-branch`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, baseRef: configRef }),
+      },
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Could not create draft branch: ${res.status} ${await res.text()}`,
+      );
+    }
+    setBranches((prev) =>
+      prev.includes(name) ? prev : [...prev, name].sort(),
+    );
+    return name;
+  }, [base, configRef]);
+
   const runEditorOpenSequenceRef = React.useRef<
     (refForOpen: string) => Promise<void>
   >(async () => {});
@@ -179,8 +216,17 @@ export function KitFabMenu({
     setOpenState({ kind: "checking" });
     setEditorIframeLoaded(false);
     try {
-      await switchBranchCookie(refForOpen);
+      let activeRef = refForOpen;
+      if (refForOpen === configRef) {
+        activeRef = await createDraftBranchRef();
+        if (runId !== editorOpenRunRef.current) return;
+      }
+      await switchBranchCookie(activeRef);
       if (runId !== editorOpenRunRef.current) return;
+      if (activeRef !== refForOpen) {
+        notifyExtensionActiveRef(activeRef);
+        scheduleRefresh();
+      }
 
       const res = await fetch(`${base}/git/editor-bootstrap`, {
         credentials: "include",
@@ -219,7 +265,10 @@ export function KitFabMenu({
         return;
       }
 
-      iframeSrcRef.current = `${window.location.origin}${base}/vscode/editor`;
+      iframeSrcRef.current =
+        data.vscodeCommit ?
+          `${window.location.origin}${base}/vscode/editor/${data.vscodeCommit}`
+        : `${window.location.origin}${base}/vscode/editor`;
       setOpenState({ kind: "ready" });
     } catch (error) {
       if (runId !== editorOpenRunRef.current) return;
@@ -292,6 +341,7 @@ export function KitFabMenu({
   }, [scheduleRefresh]);
 
   const notifyExtensionActiveRef = React.useCallback((ref: string) => {
+    persistActiveRefToStorage(ref);
     try {
       hostRefChannelRef.current?.postMessage({ ref });
     } catch {

@@ -81,3 +81,11 @@ export function vscodeWebStaticCacheHeaders(commit: string): Record<string, stri
     "x-vscode-commit": commit,
   };
 }
+
+/** Cacheable workbench shell — ref comes from same-origin `localStorage`, not this HTML. */
+export function vscodeEmbedEditorCacheHeaders(commit: string): Record<string, string> {
+  return {
+    ...vscodeWebStaticCacheHeaders(commit),
+    "content-security-policy": VSCODE_EMBED_DOCUMENT_CSP,
+  };
+}

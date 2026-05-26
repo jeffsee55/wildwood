@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { Tr33FileSystemProvider, generateBranchName, SCHEME } from "./filesystem";
-import { subscribeHostRef } from "./host-bridge";
+import { subscribeHostRef, writeActiveRefToStorage } from "./host-bridge";
 import { whenTr33ExtensionContextReady } from "./resolve-context";
 import { Tr33SourceControlProvider } from "./source-control";
 
@@ -86,6 +86,7 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     const hostRefSub = subscribeHostRef((ref) => {
+      writeActiveRefToStorage(ref);
       void tr33FS.switchRef(ref, { notifyParent: false });
     });
     context.subscriptions.push(

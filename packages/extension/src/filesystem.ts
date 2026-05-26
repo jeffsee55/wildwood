@@ -13,6 +13,7 @@ import {
   notifyKitParentBranchChanged,
   notifyKitParentWorkspaceChanged,
 } from "./kit-parent";
+import { writeActiveRefToStorage } from "./host-bridge";
 import { postAddWithProgress } from "./add-with-progress";
 import { postPatchWorktree, treesForPatch } from "./patch-worktree";
 import {
@@ -195,6 +196,7 @@ export class Tr33FileSystemProvider
   async initializeWorkspace(): Promise<void> {
     logger("initializeWorkspace: loading worktree and root tree");
     await this.fetchWorktreeState();
+    await this.ensureDraftBranch();
     const rootOid = await this.getRootTreeOid();
     const tree = await this.trees.getTree(rootOid);
     logger("initializeWorkspace", {
@@ -293,6 +295,7 @@ export class Tr33FileSystemProvider
     notifyParent = true,
   ): Promise<void> {
     if (newRef === this.currentRef) return;
+    writeActiveRefToStorage(newRef);
     if (!this.rootTreeOid || !this.commitTreeOid) {
       try {
         await this.fetchWorktreeState();
@@ -492,6 +495,18 @@ export class Tr33FileSystemProvider
   }
 
   // ── Mutations ─────────────────────────────────────────────────────
+
+  /** When editing on the default ref, create and switch to a draft branch immediately. */
+  async ensureDraftBranch(): Promise<void> {
+    if (this.currentRef !== this.configRef) {
+      return;
+    }
+    const newBranch = generateBranchName();
+    logger("ensureDraftBranch: creating", newBranch, "from", this.configRef);
+    await this.createBranch(newBranch, this.configRef);
+    await this.switchRef(newBranch);
+    this._onDidCreateBranch.fire(newBranch);
+  }
 
   async createBranch(name: string, base: string): Promise<void> {
     const res = await fetch(`${this.apiUrl}/create-branch`, {
@@ -904,15 +919,6 @@ export class Tr33FileSystemProvider
         cancellable: false,
       },
       async (progress) => {
-        if (this.currentRef === this.configRef) {
-          progress.report({ message: "Creating draft branch…" });
-          const newBranch = generateBranchName();
-          await this.createBranch(newBranch, this.configRef);
-          progress.report({ message: `Switching to ${newBranch}…` });
-          await this.switchRef(newBranch);
-          this._onDidCreateBranch.fire(newBranch);
-        }
-
         if (isBinary) {
           progress.report({ message: "Uploading binary via legacy add…" });
           const addResult = await postAddWithProgress(
