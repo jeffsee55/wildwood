@@ -104,15 +104,14 @@ export class Git implements Gitable {
     const refData = await this.db.refs.get({ ref: base });
     if (!refData) throw new Error(`Base ref "${base}" not found`);
     await this.db.refs.updateCommit({ ref: name, commit: refData.commit });
-    if (refData.rootTree) {
-      await this.db.refs.setTreeOid({
-        ref: name,
-        treeOid: refData.rootTree.oid,
-      });
-      const v = refData.versions;
-      if (v != null && v.length > 0) {
-        await this.db.refs.updateVersions({ ref: name, versions: v });
-      }
+    // New branches start clean — never inherit a sparse overlay from the base ref.
+    await this.db.refs.setTreeOid({
+      ref: name,
+      treeOid: refData.commit.treeOid,
+    });
+    const v = refData.versions;
+    if (v != null && v.length > 0) {
+      await this.db.refs.updateVersions({ ref: name, versions: v });
     }
     console.info(
       `[tr33:create-branch] name=${name} base=${base} ${Date.now() - started}ms (no full switch/index)`,

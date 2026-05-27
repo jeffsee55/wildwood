@@ -277,12 +277,18 @@ export class Trees {
 
       if (overlay.type === "blob" && commitAt.type === "blob") {
         if (overlay.oid !== commitAt.oid) {
-          result.push({
-            status: "modified",
-            path,
-            baseOid: commitAt.oid,
-            currentOid: overlay.oid,
-          });
+          const sameContent = await this.blobsEquivalent(
+            overlay.oid,
+            commitAt.oid,
+          );
+          if (!sameContent) {
+            result.push({
+              status: "modified",
+              path,
+              baseOid: commitAt.oid,
+              currentOid: overlay.oid,
+            });
+          }
         }
         continue;
       }
@@ -330,6 +336,16 @@ export class Trees {
     }
 
     return result;
+  }
+
+  private async blobsEquivalent(oidA: string, oidB: string): Promise<boolean> {
+    if (oidA === oidB) return true;
+    const [a, b] = await Promise.all([
+      this.gitable.getBlob(oidA),
+      this.gitable.getBlob(oidB),
+    ]);
+    if (!a || !b) return false;
+    return a.content === b.content;
   }
 
   private async getEmptyTreeOid(): Promise<string> {
