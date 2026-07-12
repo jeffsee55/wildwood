@@ -53,6 +53,13 @@ export {
   type CreateTr33RouteOptions,
 } from "./route";
 
+export {
+  createDraftRoute,
+  createDraftRouteHandlers,
+  draftRoute,
+  type CreateDraftRouteOptions,
+} from "./draft";
+
 // ── legacy compat — still re-export shared constants ───────────────────────
 export {
   ACTIVE_REF_MAX_AGE_SEC as ACTIVE_REF_MAX_AGE_SEC_SHARED,

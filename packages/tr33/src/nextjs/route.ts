@@ -7,40 +7,24 @@
  * - mounts the framework-agnostic H3 handler (`tr33/nextjs/handler`)
  * - branch cookie management (`x-tr33-branch` canonical, with legacy read support)
  * - `revalidateTag(TR33_CACHE_TAG)` on git mutations
- * - `/tr33/preview` exit endpoint (clears branch cookies + revalidates)
+ * - `/tr33/preview` exit + `/tr33/draft` toggle (per-user draft, no global purge)
  * - `create-branch` / `switch-branch` response enrichment
  *
- * Draft mode is host-controlled. This module does NOT call `draftMode()`.
- * Your userland `/api/draft` route should do:
+ * Draft / preview is now built-in:
  *
- * ```ts
- * // app/api/draft/route.ts — userland, you own the mechanism
- * import { cookies, draftMode } from "next/headers";
- * import { type NextRequest, NextResponse } from "next/server";
- * import { TR33_BRANCH_COOKIE } from "tr33/nextjs/branch";
+ * - `GET /api/tr33/draft?branch=<ref>` → enables draft (per-user cache bypass),
+ *   sets canonical branch cookie.
+ * - `GET /api/tr33/draft?disable=1`     → disables draft, clears branch cookies.
+ * - Legacy `GET /api/draft?...` is also handled if your catch-all covers `/api`.
  *
- * export async function GET(request: NextRequest) {
- *   const branch = request.nextUrl.searchParams.get("branch");
- *   const disable = request.nextUrl.searchParams.get("disable");
- *   const jar = await cookies();
+ * Why no `revalidateTag` on draft enter/exit:
+ * `draftMode().enable()` makes Next bypass `"use cache"` **for that user only**
+ * via `__prerender_bypass`. Disabling re-enables cache for that user. Global
+ * purge on enter/exit would invalidate everyone else — wrong.
+ * `revalidateTag(TR33_CACHE_TAG)` only fires for real mutations (commit etc).
  *
- *   if (disable) {
- *     (await draftMode()).disable();
- *     jar.delete(TR33_BRANCH_COOKIE);
- *     jar.delete("x-content-branch");
- *     jar.delete("tr33-active-ref");
- *     return NextResponse.json({ draftMode: false });
- *   }
- *
- *   if (!branch) {
- *     return NextResponse.json({ error: "Missing ?branch=" }, { status: 400 });
- *   }
- *
- *   (await draftMode()).enable();
- *   jar.set(TR33_BRANCH_COOKIE, branch, { path: "/" });
- *   return NextResponse.json({ draftMode: true, branch });
- * }
- * ```
+ * Standalone `tr33/nextjs/draft` still exports `createDraftRoute()` for apps
+ * that prefer a dedicated `/api/draft` route file — it's optional.
  *
  * When `draftMode().enable()` has been called, Next.js automatically
  * bypasses `"use cache"` boundaries, so `BlogList()` below always sees
@@ -55,8 +39,7 @@
  *   cacheLife("hours");
  *   cacheTag(TR33_CACHE_TAG);
  *
- *   // tr33 client fetch — will be cached by branch=main, bypassed in draft
- *   const content = await tr33.docs.findMany({});
+ *   const c = await tr33.docs.findMany({});
  *   return <ul>...</ul>;
  * }
  * ```
@@ -64,13 +47,12 @@
  * Minimal app wiring:
  *
  * ```ts
- * // app/api/[...path]/route.ts
+ * // app/api/[...path]/route.ts  (covers /api/tr33/* and legacy /api/draft)
  * import { createTr33Route } from "tr33/nextjs/route";
- * import { getTr33 } from "@/lib/tr33";
+ * import { tr33 } from "@/lib/tr33";
  *
- * export const { GET, POST, HEAD, OPTIONS } = createTr33Route(() => getTr33(), {
- *   revalidateTagName: "docs-content", // optional, defaults to TR33_CACHE_TAG
- * });
+ * export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } =
+ *   createTr33Route(() => tr33);
  * ```
  */
 
@@ -79,6 +61,7 @@ import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import {
   TR33_BRANCH_COOKIE,
+  TR33_BRANCH_COOKIE_FALLBACKS,
   TR33_CACHE_TAG,
   type Tr33ForBranch,
 } from "./branch";
@@ -110,6 +93,12 @@ export type CreateTr33RouteOptions = {
    * on exit for compatibility.
    */
   branchCookieName?: string;
+  /**
+   * Extra cookie names to delete when disabling draft/preview. Defaults to
+   * `TR33_BRANCH_COOKIE_FALLBACKS` (`x-content-branch`, `tr33-active-ref`).
+   * Deletions are idempotent.
+   */
+  legacyCookieNames?: readonly string[];
   /**
    * Regex that identifies git mutations that should trigger revalidation.
    * Defaults to commit / discard / merge / pull / create-branch / switch-branch.
@@ -149,6 +138,7 @@ export function createTr33Route(
 ) {
   const tagName = opts.revalidateTagName ?? TR33_CACHE_TAG;
   const cookieName = opts.branchCookieName ?? TR33_BRANCH_COOKIE;
+  const legacyNames = opts.legacyCookieNames ?? TR33_BRANCH_COOKIE_FALLBACKS;
   const mutationRe = opts.mutationRe ?? DEFAULT_MUTATION_RE;
   const tagStore = opts.revalidateTagStore ?? "default";
 
@@ -172,7 +162,96 @@ export function createTr33Route(
     revalidateTag(tagName, tagStore as never);
   }
 
+  function isDraftPath(pathname: string): boolean {
+    // Canonical: /api/tr33/draft and legacy /api/draft (if catch-all sits at /api/[...path])
+    return pathname.endsWith("/tr33/draft") || pathname.endsWith("/draft");
+  }
+
+  function isExitPreviewPath(pathname: string): boolean {
+    return pathname.endsWith("/tr33/preview") || pathname.endsWith("/preview/exit");
+  }
+
+  async function clearBranchCookies(jar: Awaited<ReturnType<typeof cookies>>) {
+    jar.delete(cookieName);
+    for (const name of legacyNames) {
+      if (name !== cookieName) jar.delete(name);
+    }
+    // Extra guard: if canonical was customized but legacy list didn't include
+    // the built-in default, still clear the default fallback names.
+    for (const f of TR33_BRANCH_COOKIE_FALLBACKS) {
+      if (f !== cookieName && !(legacyNames as readonly string[]).includes(f)) jar.delete(f);
+    }
+    if (cookieName !== TR33_BRANCH_COOKIE) jar.delete(TR33_BRANCH_COOKIE);
+  }
+
+  async function handleDraft(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+    const disable = url.searchParams.get("disable");
+    const branch = url.searchParams.get("branch")?.trim() || "";
+
+    try {
+      if (disable) {
+        const dm = (await import("next/headers")) as unknown as {
+          draftMode: () => Promise<{ disable: () => void }>;
+        };
+        (await dm.draftMode()).disable();
+        const jar = await cookies();
+        await clearBranchCookies(jar);
+        return NextResponse.json({ draftMode: false });
+      }
+
+      if (!branch) {
+        return NextResponse.json({ error: "Missing ?branch=" }, { status: 400 });
+      }
+
+      const dm = (await import("next/headers")) as unknown as {
+        draftMode: () => Promise<{ enable: () => void }>;
+      };
+      (await dm.draftMode()).enable();
+      const jar = await cookies();
+      // Write only canonical. Read path already falls back to legacy.
+      jar.set(cookieName, branch, { path: "/" });
+      return NextResponse.json({ draftMode: true, branch });
+    } catch {
+      // Non-Next environment or `next/headers` unavailable — degrade to cookie-only.
+      // We don't have `cookies()` / `draftMode()` here, so just return 400-ish hint
+      // rather than silently failing.
+      if (disable) return NextResponse.json({ draftMode: false });
+      if (!branch) return NextResponse.json({ error: "Missing ?branch=" }, { status: 400 });
+      const headers = new Headers();
+      headers.append("Set-Cookie", cookieHeaderValue(cookieName, branch));
+      return new NextResponse(JSON.stringify({ draftMode: true, branch }), {
+        headers,
+        status: 200,
+      });
+    }
+  }
+
+  async function handleExitPreview(): Promise<Response> {
+    try {
+      const jar = await cookies();
+      await clearBranchCookies(jar);
+      try {
+        const { draftMode } = (await import("next/headers")) as {
+          draftMode: () => Promise<{ disable: () => void }>;
+        };
+        (await draftMode()).disable();
+      } catch {
+        // ignore — not in Next or unavailable
+      }
+    } catch {
+      // ignore — non-Next
+    }
+    // No revalidateContent() here — draft is per-user; global purge would
+    // invalidate everyone else. Real mutations revalidate below.
+    return NextResponse.json({ ok: true });
+  }
+
   async function GET(req: Request) {
+    const pathname = pathnameOf(req);
+    // Draft is now part of the catch-all: /api/tr33/draft (and legacy /api/draft)
+    if (isDraftPath(pathname)) return handleDraft(req);
+    if (isExitPreviewPath(pathname)) return handleExitPreview();
     return apiFetch(req);
   }
   async function HEAD(req: Request) {
@@ -185,27 +264,14 @@ export function createTr33Route(
   async function POST(req: Request) {
     const pathname = pathnameOf(req);
 
+    // ── draft toggle (GET+POST) ───────────────────────────────────
+    if (isDraftPath(pathname)) return handleDraft(req);
+
     // ── exit preview ─────────────────────────────────────────────────
-    // Host clears branch cookies and busts cache so next render falls
-    // back to the configured default ref.
-    //
-    // Supports both `.../tr33/preview` (new) and `GET /api/draft?disable=1`
-    // style exits in userland; this handler only cares about clearing.
-    if (pathname.endsWith("/tr33/preview") || pathname.endsWith("/preview/exit")) {
-      try {
-        const jar = await cookies();
-        // Clear canonical + legacy so old branches don't linger.
-        jar.delete(cookieName);
-        // legacy variants — safe even if absent
-        if (cookieName !== "tr33-active-ref") jar.delete("tr33-active-ref");
-        if (cookieName !== "x-content-branch") jar.delete("x-content-branch");
-        if (cookieName !== TR33_BRANCH_COOKIE) jar.delete(TR33_BRANCH_COOKIE);
-      } catch {
-        // ignore — in non-Next environments `cookies()` may not exist
-      }
-      revalidateContent();
-      return NextResponse.json({ ok: true });
-    }
+    // Clears branch cookies so next render falls back to the configured
+    // default ref. No global `revalidateTag` — would purge cache for all users.
+    // Supports `POST .../tr33/preview` (Kit toolbar) and legacy `/preview/exit`.
+    if (isExitPreviewPath(pathname)) return handleExitPreview();
 
     // ── remember caller-intended branch name before consuming body ──
     let createBranchName: string | undefined;

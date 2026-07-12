@@ -13,6 +13,7 @@ export default defineConfig([
       "src/nextjs/handler.ts",
       "src/nextjs/route.ts",
       "src/nextjs/branch.ts",
+      "src/nextjs/draft.ts",
       "src/nextjs/kit.ts",
       "src/nextjs/resolve-active-ref.ts",
       // isolated — has heavy / native deps, must not be imported by docs

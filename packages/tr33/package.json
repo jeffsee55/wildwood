@@ -7,6 +7,7 @@
     ".": "./dist/index.mjs",
     "./nextjs": "./dist/nextjs/index.mjs",
     "./nextjs/branch": "./dist/nextjs/branch.mjs",
+    "./nextjs/draft": "./dist/nextjs/draft.mjs",
     "./nextjs/handler": "./dist/nextjs/handler.mjs",
     "./nextjs/kit": "./dist/nextjs/kit.mjs",
     "./nextjs/play-auth": "./dist/nextjs/play-auth.mjs",
