@@ -20,17 +20,6 @@ Most CMSs add a separate DB, auth, editor, and deploy for content. Wildwood coll
 - **Preview is a branch** — `x-wildwood-branch` cookie → queries target ref. No preview infra.
 - **Types from Zod** — `z.collection()`, `z.markdown()`, `z.json()`, `z.filter()`, `z.connect()`
 
-## Packages
-
-| Package | npm | Purpose |
-|---------|-----|---------|
-| `wildwood` | [![npm](https://img.shields.io/npm/v/wildwood)](https://npmjs.com/package/wildwood) | Core: config, client, parser, Git remotes, Next handlers, React components |
-| `wildwood-kit` | [![npm](https://img.shields.io/npm/v/wildwood-kit)](https://npmjs.com/package/wildwood-kit) | Client UI kit: toolbar, branch switcher, editing surface (shadow DOM) |
-| `wildwood-shared` | [![npm](https://img.shields.io/npm/v/wildwood-shared)](https://npmjs.com/package/wildwood-shared) | Shared constants (cookies, channels), branch name generator |
-| `wildwood-store` | [![npm](https://img.shields.io/npm/v/wildwood-store)](https://npmjs.com/package/wildwood-store) | Git object store, tree walker, merge logic |
-| `wildwood-ui` | [![npm](https://img.shields.io/npm/v/wildwood-ui)](https://npmjs.com/package/wildwood-ui) | Base shadcn/ui primitives for kit |
-| `wildwood-vscode` | extension | Bundled VS Code web extension (opencode adapter) |
-
 ## Quick start
 
 ```bash
@@ -93,12 +82,10 @@ import { wildwood } from "@/lib/wildwood";
 export const { GET, POST, PATCH, DELETE } = createWildwoodRoute(() => wildwood);
 ```
 
-This gives you:
-- `GET /api/wildwood/query` — typed query endpoint
-- `POST /api/wildwood/draft` / `POST /api/wildwood/preview` — draft mode + preview cookie
-- `GET /api/git/*` + `/api/vscode/*` — worktree ops + VS Code web assets
-
-Toolbar (branch switching + editing):
+This mounts:
+- `/api/wildwood/query` — typed query
+- `/api/wildwood/draft` + `/api/wildwood/preview` — draft mode + branch cookie
+- `/api/git/*` + `/api/vscode/*` — worktree ops + VS Code web shell
 
 ```tsx
 // app/layout.tsx
@@ -106,53 +93,17 @@ import { WildwoodKit } from "wildwood/nextjs/kit";
 import { wildwood } from "@/lib/wildwood";
 
 export default function Root({ children }: { children: React.ReactNode }) {
-  return (
-    <html>
-      <body>
-        {children}
-        <WildwoodKit wildwood={wildwood} />
-      </body>
-    </html>
-  );
+  return <html><body>{children}<WildwoodKit wildwood={wildwood} /></body></html>;
 }
 ```
 
-More in `content/docs/*` — this repo's own docs site is a Wildwood app dogfooding `content/docs/**/*.md`.
-
-## Monorepo structure
-
-```
-apps/
-  docs/   — docs site (this README's longer form), Next 16
-  play/   — playground / configurator (zero-config local & GitHub)
-packages/
-  wildwood/          — core (exports wildwood, wildwood/nextjs/*, wildwood/react/*)
-  kit/               — client kit (shadow DOM editor surface)
-  ui/                — shadcn primitives
-  shared/            — constants, cookie/channel names
-  store/             — git object store + merge
-  extension/         — VS Code extension (bundled into wildwood/bundled-extension/)
-```
-
-## Develop
-
-```bash
-pnpm install
-pnpm run dev:web         # play app + kit watch + extension watch
-pnpm run dev:docs        # docs app instead of play
-
-# tests
-pnpm run test:wildwood
-pnpm run test:wildwood:watch
-```
-
-Requires Node 20+, pnpm 10+.
+More in [`content/docs/*`](content/docs/intro.md) — this repo's own docs site dogfoods `content/docs/**/*.md`.
 
 ## Deploy
 
-LibSQL local file for dev; Turso or `@libsql/client` URL for prod. Preview is just setting `x-wildwood-branch` cookie via `/api/wildwood/preview`. No extra preview infrastructure.
+Local file for dev, Turso for prod. Preview is just `x-wildwood-branch`. No extra infra.
 
-See `content/docs/deploy.md`.
+For the docs app's opinionated production setup (Turso + GitHub App), see [apps/docs – Production](apps/docs/README.md#production). The general pattern is documented in [content/docs/deploy.md](content/docs/deploy.md).
 
 ## License
 
