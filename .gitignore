@@ -51,3 +51,5 @@ packages/wildwood/vendor/
 tsconfig.tsbuildinfo
 # Legacy DBs
 tr33.db
+
+**/wildwood-docs.db
