@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import { graphql } from "@octokit/graphql";
 import { createAppAuth } from "@octokit/auth-app";
 import { Octokit } from "@octokit/rest";
+import { getVercelSystemEnv } from "@/env";
 import {
   type CreatePrArgs,
   type MergePrArgs,
@@ -18,20 +19,41 @@ function normalizePrivateKey(privateKey: string): string {
   return privateKey.replace(/\\n/g, "\n");
 }
 
+function inferVercelOidcContext(): string {
+  try {
+    const v = getVercelSystemEnv();
+    if (!v.isVercel) return "";
+    const parts = [
+      `Vercel detected: env=${v.env} owner=${v.git.owner ?? "∅"} repo=${v.git.slug ?? "∅"} ref=${v.git.commitRef ?? v.git.commitSha ?? "∅"}`,
+      `If System Environment Variables are disabled in Vercel → Settings → Environment Variables, enable them so WILDWOOD can auto-detect org/repo from VERCEL_GIT_REPO_OWNER/SLUG.`,
+    ];
+    if (process.env.VERCEL_OIDC_TOKEN) {
+      parts.push(
+        `VERCEL_OIDC_TOKEN is present — you can wire GitHub App auth via OIDC if you prefer not to set GITHUB_PRIVATE_KEY in env.`,
+      );
+    }
+    return parts.join(" ");
+  } catch {
+    return "";
+  }
+}
+
 function getGitHubToken(): string {
   if (process.env.GITHUB_TOKEN) {
     return process.env.GITHUB_TOKEN;
   }
 
   // In production (Vercel, etc) `gh` CLI never exists.
-  // Don't spawn at runtime — go straight to the installable error.
+  // Don't spawn at runtime — go straight to the installable error, with Vercel hints.
   const isProdServer =
     process.env.NODE_ENV === "production" && !process.env.NEXT_PHASE;
   if (isProdServer) {
+    const hint = inferVercelOidcContext();
     throw new Error(
       "Failed to get GitHub token. In production there is no `gh` CLI — " +
         "set GITHUB_TOKEN (PAT) or GITHUB_APP_ID + GITHUB_PRIVATE_KEY + GITHUB_APP_INSTALLATION_ID. " +
-        "For read-only docs, ensure the Turso DB was populated at build time so no GitHub fetch is needed at runtime.",
+        (hint ? hint + " " : "") +
+        "For read-only docs, ensure the database (Turso/LibSQL) is populated at build time so no GitHub fetch is needed at runtime.",
     );
   }
 
@@ -47,9 +69,11 @@ function getGitHubToken(): string {
 
     return token;
   } catch (error) {
+    const hint = inferVercelOidcContext();
     throw new Error(
-      "Failed to get GitHub token. Either set GITHUB_TOKEN env var or authenticate with `gh auth login`.\n" +
-        `Original error: ${error instanceof Error ? error.message : String(error)}`,
+      "Failed to get GitHub token. Either set GITHUB_TOKEN env var or authenticate with `gh auth login`." +
+        (hint ? `\n${hint}` : "") +
+        `\nOriginal error: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }

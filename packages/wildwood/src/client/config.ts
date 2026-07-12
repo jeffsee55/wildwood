@@ -2,6 +2,14 @@ import { existsSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { minimatch } from "minimatch";
 import { z } from "zod/v4";
+import {
+  resolveOrg as envResolveOrg,
+  resolveRepo as envResolveRepo,
+  resolveRef as envResolveRef,
+  resolveOrigin as envResolveOrigin,
+  resolveVersion as envResolveVersion,
+  requireOrgRepo as envRequireOrgRepo,
+} from "@/env";
 import type { Cache, Entry, Namespace } from "@/types";
 import { zodVisitor } from "@/zod/visitor";
 
@@ -135,9 +143,10 @@ export const variantsConfigSchema = z.object({
 // export const variantsSchema = z.record(z.string(), variantsConfigSchema);
 
 export const configInputSchema = z.object({
-  org: z.string(),
-  repo: z.string(),
-  ref: z.string(),
+  org: z.string().optional(),
+  repo: z.string().optional(),
+  ref: z.string().optional(),
+  origin: z.string().optional(),
   localPath: z.string().optional(),
   version: z.string().optional(),
   collections: z.record(z.string(), collectionSchema),
@@ -148,22 +157,38 @@ export const configOutputSchema = z.object({
   org: z.string(),
   repo: z.string(),
   ref: z.string(),
+  origin: z.string().optional(),
   localPath: z.string().optional(),
   version: z.string(),
   variants: z.record(z.string(), variantsConfigSchema).optional(),
   collections: z.record(z.string(), collectionSchema),
 });
 
+// Resolved shapes (after env inference) — used by callers that care about
+// verified presence of org/repo. Input schema is intentionally optional so
+// `defineConfig({ collections })` works on Vercel / local git.
+export type ConfigInputLoose = z.infer<typeof configInputSchema>;
+
+// Normalized, always-present.
+export type ConfigOutputResolved = z.infer<typeof configOutputSchema>;
+
 export const configSchema = z.codec(configInputSchema, configOutputSchema, {
   decode: (value) => {
+    const explicitOrg = value.org?.trim() || undefined;
+    const explicitRepo = value.repo?.trim() || undefined;
+    const org = envResolveOrg(explicitOrg);
+    const repo = envResolveRepo(explicitRepo);
+    const required = envRequireOrgRepo(org, repo);
     return {
       ...value,
-      version: value.version ?? "0",
+      org: required.org,
+      repo: required.repo,
+      ref: envResolveRef(value.ref?.trim() || undefined),
+      origin: envResolveOrigin(value.origin?.trim() || undefined),
+      version: envResolveVersion(value.version?.trim() || undefined),
     };
   },
-  encode: (value) => {
-    return value;
-  },
+  encode: (value) => value,
 });
 
 export class Config<Colls extends AnyCollections = AnyCollections> {
@@ -188,6 +213,10 @@ export class Config<Colls extends AnyCollections = AnyCollections> {
   }
   get ref() {
     return this.configObject.ref;
+  }
+  /** Resolved production origin (NEXT_PUBLIC_ORIGIN or Vercel system URLs). */
+  get origin(): string | undefined {
+    return this.configObject.origin;
   }
   /** Explicit `localPath` from `defineConfig` (may be undefined). */
   get localPath(): string | undefined {
@@ -877,10 +906,14 @@ export type AnyCollection = {
 
 export type AnyCollections = Record<string, AnyCollection>;
 
+// All identity fields are optional at input time — they are auto-resolved from
+// Vercel system envs (VERCEL_GIT_REPO_OWNER/SLUG/REF) or local git remote in dev.
+// This lets `defineConfig({ collections })` work with zero env on Vercel.
 export type DefineConfigInput<Colls extends AnyCollections = AnyCollections> = {
-  org: string;
-  repo: string;
-  ref: string;
+  org?: string;
+  repo?: string;
+  ref?: string;
+  origin?: string;
   localPath?: string;
   version?: string;
   collections: Colls;
@@ -890,9 +923,10 @@ export type DefineConfigInput<Colls extends AnyCollections = AnyCollections> = {
 // For backwards compat, `ConfigInput` stays as the erased runtime type,
 // but `defineConfig` is now generic over `Colls` preserving shapes.
 export type ConfigInput = {
-  org: string;
-  repo: string;
-  ref: string;
+  org?: string;
+  repo?: string;
+  ref?: string;
+  origin?: string;
   localPath?: string;
   version?: string;
   collections: AnyCollections;
@@ -903,12 +937,15 @@ export type ConfigObject = {
   org: string;
   repo: string;
   ref: string;
+  origin?: string;
   localPath?: string;
   version: string;
   variants?: Record<string, z.infer<typeof variantsConfigSchema>>;
   collections: AnyCollections;
 };
 
-export const defineConfig = <const Colls extends AnyCollections>(config: DefineConfigInput<Colls>) => {
+export const defineConfig = <const Colls extends AnyCollections>(
+  config: DefineConfigInput<Colls>,
+) => {
   return new Config<Colls>(config as unknown as ConfigInput & { collections: Colls });
 };

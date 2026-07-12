@@ -8,7 +8,15 @@ import {
   variant,
 } from "@/zod/extensions";
 
-export { defineConfig } from "@/client/config";
+export {
+  defineConfig,
+  type AnyCollection,
+  type AnyCollections,
+  type Config,
+  type ConfigInput,
+  type ConfigObject,
+  type DefineConfigInput,
+} from "@/client/config";
 export { createClient, type WildwoodClient } from "@/client/index";
 export type {
   WildwoodAuthAction,
@@ -19,6 +27,22 @@ export type {
   WildwoodGitHubAppAuth,
   WildwoodGitHubAuth,
 } from "@/client/auth";
+export {
+  getVercelSystemEnv,
+  isVercel,
+  parseGitRemoteUrl,
+  resolveIdentity,
+  resolveOrg,
+  resolveOrigin,
+  resolveRef,
+  resolveRepo,
+  resolveVersion,
+  vercelEnv,
+  type ResolvedWildwoodIdentity,
+  type VercelSystemEnv,
+  __resetGitRemoteCache,
+  __resetVercelEnvCache,
+} from "@/env";
 
 export const z = {
   ...zod,

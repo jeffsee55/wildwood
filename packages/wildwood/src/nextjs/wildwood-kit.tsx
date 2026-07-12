@@ -19,6 +19,7 @@
 import type { KitAuthConfig, Theme } from "wildwood-kit";
 import { type ReactNode } from "react";
 import type { WildwoodForActiveRef } from "./resolve-active-ref";
+import { resolveOrigin } from "@/env";
 import { getBranch } from "./branch";
 import { resolveVscodeWebCdn } from "./vscode-web-cdn";
 // Keep client-boundary as a static import so tsdown can emit a proper chunk.
@@ -29,19 +30,20 @@ import { ClientKitBoundary } from "./client-boundary";
 export type WildwoodKitHostClient = WildwoodForActiveRef;
 
 function resolveKitAuthFromEnv(): KitAuthConfig | undefined {
+  // Vercel-first origin: covers NEXT_PUBLIC_ORIGIN > VERCEL_PROJECT_PRODUCTION_URL > VERCEL_BRANCH_URL > VERCEL_URL
+  const vercelOrigin = resolveOrigin();
+
   const appSlug = process.env.GITHUB_APP_SLUG?.trim();
   const appId = process.env.GITHUB_APP_ID?.trim();
   const privateKey = process.env.GITHUB_PRIVATE_KEY?.trim();
   const configured = !!(appId && privateKey);
 
   if (!appSlug && !configured) {
-    // Return explicit unconfigured marker so client can always offer setup link.
-    // Host merging keeps this visible even when they pass auth without slug.
     return {
       githubApp: {
         configured: false as const,
         name: process.env.GITHUB_APP_NAME?.trim() || "Wildwood",
-        origin: process.env.NEXT_PUBLIC_ORIGIN?.trim() || undefined,
+        origin: vercelOrigin,
       },
     };
   }
@@ -51,7 +53,7 @@ function resolveKitAuthFromEnv(): KitAuthConfig | undefined {
       appSlug,
       configured: configured || !!appSlug,
       name: process.env.GITHUB_APP_NAME?.trim() || "Wildwood",
-      origin: process.env.NEXT_PUBLIC_ORIGIN?.trim() || undefined,
+      origin: vercelOrigin,
     },
   };
 }

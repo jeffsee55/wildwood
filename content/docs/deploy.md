@@ -98,54 +98,54 @@ Keep `WILDWOOD_DOCS_DATABASE_URL` supported for backwards compat and for non-mar
 
 > Tip: `vercel integration add` also accepts `--prefix` if you want `WILDWOOD_TURSO_DATABASE_URL` instead of bare `TURSO_DATABASE_URL`. In that case set `WILDWOOD_DOCS_DATABASE_URL` to the same value or just read your prefixed name in `resolveDatabaseUrl()`. We recommend no prefix for simplicity.
 
-## 3 — Set the minimal GitHub / version env
+## 3 — Zero-config identity (no WILDWOOD_* needed on Vercel)
 
-Wildwood does not require a GitHub App at first boot — readers work with only the DB populated at build. Edits will show the setup CTA when unconfigured, which is the intended flow.
+When you enable System Environment Variables in your Vercel project (Settings → Environment Variables → **Enable access to System Environment Variables**), Wildwood needs no custom env vars at all for `org`/`repo`/`ref`/`origin`:
 
-For the docs app, set:
+- `org` ← `VERCEL_GIT_REPO_OWNER` (e.g. `jeffsee55`)
+- `repo` ← `VERCEL_GIT_REPO_SLUG` (e.g. `wildwood`)
+- `ref` ← `VERCEL_GIT_COMMIT_REF` (branch name, e.g. `main`) → `VERCEL_GIT_COMMIT_SHA` (SHA fallback for immutable deploys)
+- `origin` ← `VERCEL_PROJECT_PRODUCTION_URL` → `VERCEL_BRANCH_URL` → `VERCEL_URL` (for absolute URLs, OG images, GitHub App manifest callback)
 
-```sh
-vercel env add WILDWOOD_GITHUB_ORG production preview development
-# jeffsee55 (or your org)
+In local dev, `org`/`repo` are inferred from `git remote.origin` (no `gh` CLI needed), and `ref` defaults to `main`.
 
-vercel env add WILDWOOD_GITHUB_REPO production preview development
-# wildwood (or your repo)
-
-# optional but recommended — pins indexed ref to the deployed commit:
-# Vercel auto-sets VERCEL_GIT_COMMIT_SHA; Wildwood prefers WILDWOOD_DOCS_REF,
-# then falls back to VERCEL_GIT_COMMIT_SHA, then config.ref.
-# No action needed if you use the default resolver below; set explicitly only
-# if you want a different ref than the deployed commit.
-```
-
-Constructor stays minimal:
+That means this is the whole config for most apps:
 
 ```ts
-// lib/wildwood.ts (condensed)
+// lib/wildwood.ts — condensed, zero-config
 import { createClient as libsql } from "@libsql/client";
 import { createClient, defineConfig, z } from "wildwood";
 
-const ORG = process.env.WILDWOOD_GITHUB_ORG || "jeffsee55";
-const REPO = process.env.WILDWOOD_GITHUB_REPO || "wildwood";
-const REF = process.env.WILDWOOD_DOCS_REF?.trim()
-        || process.env.VERCEL_GIT_COMMIT_SHA?.trim()
-        || "main";
+export const collections = {
+  authors: z.collection({
+    name: "authors",
+    match: "content/authors/**/*.md",
+    schema: z.markdown({ name: z.filter(z.string()) }),
+  }),
+  docs: z.collection({
+    name: "docs",
+    match: "content/docs/**/*.md",
+    schema: z.markdown({ title: z.filter(z.string()) }),
+  }),
+};
 
 const config = defineConfig({
-  org: ORG, repo: REPO, ref: REF,
+  // org/repo/ref/origin intentionally omitted — auto-resolved from:
+  // explicit > WILDWOOD_* > VERCEL_GIT_* > git remote > defaults
   version: "docs-1",
-  collections: { /* ... */ },
+  collections,
 });
 
 const database = libsql({
-  url: resolveDatabaseUrl(),
-  authToken: resolveAuthToken(),
+  // TURSO_* auto-injected by `vercel integration add tursocloud/database`
+  url: process.env.TURSO_DATABASE_URL || "file:./wildwood.db",
+  authToken: process.env.TURSO_AUTH_TOKEN,
 });
 
 export const wildwood = createClient({ config, database });
 ```
 
-Why `WILDWOOD_DOCS_REF` over raw SHA? One indirection lets you use Vercel's `VERCEL_GIT_COMMIT_SHA` without coupling. Fallback order is `WILDWOOD_DOCS_REF → VERCEL_GIT_COMMIT_SHA → config.ref`. Most apps can simply rely on Vercel's built-in SHA and not set `WILDWOOD_DOCS_REF`.
+If you deploy outside Vercel or need to override (monorepo sharing a single repo, self-hosted), set `WILDWOOD_GITHUB_ORG` / `WILDWOOD_GITHUB_REPO` / `WILDWOOD_DOCS_REF` / `WILDWOOD_VERSION` — they win over system envs. To allow git-remote inference in production (e.g. Fly, self-hosted with a checkout), set `WILDWOOD_INFER_GIT_REMOTE=1`.
 
 ## 4 — Deploy — build indexes straight into Turso
 
@@ -208,36 +208,55 @@ After creating the App, you must install it on the repository Wildwood writes to
 ## Full env contract
 
 ```sh
-# Always — wired by integration (preferred) or your own Turso:
-TURSO_DATABASE_URL=libsql://…
-TURSO_AUTH_TOKEN=…
+# ── Vercel system envs (auto — enable "System Environment Variables") ──
+# You never set these manually. Vercel populates them when System Envs are
+# enabled (Settings → Environment Variables → checkbox).
+VERCEL=1
+VERCEL_ENV=production|preview|development
+VERCEL_GIT_REPO_OWNER=jeffsee55           # → org
+VERCEL_GIT_REPO_SLUG=wildwood             # → repo
+VERCEL_GIT_COMMIT_REF=main                # → ref (branch, preferred)
+VERCEL_GIT_COMMIT_SHA=fa1ead...           # → ref fallback (SHA, immutable)
+VERCEL_PROJECT_PRODUCTION_URL=my-site.com # → origin (shortest prod domain)
+VERCEL_BRANCH_URL=my-site-git-*.vercel.app# → origin fallback (preview branches)
+VERCEL_URL=my-site-*.vercel.app           # → origin fallback (deployment URL)
 
-# Back-compat aliases — optional if using Turso integration:
+# ── Database — Turso marketplace (preferred) ──
+# Wired automatically by `vercel integration add tursocloud/database`:
+TURSO_DATABASE_URL=libsql://...
+TURSO_AUTH_TOKEN=...
+
+# Optional aliases (self-host, non-marketplace):
 WILDWOOD_DOCS_DATABASE_URL=
 WILDWOOD_DOCS_DATABASE_AUTH_TOKEN=
+LIBSQL_URL=
+LIBSQL_AUTH_TOKEN=
 
-# Repo identity (readers + editor):
-WILDWOOD_GITHUB_ORG=jeffsee55
-WILDWOOD_GITHUB_REPO=wildwood
-WILDWOOD_DOCS_REF=                # optional; defaults to VERCEL_GIT_COMMIT_SHA → main
+# ── Identity overrides (optional — override Vercel system envs when needed) ──
+WILDWOOD_GITHUB_ORG=jeffsee55   # or WILDWOOD_ORG / GITHUB_ORG
+WILDWOOD_GITHUB_REPO=wildwood   # or WILDWOOD_REPO / GITHUB_REPO
+WILDWOOD_DOCS_REF=               # or WILDWOOD_REF / WILDWOOD_BRANCH / GIT_REF
+WILDWOOD_VERSION=0
+WILDWOOD_INFER_GIT_REMOTE=1     # allow git remote parsing in prod (non-Vercel)
 
-# GitHub App (private — only needed for edits / toolbar write ops):
+NEXT_PUBLIC_ORIGIN=https://wildwood.dev  # or ORIGIN / NEXT_PUBLIC_SITE_URL / SITE_URL
+
+# ── GitHub App (only for toolbar edits) ──
 GITHUB_APP_ID=
-GITHUB_PRIVATE_KEY=               # PEM — \n escapes ok, builder preserves newlines
-GITHUB_APP_INSTALLATION_ID=       # optional optimization, avoids API fetch at write time
-GITHUB_CLIENT_ID=                 # from manifest conversion — for hosted OAuth callback
+GITHUB_PRIVATE_KEY=
+GITHUB_APP_INSTALLATION_ID=
+GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
-# Public bit — safe to expose to browser for install links + manifest UI:
 GITHUB_APP_SLUG=
 GITHUB_APP_NAME=Wildwood
-NEXT_PUBLIC_ORIGIN=               # optional override for manifests / absolute URLs
 
-# Dev overrides:
+# ── Dev ──
 WILDWOOD_DOCS_SOURCE=local|github
 WILDWOOD_DOCS_REPO_PATH=/abs/to/repo
 ```
 
-Minimal viable prod: `TURSO_*` (via integration) + `WILDWOOD_GITHUB_ORG` + `WILDWOOD_GITHUB_REPO` (read-only). Add `GITHUB_APP_*` only when enabling the editor.
+Minimal viable prod on Vercel: enable System Environment Variables in project settings, then add Turso via marketplace (`vercel integration add tursocloud/database`). That's it for read-only — org/repo/ref/origin auto-resolve from `VERCEL_GIT_*` / `VERCEL_*_URL`. Add `GITHUB_APP_*` only when enabling the editor.
+
 
 ## Route factory & toolbar (unchanged)
 

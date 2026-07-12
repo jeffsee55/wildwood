@@ -1,16 +1,20 @@
 import { createClient as createLibsqlClient } from "@libsql/client";
 import { createClient, defineConfig, type WildwoodAuthConfig, z } from "wildwood";
 
-// Docs app dogfoods this repo. Source is content/. No manual repo-root plumbing:
-// `wildwood` auto-detects the git checkout from cwd in dev/build (via resolvedLocalPath).
+// Docs app dogfoods this repo. Source is content/. Zero-config in dev (git remote)
+// and on Vercel (VERCEL_GIT_REPO_OWNER/SLUG/REF system envs). No WILDWOOD_GITHUB_*
+// env vars required — but they still win when set.
+//
+// `org`/`repo`/`ref`/`origin` are intentionally omitted: `defineConfig` now
+// auto-resolves from:
+//   1. explicit args (if you pass them)
+//   2. WILDWOOD_* overrides
+//   3. VERCEL_GIT_* system envs (zero-config on Vercel, when "Enable access to
+//      System Environment Variables" is checked in project settings)
+//   4. local git remote (zero-config in dev)
+// `ref` also falls back to VERCEL_GIT_COMMIT_SHA for immutable deploys.
 
-const ORG = process.env.WILDWOOD_GITHUB_ORG || "jeffsee55";
-const REPO = process.env.WILDWOOD_GITHUB_REPO || "wildwood";
 const VERSION = "docs-1" as const;
-const REF =
-  process.env.WILDWOOD_DOCS_REF?.trim() ||
-  process.env.VERCEL_GIT_COMMIT_SHA?.trim() ||
-  "main";
 
 // ── collections ──────────────────────────────────────────────────────
 // `docs` first so nav can lazily connect to it without TDZ.
@@ -74,9 +78,8 @@ function githubAuth(): WildwoodAuthConfig["github"] | undefined {
 // `import { wildwood } from "@/lib/wildwood"` with no ceremony.
 
 const config = defineConfig({
-  org: ORG,
-  repo: REPO,
-  ref: REF,
+  // org/repo/ref intentionally omitted — auto-resolved from Vercel system envs
+  // or git remote. See env.ts for priority: explicit > WILDWOOD_* > VERCEL_GIT_* > git remote.
   version: VERSION,
   collections,
 });
