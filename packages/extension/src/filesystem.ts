@@ -7,7 +7,7 @@ import {
   calculateBlobOid,
   calculateBlobOidFromBytes,
   getGitObjectCache,
-} from "tr33-store";
+} from "wildwood-store";
 import * as vscode from "vscode";
 import { logger } from "./extension";
 import {
@@ -15,16 +15,16 @@ import {
   notifyKitParentWorkspaceChanged,
 } from "./kit-parent";
 import { writeActiveRefToStorage } from "./host-bridge";
-import { generateBranchName } from "@tr33/shared";
+import { generateBranchName } from "wildwood-shared";
 import { postAddWithProgress } from "./add-with-progress";
 import { postPatchWorktree, treesForPatch } from "./patch-worktree";
 import {
-  type Tr33ExtensionContext,
-  resolveTr33ExtensionContext,
+  type WildwoodExtensionContext,
+  resolveWildwoodExtensionContext,
 } from "./resolve-context";
 
 /** Distinct from VS Code's built-in `vscode-vfs` (Remote Repositories). */
-export const SCHEME = "tr33-vfs";
+export const SCHEME = "wildwood-vfs";
 
 export { generateBranchName };
 
@@ -63,7 +63,7 @@ export type ScmState = {
   conflicts: { path: string; message: string }[];
 };
 
-export class Tr33FileSystemProvider
+export class WildwoodFileSystemProvider
   implements vscode.FileSystemProvider, Gitable
 {
   private _emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
@@ -98,16 +98,16 @@ export class Tr33FileSystemProvider
 
   constructor(
     extensionUri: vscode.Uri,
-    resolved?: Tr33ExtensionContext,
+    resolved?: WildwoodExtensionContext,
   ) {
-    const ctx = resolved ?? resolveTr33ExtensionContext(extensionUri);
+    const ctx = resolved ?? resolveWildwoodExtensionContext(extensionUri);
     this.repo = ctx.repo;
     this.configRef = ctx.configRef;
     this.currentRef = ctx.currentRef;
     this.apiBase = ctx.apiBase;
     this.apiUrl = `${ctx.apiBase}/api/git`;
     this.trees = new Trees({ gitable: this });
-    logger("Tr33FileSystemProvider", {
+    logger("WildwoodFileSystemProvider", {
       repo: this.repo,
       configRef: ctx.configRef,
       currentRef: ctx.currentRef,
@@ -220,7 +220,7 @@ export class Tr33FileSystemProvider
     });
   }
 
-  /** Align the workbench folder with the provider root (`tr33-vfs://host/`). */
+  /** Align the workbench folder with the provider root (`wildwood-vfs://host/`). */
   async bindWorkspaceFolder(): Promise<void> {
     const root = this.getRootUri();
     const name = this.repo.split("/").pop() ?? this.repo;

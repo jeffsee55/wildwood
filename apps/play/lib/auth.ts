@@ -1,10 +1,10 @@
-import { createTr33PlayAuth } from "tr33/nextjs/play-auth";
+import { createWildwoodPlayAuth } from "tr33/nextjs/play-auth";
 import { headers } from "next/headers";
 
 import { playgroundDatabaseUrl } from "./playground-database-url";
 
-const playAuth = createTr33PlayAuth({
-  appName: "Tr33 Play",
+const playAuth = createWildwoodPlayAuth({
+  appName: "Wildwood Play",
   databaseUrl: playgroundDatabaseUrl,
 });
 

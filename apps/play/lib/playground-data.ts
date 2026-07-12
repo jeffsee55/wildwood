@@ -5,7 +5,7 @@ import {
   playInfo,
 } from "./playground-log";
 import { playgroundDatabaseUrl } from "./playground-database-url";
-import { buildPlaygroundTr33 } from "./tr33";
+import { buildPlaygroundWildwood } from "./tr33";
 
 /**
  * Fetches the `page` collection for the playground. Not wrapped in `"use cache"` or
@@ -35,15 +35,15 @@ export async function getPlaygroundViewData(
 
   let tr33;
   try {
-    tr33 = buildPlaygroundTr33(config);
+    tr33 = buildPlaygroundWildwood(config);
   } catch (err) {
-    playFailureHeadline("buildPlaygroundTr33", err, {
+    playFailureHeadline("buildPlaygroundWildwood", err, {
       org: config.org,
       repo: config.repo,
       localPath: config.source === "local" ? config.localPath : null,
     });
     throw new Error(
-      `Tr33 client could not be created (source=${config.source}, org/repo, or localPath). See server stderr for "FAILED at buildPlaygroundTr33".`,
+      `Wildwood client could not be created (source=${config.source}, org/repo, or localPath). See server stderr for "FAILED at buildPlaygroundWildwood".`,
       { cause: err },
     );
   }
@@ -72,7 +72,7 @@ export async function getPlaygroundViewData(
   });
   if (n === 0) {
     playInfo("viewData.empty result", {
-      hint: "0 items. If you expect files, re-index: Toolbar Apply, or delete apps/play/tr33.db and reload. DB path = cwd of Next process for file:./tr33.db; see viewData.start libsqlUrl.",
+      hint: "0 items. If you expect files, re-index: Toolbar Apply, or delete apps/play/wildwood.db and reload. DB path = cwd of Next process for file:./wildwood.db; see viewData.start libsqlUrl.",
       ref,
       org: config.org,
       repo: config.repo,

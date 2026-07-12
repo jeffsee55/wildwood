@@ -26,7 +26,7 @@ Most CMSs introduce a separate database, auth system, editor, and deploy pipelin
 A collection maps a glob pattern to a schema:
 
 ```ts
-import { z } from "tr33";
+import { z } from "wildwood";
 
 const docs = z.collection({
   name: "docs",
@@ -88,9 +88,9 @@ In development, tr33 auto-detects a local Git checkout by walking up from `cwd` 
 ## Minimal example
 
 ```ts
-// lib/tr33.ts
+// lib/wildwood.ts
 import { createClient as libsql } from "@libsql/client";
-import { createClient, defineConfig, z } from "tr33";
+import { createClient, defineConfig, z } from "wildwood";
 
 const authors = z.collection({
   name: "authors",
@@ -122,7 +122,7 @@ export const tr33 = createClient({ config, database });
 
 ```ts
 // anywhere in your app
-const { items } = await tr33.docs.findMany({
+const { items } = await wildwood.docs.findMany({
   where: { title: { eq: "Introduction" } },
   with: { author: true },
 });

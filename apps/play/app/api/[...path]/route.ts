@@ -2,35 +2,35 @@ import {
   activeRefSetCookieHeader,
   cookiesFromCookieHeader,
   handle,
-} from "tr33/nextjs";
+} from "wildwood/nextjs";
 
-import { getPlaygroundTr33 } from "@/lib/tr33";
+import { getPlaygroundWildwood } from "@/lib/wildwood";
 
 /**
- * Play reuses the same `tr33-active-ref` cookie name for consistency with docs.
+ * Play reuses the same `wildwood-active-ref` cookie name for consistency with docs.
  * You can pick any cookie — active-ref lives entirely in host app glue now.
  */
 const REVALIDATE_HINT = "playground-content" as const;
 void REVALIDATE_HINT;
 
-async function tr33HandlerFor(request: Request): Promise<Response> {
+async function wildwoodHandlerFor(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const pathname = url.pathname;
 
   // Exit preview — clear the cookie on our side
-  if (request.method === "POST" && pathname.endsWith("/tr33/preview")) {
+  if (request.method === "POST" && pathname.endsWith("/wildwood/preview")) {
     // NextResponse not available from pure H3, so we craft a redirect-style response
     // that the browser will accept for cookie clearing. Host should delete its own cookie.
     return new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json",
-        "Set-Cookie": `${"tr33-active-ref"}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
+        "Set-Cookie": `${"wildwood-active-ref"}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
       },
     });
   }
 
-  const tr33 = getPlaygroundTr33(cookiesFromCookieHeader(request.headers.get("cookie")));
-  const api = handle(tr33);
+  const wildwood = getPlaygroundWildwood(cookiesFromCookieHeader(request.headers.get("cookie")));
+  const api = handle(wildwood);
 
   let createBranchNameFromRequest: string | undefined;
   if (request.method === "POST" && /\/git\/create-branch\/?$/.test(pathname)) {
@@ -74,8 +74,8 @@ async function tr33HandlerFor(request: Request): Promise<Response> {
   });
 }
 
-export const GET = tr33HandlerFor;
-export const HEAD = tr33HandlerFor;
-export const OPTIONS = tr33HandlerFor;
-/** Git mutations and other Tr33 APIs use POST; Next only forwards exported methods. */
-export const POST = tr33HandlerFor;
+export const GET = wildwoodHandlerFor;
+export const HEAD = wildwoodHandlerFor;
+export const OPTIONS = wildwoodHandlerFor;
+/** Git mutations and other Wildwood APIs use POST; Next only forwards exported methods. */
+export const POST = wildwoodHandlerFor;

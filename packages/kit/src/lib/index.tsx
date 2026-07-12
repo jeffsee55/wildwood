@@ -24,17 +24,17 @@ export type KitProps = {
    */
   theme?: Theme;
   /**
-   * Where the host app mounts Tr33’s `handle()` API (Next catch‑all under `/api/...`).
+   * Where the host app mounts Wildwood’s `handle()` API (Next catch‑all under `/api/...`).
    * The VS Code web editor loads from `{apiBase}/vscode/editor` on the current origin.
    * @default "/api"
    */
   apiBase?: string;
   /**
-   * Default git ref label from host config when no `tr33-active-ref` cookie exists.
+   * Default git ref label from host config when no `wildwood-active-ref` cookie exists.
    */
   configRef?: string;
   /**
-   * Pinned VS Code web commit from the server (see {@link Tr33Kit}).
+   * Pinned VS Code web commit from the server (see {@link WildwoodKit}).
    */
   vscodeCommit?: string;
   activeRef?: string | null;

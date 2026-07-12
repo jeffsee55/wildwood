@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Markdown } from "tr33/react/markdown";
-import { tr33 } from "@/lib/tr33";
+import { Markdown } from "wildwood/react/markdown";
+import { wildwood } from "@/lib/wildwood";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -13,23 +13,23 @@ function resolveHref(href: string): string {
 }
 
 export async function generateStaticParams() {
-  const res = await tr33.docs.findMany({});
+  const res = await wildwood.docs.findMany({});
   return res.items.map((d) => ({ slug: d.slug }));
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
-  const res = await tr33.docs.findFirst({
+  const res = await wildwood.docs.findFirst({
     where: { slug },
     with: { author: true },
   });
-  if (!res.value) return { title: "not found — tr33(1)" };
-  return { title: `${res.value.title} — tr33(1)`, description: res.value.description };
+  if (!res.value) return { title: "not found — wildwood(1)" };
+  return { title: `${res.value.title} — wildwood(1)`, description: res.value.description };
 }
 
 export default async function DocsPage({ params }: PageProps) {
   const { slug } = await params;
-  const res = await tr33.docs.findFirst({
+  const res = await wildwood.docs.findFirst({
     where: { slug },
     with: { author: true },
   });
@@ -41,7 +41,7 @@ export default async function DocsPage({ params }: PageProps) {
       {/* man header — NAME(1) style */}
       <header className="border-b border-border pb-8">
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-          <span>tr33(1)</span>
+          <span>wildwood(1)</span>
           {doc.author?.name ? <span>by {doc.author.name.toLowerCase()}</span> : <span>manual</span>}
           <span className="ml-auto tabular-nums">{doc._meta?.path ?? `${slug}.md`}</span>
         </div>

@@ -1,5 +1,5 @@
-import { GIT_EMPTY_TREE_OID } from "@tr33/shared";
-import type { TreeEntries } from "tr33-store";
+import { GIT_EMPTY_TREE_OID } from "wildwood-shared";
+import type { TreeEntries } from "wildwood-store";
 
 export type ChangedFile = {
   path: string;

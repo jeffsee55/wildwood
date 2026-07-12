@@ -1,7 +1,7 @@
-import { createTr33Route } from "tr33/nextjs/route";
-import { tr33 } from "@/lib/tr33";
+import { createWildwoodRoute } from "wildwood/nextjs/route";
+import { wildwood } from "@/lib/wildwood";
 
-export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createTr33Route(
-  () => tr33,
+export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createWildwoodRoute(
+  () => wildwood,
   { revalidateTagName: "docs-content" },
 );

@@ -1,28 +1,28 @@
-import type {} from "@tr33/shared";
+import type {} from "wildwood-shared";
 
 const log = (...args: unknown[]) => {
-  console.info("[tr33:vscode:kit-parent]", ...args);
+  console.info("[wildwood:vscode:kit-parent]", ...args);
 };
 
 function channels() {
   // Require so extension host bundler doesn't tree-shake away dynamic constants.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mod = require("@tr33/shared") as typeof import("@tr33/shared");
+  const mod = require("wildwood-shared") as typeof import("wildwood-shared");
   return {
-    TR33_EXTENSION_TO_HOST_REF_CHANNEL: mod.TR33_EXTENSION_TO_HOST_REF_CHANNEL,
-    TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL:
-      mod.TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL,
+    WILDWOOD_EXTENSION_TO_HOST_REF_CHANNEL: mod.WILDWOOD_EXTENSION_TO_HOST_REF_CHANNEL,
+    WILDWOOD_EXTENSION_WORKSPACE_CHANGED_CHANNEL:
+      mod.WILDWOOD_EXTENSION_WORKSPACE_CHANGED_CHANNEL,
   };
 }
 
 export function notifyKitParentBranchChanged(ref: string): void {
-  const { TR33_EXTENSION_TO_HOST_REF_CHANNEL } = channels();
+  const { WILDWOOD_EXTENSION_TO_HOST_REF_CHANNEL } = channels();
   if (typeof BroadcastChannel !== "undefined") {
     try {
-      const bc = new BroadcastChannel(TR33_EXTENSION_TO_HOST_REF_CHANNEL);
+      const bc = new BroadcastChannel(WILDWOOD_EXTENSION_TO_HOST_REF_CHANNEL);
       bc.postMessage({ ref });
       bc.close();
-      log("BroadcastChannel → host", TR33_EXTENSION_TO_HOST_REF_CHANNEL, ref);
+      log("BroadcastChannel → host", WILDWOOD_EXTENSION_TO_HOST_REF_CHANNEL, ref);
     } catch (e) {
       log("BroadcastChannel failed", e);
     }
@@ -41,7 +41,7 @@ export function notifyKitParentBranchChanged(ref: string): void {
     targetOrigin = w.top!.location.origin;
   } catch {}
   log("postMessage → top", { ref, targetOrigin });
-  w.top!.postMessage({ type: "tr33-kit-branch-changed", ref }, targetOrigin);
+  w.top!.postMessage({ type: "wildwood-kit-branch-changed", ref }, targetOrigin);
 }
 
 let workspaceNotifyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -55,13 +55,13 @@ export function notifyKitParentWorkspaceChanged(): void {
 }
 
 function notifyKitParentWorkspaceChangedNow(): void {
-  const { TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL } = channels();
+  const { WILDWOOD_EXTENSION_WORKSPACE_CHANGED_CHANNEL } = channels();
   if (typeof BroadcastChannel !== "undefined") {
     try {
-      const bc = new BroadcastChannel(TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL);
+      const bc = new BroadcastChannel(WILDWOOD_EXTENSION_WORKSPACE_CHANGED_CHANNEL);
       bc.postMessage({ source: "workspace" as const });
       bc.close();
-      log("BroadcastChannel → host (workspace)", TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL);
+      log("BroadcastChannel → host (workspace)", WILDWOOD_EXTENSION_WORKSPACE_CHANGED_CHANNEL);
     } catch (e) {
       log("BroadcastChannel workspace failed", e);
     }
@@ -74,5 +74,5 @@ function notifyKitParentWorkspaceChangedNow(): void {
     targetOrigin = w.top!.location.origin;
   } catch {}
   log("postMessage → top (workspace-changed)", { targetOrigin });
-  w.top!.postMessage({ type: "tr33-kit-workspace-changed" }, targetOrigin);
+  w.top!.postMessage({ type: "wildwood-kit-workspace-changed" }, targetOrigin);
 }

@@ -46,7 +46,7 @@ export function PlaygroundAuthPanel({ githubEnabled }: Props) {
     <main className="flex min-h-svh w-full flex-1 items-center justify-center bg-zinc-50 px-6 py-16 font-sans dark:bg-black">
       <section className="w-full max-w-sm rounded-xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <h1 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
-          Sign in to Tr33 Play
+          Sign in to Wildwood Play
         </h1>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
           Authentication gates the editor and git mutation APIs. Better Auth

@@ -11,8 +11,8 @@ This page collects the patterns actually used in `apps/docs` for `jeffsee55/tr33
 ## 1. Collections
 
 ```ts
-// apps/docs/lib/tr33.ts
-import { createClient, defineConfig, z } from "tr33";
+// apps/docs/lib/wildwood.ts
+import { createClient, defineConfig, z } from "wildwood";
 
 const authors = z.collection({
   name: "authors",
@@ -63,7 +63,7 @@ Layout owns nav. Pages own docs. No orphan-append or empty `notFound()` masking.
 
 ```tsx
 // apps/docs/app/layout.tsx
-import { tr33 } from "@/lib/tr33";
+import { wildwood } from "@/lib/wildwood";
 const navRes = await tr33.nav.findMany({ with: { children: true } });
 const nav = navRes.items[0] ?? null;
 const docs = (nav?.children ?? []) as Array<{ _meta:{path:string}; slug:string; title:string }>;
@@ -72,13 +72,13 @@ const docs = (nav?.children ?? []) as Array<{ _meta:{path:string}; slug:string; 
 ```tsx
 // apps/docs/app/docs/[slug]/page.tsx
 export async function generateStaticParams() {
-  const { items } = await tr33.docs.findMany({});
+  const { items } = await wildwood.docs.findMany({});
   return items.map((d) => ({ slug: d.slug }));
 }
 
 export default async function DocsPage({ params }: { params: Promise<{slug:string}> }) {
   const { slug } = await params;
-  const res = await tr33.docs.findFirst({ where:{slug}, with:{author:true} });
+  const res = await wildwood.docs.findFirst({ where:{slug}, with:{author:true} });
   const doc = res.value;
   if (!doc) notFound();
   // doc.title, doc.description, doc.body (mdast Root), doc.author?.name — fully typed
@@ -93,8 +93,8 @@ No generic find types are exposed via a `Doc` interface file; everything inferre
 
 ```ts
 // apps/docs/app/api/[...path]/route.ts
-import { createTr33Route } from "tr33/nextjs/route";
-import { tr33 } from "@/lib/tr33";
+import { createTr33Route } from "wildwood"nextjs/route";
+import { wildwood } from "@/lib/wildwood";
 
 export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createTr33Route(
   () => tr33,
@@ -114,11 +114,11 @@ If you manage cookies elsewhere (middleware, custom path), you can avoid `create
 
 ### Client singleton
 
-`apps/docs/lib/tr33.ts` owns the top-level singleton:
+`apps/docs/lib/wildwood.ts` owns the top-level singleton:
 
 ```ts
 import { createClient as libsql } from "@libsql/client";
-import { createClient } from "tr33";
+import { createClient } from "wildwood";
 
 const database = libsql({
   url: process.env.TR33_DOCS_DATABASE_URL || "file:./tr33-docs.db",
@@ -134,8 +134,8 @@ No `getDocsTr33()` getter needed. Core factory stays pure — app owns the one s
 
 ```tsx
 // inlined auth — just check an env var, no extra module
-import { Toolbar } from "tr33/nextjs/kit";
-import { tr33 } from "@/lib/tr33";
+import { Toolbar } from "wildwood"nextjs/kit";
+import { wildwood } from "@/lib/wildwood";
 
 export function DocsLayout({ children }) {
   return (
@@ -178,8 +178,8 @@ or
 ### Read from another branch (no cookies)
 
 ```ts
-const main    = await tr33.docs.findMany({ ref: "main" });
-const feature = await tr33.docs.findMany({ ref: "feature/rewrite" });
+const main    = await wildwood.docs.findMany({ ref: "main" });
+const feature = await wildwood.docs.findMany({ ref: "feature/rewrite" });
 ```
 
 ### Guard mutations (authorize)
@@ -232,7 +232,7 @@ function resolveHref(href: string): string {
 
 ```ts
 // generateStaticParams from docs
-const { items } = await tr33.docs.findMany({});
+const { items } = await wildwood.docs.findMany({});
 return items.map((d)=>({ slug: d.slug }));
 
 // Sidebar sorting — fully ordered by nav.children, not slug lexicographic

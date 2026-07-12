@@ -6,13 +6,13 @@ description: "The public surface — collections, client, queries, routes, Kit, 
 
 # API reference
 
-All public types come from `tr33`, `tr33/nextjs/*`, and `@tr33/shared` (for constants). Imports below are accurate to the codebase at this repo.
+All public types come from "wildwood", `tr33/nextjs/*`, and `@wildwood/shared` (for constants). Imports below are accurate to the codebase at this repo.
 
 ## Top-level (`tr33`)
 
 ```ts
-import { createClient, defineConfig, z } from "tr33";
-import type { Tr33Client, Tr33AuthConfig, Tr33AuthAction, Tr33AuthorizeContext } from "tr33";
+import { createClient, defineConfig, z } from "wildwood";
+import type { Tr33Client, Tr33AuthConfig, Tr33AuthAction, Tr33AuthorizeContext } from "wildwood";
 ```
 
 - `defineConfig(input)` → `Config<Colls>` (generic-captures `Colls` literally for inference).
@@ -52,7 +52,7 @@ z.lazy, z.optional, z.array, etc — plain Zod passthrough, inferred through `Fi
 ## Client (`tr33` client)
 
 ```ts
-import { createClient } from "tr33";
+import { createClient } from "wildwood";
 import { createClient as libsql } from "@libsql/client";
 
 const database = libsql({ url, authToken });
@@ -62,7 +62,7 @@ const tr33 = createClient({ config, database, auth? });
 - `tr33.[name].findMany(args?)` → `{ collection, commitOid, items: (Inferred & EntrySystemFields & ReverseRes)[] }`
 - `tr33.[name].findFirst(args?)` → `{ org, repo, ref, version, name, commit, collection, value: ... }` (throws on missing).
 - `args`: `{ where?, with?, references?, limit?, offset?, orderBy?, variant?, ref? }` where `with` is `ConnArgs<CM,FM,Name>` typed per collection and nested.
-- `tr33._.config`, `.auth?`, `.git`, `.db`, `.logger`.
+- `wildwood._.config`, `.auth?`, `.git`, `.db`, `.logger`.
 
 `Tr33Client` is structural — `Record<string, any>` with `_` namespace for internal (tag `NoExplicitAny` bypassed for collection shape).
 
@@ -149,7 +149,7 @@ class Git implements Gitable {
 
 - `GitAddResult = { files:Record<string,oid>, rootTreeOid }`.
 - `gitAddTimer(ref, onProgress?)` → `(step)=>log + onProgress`.
-- `calculateBlobOid`, `calculateBlobOidFromBytes`, `calculateCommitOid`, `Trees`, `TreeEntries` from `tr33-store` (`packages/store`).
+- `calculateBlobOid`, `calculateBlobOidFromBytes`, `calculateCommitOid`, `Trees`, `TreeEntries` from "wildwood"store` (`packages/store`).
 
 ## Remotes (`git/remote/index.ts` + `native`/`github`)
 
@@ -177,7 +177,7 @@ class GitHubRemote extends Remote // GitHub API (GraphQL for trees/commits, REST
 
 ```ts
 // pure fetch
-import { handle, createHandler } from "tr33/nextjs/handler";
+import { handle, createHandler } from "wildwood"nextjs/handler";
 const api = handle(tr33);             // (req:Request)=>Promise<Response>
 const app = createHandler(tr33);      // H3 app (mount /api sub-routers internally)
 ```
@@ -186,20 +186,20 @@ Handler mounts `/git`, `/vscode`, `/github` sub-routers. CORS applied per reques
 
 ```ts
 // Next.js wrapper
-import { createTr33Route, TR33_BRANCH_COOKIE, TR33_CACHE_TAG } from "tr33/nextjs/route";
+import { createTr33Route, TR33_BRANCH_COOKIE, TR33_CACHE_TAG } from "wildwood"nextjs/route";
 export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } =
   createTr33Route(() => tr33, { revalidateTagName?, branchCookieName?, legacyCookieNames?, mutationRe?, revalidateTagStore? });
 ```
 
-`TR33_BRANCH_COOKIE`, `TR33_BRANCH_COOKIE_FALLBACKS`, `TR33_ACTIVE_REF_COOKIE`, `TR33_ACTIVE_REF_STORAGE_KEY`, `TR33_CACHE_TAG`, `ACTIVE_REF_MAX_AGE_SEC`, `TR33_SYNC_HOST_ACTIVE_REF_HEADER` re-exported from `@tr33/shared` via `tr33/nextjs/branch` and `tr33/nextjs/index.ts`. Route factory `handles()` details in [Branching](./branching.md) and [Editor routes](./editor-routes.md).
+`TR33_BRANCH_COOKIE`, `TR33_BRANCH_COOKIE_FALLBACKS`, `TR33_ACTIVE_REF_COOKIE`, `TR33_ACTIVE_REF_STORAGE_KEY`, `TR33_CACHE_TAG`, `ACTIVE_REF_MAX_AGE_SEC`, `TR33_SYNC_HOST_ACTIVE_REF_HEADER` re-exported from `@wildwood/shared` via `tr33/nextjs/branch` and `tr33/nextjs/index.ts`. Route factory `handles()` details in [Branching](./branching.md) and [Editor routes](./editor-routes.md).
 
 ```
 Standalone draft route:
-import { createDraftRoute, type CreateDraftRouteOptions } from "tr33/nextjs/draft";
+import { createDraftRoute, type CreateDraftRouteOptions } from "wildwood"nextjs/draft";
 export const { GET, POST } = createDraftRoute({ branchCookieName?, legacyCookieNames? });
 ```
 
-Legacy alias `resolveActiveRef` still re-exported from `tr33/nextjs/branch`/`resolve-active-ref`; preferred is `getBranch` / `resolveBranch`.
+Legacy alias `resolveActiveRef` still re-exported from "wildwood"nextjs/branch`/`resolve-active-ref`; preferred is `getBranch` / `resolveBranch`.
 
 ## Branch / cookie helpers
 
@@ -219,7 +219,7 @@ import {
   TR33_ACTIVE_REF_COOKIE,        // legacy alias = "tr33-active-ref"
   TR33_ACTIVE_REF_STORAGE_KEY,   // "tr33.activeRef"
   TR33_CACHE_TAG,                 // "tr33"
-} from "tr33/nextjs/branch";
+} from "wildwood"nextjs/branch";
 
 type Tr33RequestCookies = { get(name:string): { value:string }|undefined };
 function cookiesFromCookieHeader(cookie: string|null|undefined): Tr33RequestCookies;
@@ -241,16 +241,16 @@ async function getBranch(
 ## Kit
 
 ```ts
-import { Tr33Kit, Toolbar, type ToolbarProps, type Tr33KitProps, type KitAuthConfig } from "tr33/nextjs/kit";
+import { Tr33Kit, Toolbar, type ToolbarProps, type Tr33KitProps, type KitAuthConfig } from "wildwood"nextjs/kit";
 ```
 
 - `ToolbarProps` = `Tr33KitProps & { fallback?: ReactNode }`.
 - `Tr33KitProps = { tr33: Tr33KitHostClient (_:config.ref read), apiBase?:string (default "/api"), theme?:Theme(default "system"), auth?:KitAuthConfig, activeRef?:string|null, cookieName?:string, vscodeCommit?:string }`. `Tr33KitHostClient` structural `Tr33ForActiveRef`.
 - `KitAuthConfig` (UI only) public bits: `{ enabled?, enforceInProduction?, userEmail?, githubOAuthEnabled?, githubApp?:{ appSlug?, name?, origin? } }`. `Toolbar` without `auth` derives from `GITHUB_APP_SLUG` / `GITHUB_APP_NAME`. Private signing stays in `createClient({auth:{github}})`. Auth merge in Server Component shallow + `githubApp` merge.
-- `Theme = "light"|"dark"|"system"`, `ResolvedTheme = "light"|"dark"` exposed from `ThemeProvider` (`@tr33/kit` package doc). Kit listens to `matchMedia("(prefers-color-scheme: dark)")`, writes `.dark` on shadow container/documentElement, sets `colorScheme`, `data-kit-theme`, disable transitions.
+- `Theme = "light"|"dark"|"system"`, `ResolvedTheme = "light"|"dark"` exposed from `ThemeProvider` (`@wildwood/kit` package doc). Kit listens to `matchMedia("(prefers-color-scheme: dark)")`, writes `.dark` on shadow container/documentElement, sets `colorScheme`, `data-kit-theme`, disable transitions.
 - FAB, auth panel, editor open sequence, branch channels constants — see [Kit](./kit.md).
 
-## Shared (`@tr33/shared`)
+## Shared (`@wildwood/shared`)
 
 Re-exported via `tr33/nextjs/index.ts` legacy compat too, but source is `packages/shared`:
 
@@ -274,7 +274,7 @@ Kit channels: TR33_KIT_HOST_REF_CHANNEL="tr33-kit-host-ref", TR33_EXTENSION_TO_H
 ## Markdown render
 
 ```ts
-import { Markdown } from "tr33/react/markdown";
+import { Markdown } from "wildwood"react/markdown";
 <Markdown root={doc.body} components={{ a:({href,children,...})=> <Link href={...}/> } } />
 ```
 

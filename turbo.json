@@ -4,12 +4,12 @@
     "GITHUB_APP_ID",
     "GITHUB_PRIVATE_KEY",
     "GITHUB_APP_INSTALLATION_ID",
-    "TR33_DOCS_SOURCE",
-    "TR33_GITHUB_ORG",
-    "TR33_GITHUB_REPO",
-    "TR33_DOCS_REF",
-    "TR33_DOCS_DATABASE_URL",
-    "TR33_DOCS_DATABASE_AUTH_TOKEN"
+    "WILDWOOD_DOCS_SOURCE",
+    "WILDWOOD_GITHUB_ORG",
+    "WILDWOOD_GITHUB_REPO",
+    "WILDWOOD_DOCS_REF",
+    "WILDWOOD_DOCS_DATABASE_URL",
+    "WILDWOOD_DOCS_DATABASE_AUTH_TOKEN"
   ],
   "tasks": {
     "build": {
@@ -19,20 +19,20 @@
         "GITHUB_APP_ID",
         "GITHUB_PRIVATE_KEY",
         "GITHUB_APP_INSTALLATION_ID",
-    "TR33_DOCS_SOURCE",
-        "TR33_GITHUB_ORG",
-        "TR33_GITHUB_REPO",
-        "TR33_DOCS_REF",
-        "TR33_DOCS_DATABASE_URL",
-        "TR33_DOCS_DATABASE_AUTH_TOKEN"
+        "WILDWOOD_DOCS_SOURCE",
+        "WILDWOOD_GITHUB_ORG",
+        "WILDWOOD_GITHUB_REPO",
+        "WILDWOOD_DOCS_REF",
+        "WILDWOOD_DOCS_DATABASE_URL",
+        "WILDWOOD_DOCS_DATABASE_AUTH_TOKEN"
       ]
     },
-    "tr33#build": {
+    "wildwood#build": {
       "dependsOn": [
-        "tr33-store#build",
-        "@tr33/kit#build",
-        "@tr33/ui#build",
-        "tr33-vscode#build"
+        "wildwood-store#build",
+        "wildwood-kit#build",
+        "wildwood-ui#build",
+        "wildwood-vscode#build"
       ],
       "outputs": ["dist/**", "bundled-extension/**"]
     },

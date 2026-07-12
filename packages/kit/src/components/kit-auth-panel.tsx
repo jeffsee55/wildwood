@@ -44,7 +44,7 @@ function trimSlashes(value: string): string {
 }
 
 function randomAppName() {
-  return `Tr33 Play Dev ${Math.random().toString(36).slice(2, 7)}`;
+  return `Wildwood Play Dev ${Math.random().toString(36).slice(2, 7)}`;
 }
 
 function normalizeAuthBase(authBase: string | undefined): string {
@@ -64,7 +64,7 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [name, setName] = React.useState(
-    auth.githubApp?.name || "Tr33 Play Dev",
+    auth.githubApp?.name || "Wildwood Play Dev",
   );
   const [origin, setOrigin] = React.useState(
     auth.githubApp?.origin || "",
@@ -349,7 +349,7 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
               Auth
             </p>
             <p className="mt-1 text-muted-foreground">
-              GitHub sign-in for local Tr33 development.
+              GitHub sign-in for local Wildwood development.
             </p>
           </div>
           {sessionSection}

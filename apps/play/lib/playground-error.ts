@@ -186,7 +186,7 @@ export function logAndFormatPlaygroundError(
   return [
     "Preview run failed. Details below and in the terminal where you run the Next dev server (stderr lines starting with [play]).",
     "If you only see { } in a log, search for: [play] preview load failed (structured)  OR  [play] FAILED at",
-    "Verbose steps: set TR33_PLAY_LOG=1  (in development, logging is on unless TR33_PLAY_LOG=0).",
+    "Verbose steps: set WILDWOOD_PLAY_LOG=1  (in development, logging is on unless WILDWOOD_PLAY_LOG=0).",
     "",
     "── What went wrong ──",
     problem,
@@ -205,10 +205,10 @@ export function logAndFormatPlaygroundError(
     c.source === "github"
       ? "• GitHub: confirm the repo is public or your token has access; check ref exists."
       : "• Local: ensure `localPath` is a real git worktree, ref exists, and the glob matches files under that tree.",
-    "• If you changed org/repo, align with what’s in `tr33.db` or delete `apps/play/tr33.db` and Apply again.",
+    "• If you changed org/repo, align with what’s in `wildwood.db` or delete `apps/play/wildwood.db` and Apply again.",
     "",
     "── What this page cannot know ──",
     "We run on the server. We do not see your full filesystem except paths you configure; we cannot see the browser devtools console for the preview panel.",
-    "The SQLite file URL `file:./tr33.db` is relative to the Next process current working directory (see [play] viewData.start: libsqlUrl in the server log).",
+    "The SQLite file URL `file:./wildwood.db` is relative to the Next process current working directory (see [play] viewData.start: libsqlUrl in the server log).",
   ].join("\n");
 }

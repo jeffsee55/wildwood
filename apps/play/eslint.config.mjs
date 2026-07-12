@@ -11,7 +11,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
-    ".tr33-cache/**",
+    ".wildwood-cache/**",
     "next-env.d.ts",
   ]),
 ]);

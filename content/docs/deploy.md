@@ -17,9 +17,9 @@ That DB — `file:./tr33-docs.db` locally or `TR33_DOCS_DATABASE_URL` (Turso) �
 ## Vercel + Turso pattern (this docs app)
 
 ```ts
-// lib/tr33.ts
+// lib/wildwood.ts
 import { createClient as libsql } from "@libsql/client";
-import { createClient, defineConfig, z } from "tr33";
+import { createClient, defineConfig, z } from "wildwood";
 
 const ORG = process.env.TR33_GITHUB_ORG || "jeffsee55";
 const REPO = process.env.TR33_GITHUB_REPO || "tr33";
@@ -71,8 +71,8 @@ Why `TR33_DOCS_REF` over `GIT_SHA`? One indirection lets you use `VERCEL_GIT_COM
 
 ```ts
 // app/api/[...path]/route.ts
-import { createTr33Route } from "tr33/nextjs/route";
-import { tr33 } from "@/lib/tr33";
+import { createTr33Route } from "wildwood"nextjs/route";
+import { wildwood } from "@/lib/wildwood";
 
 export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createTr33Route(
   () => tr33,
@@ -85,8 +85,8 @@ The factory owns branch cookie + `revalidateTag`. The underlying H3 `handle(tr33
 ## Toolbar wiring
 
 ```tsx
-import { Toolbar } from "tr33/nextjs/kit";
-import { tr33 } from "@/lib/tr33";
+import { Toolbar } from "wildwood"nextjs/kit";
+import { wildwood } from "@/lib/wildwood";
 
 export function Layout({ children }) {
   return <html><body>{children}<Toolbar tr33={tr33} apiBase="/api" /></body></html>;
@@ -103,7 +103,7 @@ To install tr33's GitHub App into a target repo for the editor's remote:
 
 ```tsx
 // app/github-app-manifest/page.tsx (Playground pattern)
-import { createGitHubAppManifestConversionRoute, githubAppManifestConversionCommand, GitHubAppManifestCallback } from "tr33/nextjs/github-app-manifest";
+import { createGitHubAppManifestConversionRoute, githubAppManifestConversionCommand, GitHubAppManifestCallback } from "wildwood"nextjs/github-app-manifest";
 
 export async function GET(req: Request) {
   // Handles conversion (manifest callback) → stored secrets

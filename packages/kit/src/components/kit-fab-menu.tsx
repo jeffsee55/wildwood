@@ -20,28 +20,28 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  TR33_ACTIVE_REF_STORAGE_KEY,
-  TR33_EXTENSION_TO_HOST_REF_CHANNEL,
-  TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL,
-  TR33_KIT_BRANCH_CHANGED_MESSAGE,
-  TR33_KIT_CLOSE_MESSAGE,
-  TR33_KIT_HOST_REF_CHANNEL,
-  TR33_KIT_WORKSPACE_CHANGED_MESSAGE,
+  WILDWOOD_ACTIVE_REF_STORAGE_KEY,
+  WILDWOOD_EXTENSION_TO_HOST_REF_CHANNEL,
+  WILDWOOD_EXTENSION_WORKSPACE_CHANGED_CHANNEL,
+  WILDWOOD_KIT_BRANCH_CHANGED_MESSAGE,
+  WILDWOOD_KIT_CLOSE_MESSAGE,
+  WILDWOOD_KIT_HOST_REF_CHANNEL,
+  WILDWOOD_KIT_WORKSPACE_CHANGED_MESSAGE,
   generateBranchName,
-} from "@tr33/shared";
+} from "wildwood-shared";
 import { useShadowContainer } from "@/lib/shadow-root";
 import { cn } from "@/lib/utils";
 
 const persistActiveRefToStorage = (ref: string): void => {
   try {
-    localStorage.setItem(TR33_ACTIVE_REF_STORAGE_KEY, ref);
+    localStorage.setItem(WILDWOOD_ACTIVE_REF_STORAGE_KEY, ref);
   } catch {
     /* private mode / blocked storage */
   }
 };
 
 const kitLog = (...args: unknown[]) => {
-  console.info("[tr33:kit]", ...args);
+  console.info("[wildwood:kit]", ...args);
 };
 
 function messageOriginatedInVsCodeIframe(
@@ -114,7 +114,7 @@ function authEnabled(auth: KitAuthConfig | undefined): boolean {
     // Throwing here means layout's `<Toolbar auth={...}>` blows up build/runtime
     // with a clear message rather than silently running unauthed in prod.
     throw new Error(
-      "[tr33] Kit auth: GITHUB_APP_SLUG missing. Set GITHUB_APP_SLUG (and GITHUB_APP_ID) in production — hosts should always pass { githubApp: { appSlug, name } }.",
+      "[wildwood] Kit auth: GITHUB_APP_SLUG missing. Set GITHUB_APP_SLUG (and GITHUB_APP_ID) in production — hosts should always pass { githubApp: { appSlug, name } }.",
     );
   }
   return ok;
@@ -394,7 +394,7 @@ export function KitFabMenu({
     if (typeof BroadcastChannel === "undefined") {
       return undefined;
     }
-    hostRefChannelRef.current = new BroadcastChannel(TR33_KIT_HOST_REF_CHANNEL);
+    hostRefChannelRef.current = new BroadcastChannel(WILDWOOD_KIT_HOST_REF_CHANNEL);
     return () => {
       hostRefChannelRef.current?.close();
       hostRefChannelRef.current = null;
@@ -406,7 +406,7 @@ export function KitFabMenu({
     if (typeof BroadcastChannel === "undefined") {
       return undefined;
     }
-    const bc = new BroadcastChannel(TR33_EXTENSION_TO_HOST_REF_CHANNEL);
+    const bc = new BroadcastChannel(WILDWOOD_EXTENSION_TO_HOST_REF_CHANNEL);
     bc.onmessage = (ev: MessageEvent<{ ref?: string }>) => {
       const ref = typeof ev.data?.ref === "string" ? ev.data.ref.trim() : "";
       if (ref.length === 0) return;
@@ -421,7 +421,7 @@ export function KitFabMenu({
     if (typeof BroadcastChannel === "undefined") {
       return undefined;
     }
-    const bc = new BroadcastChannel(TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL);
+    const bc = new BroadcastChannel(WILDWOOD_EXTENSION_WORKSPACE_CHANGED_CHANNEL);
     bc.onmessage = () => {
       kitLog("BroadcastChannel extension→host (workspace)");
       scheduleRefresh();
@@ -581,7 +581,7 @@ export function KitFabMenu({
 
   React.useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      if (event.data?.type === TR33_KIT_WORKSPACE_CHANGED_MESSAGE) {
+      if (event.data?.type === WILDWOOD_KIT_WORKSPACE_CHANGED_MESSAGE) {
         const iframeWin = iframeRef.current?.contentWindow;
         const fromEditor =
           event.origin === window.location.origin ||
@@ -594,7 +594,7 @@ export function KitFabMenu({
         scheduleRefresh();
         return;
       }
-      if (event.data?.type === TR33_KIT_BRANCH_CHANGED_MESSAGE) {
+      if (event.data?.type === WILDWOOD_KIT_BRANCH_CHANGED_MESSAGE) {
         const iframeWin = iframeRef.current?.contentWindow;
         const fromEditor =
           event.origin === window.location.origin ||
@@ -620,7 +620,7 @@ export function KitFabMenu({
       if (event.origin !== window.location.origin) {
         return;
       }
-      if (event.data?.type !== TR33_KIT_CLOSE_MESSAGE) {
+      if (event.data?.type !== WILDWOOD_KIT_CLOSE_MESSAGE) {
         return;
       }
       const iframeWin = iframeRef.current?.contentWindow;
@@ -820,7 +820,7 @@ export function KitFabMenu({
                   onClick={async () => {
                     try {
                       await fetch(
-                        `${window.location.origin}${base}/tr33/preview`,
+                        `${window.location.origin}${base}/wildwood/preview`,
                         {
                           method: "POST",
                           credentials: "include",

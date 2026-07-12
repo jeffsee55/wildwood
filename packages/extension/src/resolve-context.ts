@@ -2,16 +2,16 @@ import * as vscode from "vscode";
 import { readActiveRefFromStorage } from "./host-bridge";
 import { logger } from "./extension";
 
-export type Tr33ExtensionContext = {
+export type WildwoodExtensionContext = {
   repo: string;
   configRef: string;
   currentRef: string;
-  /** Origin for Tr33 git API routes, e.g. `https://docs.example.com`. */
+  /** Origin for Wildwood git API routes, e.g. `https://docs.example.com`. */
   apiBase: string;
 };
 
 /** HTTPS origin for `/api/git` — use workspace host, not `vscode-vfs:` / extension path. */
-export function resolveTr33ApiBase(extensionUri: vscode.Uri): string {
+export function resolveWildwoodApiBase(extensionUri: vscode.Uri): string {
   const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
   if (folder?.authority) {
     return `https://${folder.authority}`;
@@ -22,10 +22,20 @@ export function resolveTr33ApiBase(extensionUri: vscode.Uri): string {
   return `https://${extensionUri.authority}`;
 }
 
-export function resolveTr33ExtensionContext(
+export function resolveWildwoodExtensionContext(
   extensionUri: vscode.Uri,
-): Tr33ExtensionContext {
-  const tr33Config = vscode.workspace.getConfiguration("tr33");
+): WildwoodExtensionContext {
+  // Try new config first, fall back to legacy tr33 config
+  const wildwoodConfig = vscode.workspace.getConfiguration("wildwood");
+  const legacyConfig = vscode.workspace.getConfiguration("tr33");
+  const getConfig = (key: string, fallback?: string) => {
+    const v = wildwoodConfig.get<string>(key);
+    if (v != null && v !== "") return v;
+    const lv = legacyConfig.get<string>(key);
+    if (lv != null && lv !== "") return lv;
+    return fallback;
+  };
+
   let repo: string | undefined;
   let initialRef: string | undefined;
 
@@ -53,7 +63,7 @@ export function resolveTr33ExtensionContext(
   }
 
   if (!repo) {
-    repo = tr33Config.get<string>("repo");
+    repo = getConfig("repo");
   }
 
   if (!repo && workspaceUri) {
@@ -70,7 +80,7 @@ export function resolveTr33ExtensionContext(
   }
 
   if (!initialRef) {
-    initialRef = tr33Config.get<string>("headRef");
+    initialRef = getConfig("headRef");
   }
 
   const extensionParams = extensionUri.query
@@ -84,13 +94,13 @@ export function resolveTr33ExtensionContext(
     undefined;
   const configRef =
     queryConfigRef ??
-    tr33Config.get<string>("baseRef") ??
-    tr33Config.get<string>("ref", "main");
+    getConfig("baseRef") ??
+    getConfig("ref", "main");
   const currentRef = initialRef ?? configRef;
 
   if (!repo || !configRef || !currentRef) {
     throw new Error(
-      `Tr33: cannot resolve workspace context (repo=${repo ?? "missing"}, baseRef=${configRef ?? "missing"}, headRef=${currentRef ?? "missing"}). extensionUri=${extensionUri.toString()}, workspace=${workspaceUri?.toString() ?? "none"}`,
+      `Wildwood: cannot resolve workspace context (repo=${repo ?? "missing"}, baseRef=${configRef ?? "missing"}, headRef=${currentRef ?? "missing"}). extensionUri=${extensionUri.toString()}, workspace=${workspaceUri?.toString() ?? "none"}`,
     );
   }
 
@@ -98,23 +108,23 @@ export function resolveTr33ExtensionContext(
     repo: repo.toLowerCase(),
     configRef,
     currentRef,
-    apiBase: resolveTr33ApiBase(extensionUri),
+    apiBase: resolveWildwoodApiBase(extensionUri),
   };
 }
 
 /** Workbench may open the folder before `configurationDefaults` / workspace folders are visible. */
-export async function whenTr33ExtensionContextReady(
+export async function whenWildwoodExtensionContextReady(
   extensionUri: vscode.Uri,
   options?: { maxWaitMs?: number },
-): Promise<Tr33ExtensionContext> {
+): Promise<WildwoodExtensionContext> {
   const maxWaitMs = options?.maxWaitMs ?? 10_000;
   const deadline = Date.now() + maxWaitMs;
   let lastError: Error | undefined;
 
   while (Date.now() < deadline) {
     try {
-      const ctx = resolveTr33ExtensionContext(extensionUri);
-      logger("Resolved tr33 context", ctx);
+      const ctx = resolveWildwoodExtensionContext(extensionUri);
+      logger("Resolved wildwood context", ctx);
       return ctx;
     } catch (e) {
       lastError = e instanceof Error ? e : new Error(String(e));
@@ -124,6 +134,6 @@ export async function whenTr33ExtensionContextReady(
 
   throw (
     lastError ??
-    new Error("Tr33: timed out waiting for workspace context")
+    new Error("Wildwood: timed out waiting for workspace context")
   );
 }

@@ -42,9 +42,12 @@ yarn-error.log*
 drizzle
 .env*.local
 
-tr33.db
-packages/tr33/vendor/
+wildwood.db
+packages/wildwood/vendor/
+.wildwood-cache/
+# Legacy cache dir names (safe to delete locally)
 .tr33-cache/
-# Legacy cache dir name (safe to delete locally)
 .tr33-cache/
 tsconfig.tsbuildinfo
+# Legacy DBs
+tr33.db

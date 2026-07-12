@@ -1,11 +1,11 @@
-import type { Diff2Entry } from "tr33-store";
+import type { Diff2Entry } from "wildwood-store";
 import * as vscode from "vscode";
-import type { Tr33FileSystemProvider } from "./filesystem";
+import type { WildwoodFileSystemProvider } from "./filesystem";
 import { SCHEME } from "./filesystem";
 
 type ComparisonMode = "combined";
 
-type Tr33SourceControlProviderOptions = {
+type WildwoodSourceControlProviderOptions = {
   id: string;
   label: string;
   mode: ComparisonMode;
@@ -29,15 +29,15 @@ type Tr33SourceControlProviderOptions = {
   showStatusBar?: boolean;
 };
 
-export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
+export class WildwoodSourceControlProvider implements vscode.QuickDiffProvider {
   private _sourceControl: vscode.SourceControl;
   private _configRefChangesGroup: vscode.SourceControlResourceGroup;
   private _conflictsGroup: vscode.SourceControlResourceGroup;
   private _workingChangesGroup: vscode.SourceControlResourceGroup;
-  private _fs: Tr33FileSystemProvider;
-  private _primaryAction: Tr33SourceControlProviderOptions["primaryAction"];
-  private _getPrimaryActionTitle: Tr33SourceControlProviderOptions["getPrimaryActionTitle"];
-  private _secondaryActions: Tr33SourceControlProviderOptions["secondaryActions"];
+  private _fs: WildwoodFileSystemProvider;
+  private _primaryAction: WildwoodSourceControlProviderOptions["primaryAction"];
+  private _getPrimaryActionTitle: WildwoodSourceControlProviderOptions["getPrimaryActionTitle"];
+  private _secondaryActions: WildwoodSourceControlProviderOptions["secondaryActions"];
   private _showStatusBar: boolean;
   private _existingPr: { number: number; url: string } | null = null;
   private _prActionsSupported = true;
@@ -47,8 +47,8 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
 
   constructor(
     context: vscode.ExtensionContext,
-    fs: Tr33FileSystemProvider,
-    options: Tr33SourceControlProviderOptions,
+    fs: WildwoodFileSystemProvider,
+    options: WildwoodSourceControlProviderOptions,
   ) {
     this._fs = fs;
     this._primaryAction = options.primaryAction;
@@ -178,7 +178,7 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
       this.updateInputUi();
       this.updateStatusBar();
     } catch (error) {
-      console.error("[Tr33 SCM] Refresh failed:", error);
+      console.error("[Wildwood SCM] Refresh failed:", error);
     }
   }
 
@@ -191,8 +191,8 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
 
     try {
       await this._fs.commit(message, {
-        name: "Tr33 User",
-        email: "user@tr33.dev",
+        name: "Wildwood User",
+        email: "user@wildwood.dev",
       });
       this._sourceControl.inputBox.value = "";
       vscode.window.showInformationMessage(`Committed: "${message}"`);
@@ -218,8 +218,8 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
         },
         async () => {
           await this._fs.commit(message, {
-            name: "Tr33 User",
-            email: "user@tr33.dev",
+            name: "Wildwood User",
+            email: "user@wildwood.dev",
           });
           await this.pushIfSupported();
         },
@@ -261,8 +261,8 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
         },
         async () => {
           await this._fs.commit(message, {
-            name: "Tr33 User",
-            email: "user@tr33.dev",
+            name: "Wildwood User",
+            email: "user@wildwood.dev",
           });
           try {
             await this._fs.pullFromRemote();
@@ -310,8 +310,8 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
         },
         async () => {
           await this._fs.commit(message, {
-            name: "Tr33 User",
-            email: "user@tr33.dev",
+            name: "Wildwood User",
+            email: "user@wildwood.dev",
           });
           await this.pushIfSupported();
           await this._fs.mergeToConfigRef();
@@ -350,8 +350,8 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
         },
         async () => {
           await this._fs.commit(message, {
-            name: "Tr33 User",
-            email: "user@tr33.dev",
+            name: "Wildwood User",
+            email: "user@wildwood.dev",
           });
           await this.pushIfSupported();
           try {
@@ -556,29 +556,29 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
       });
       primaryAction = {
         command: this._hasUncommittedChanges
-          ? "tr33.source-control.commitAndPush"
-          : "tr33.source-control.syncToConfigRef",
+          ? "wildwood.source-control.commitAndPush"
+          : "wildwood.source-control.syncToConfigRef",
         title: resolved.title,
       };
       placeholder = resolved.placeholder;
     } else {
       primaryAction = this._hasUncommittedChanges
         ? ({
-            command: "tr33.source-control.commitAndPush",
+            command: "wildwood.source-control.commitAndPush",
             title: `Commit & Push`,
           } satisfies vscode.Command)
         : isMergeOnly
           ? ({
-              command: "tr33.source-control.syncToConfigRef",
+              command: "wildwood.source-control.syncToConfigRef",
               title: `Merge to ${configRef}`,
             } satisfies vscode.Command)
           : this._existingPr
             ? ({
-                command: "tr33.source-control.syncToConfigRef",
+                command: "wildwood.source-control.syncToConfigRef",
                 title: `Merge PR`,
               } satisfies vscode.Command)
             : ({
-                command: "tr33.source-control.syncToConfigRef",
+                command: "wildwood.source-control.syncToConfigRef",
                 title: "Create PR",
               } satisfies vscode.Command);
       placeholder = this._hasUncommittedChanges
@@ -602,17 +602,17 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
     const commitDropdownActions = this._hasUncommittedChanges
       ? [
           {
-            command: "tr33.source-control.commit",
+            command: "wildwood.source-control.commit",
             title: "Commit",
           },
           {
-            command: "tr33.source-control.commitAndSyncWithPull",
+            command: "wildwood.source-control.commitAndSyncWithPull",
             title: "Commit & Sync",
           },
         ]
       : [];
     const skipCommitAction = {
-      command: "tr33.source-control.skipCommitAndSync",
+      command: "wildwood.source-control.skipCommitAndSync",
       title: isMergeOnly
         ? `Merge committed changes to ${configRef}`
         : `Skip commit: Create PR / Merge to ${configRef}`,
@@ -630,11 +630,11 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
           ...(this._existingPr && this._prActionsSupported
             ? [
                 {
-                  command: "tr33.source-control.main.pullFromRemote",
+                  command: "wildwood.source-control.main.pullFromRemote",
                   title: "Pull from remote",
                 },
                 {
-                  command: "tr33.source-control.main.viewPr",
+                  command: "wildwood.source-control.main.viewPr",
                   title: `View PR #${this._existingPr.number}`,
                 },
               ]
@@ -666,7 +666,7 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
     this._sourceControl.statusBarCommands = [
       {
         title: `$(git-branch) ${ref}${hasChanges ? "*" : ""}`,
-        command: "tr33.switchBranch",
+        command: "wildwood.switchBranch",
         tooltip: "Switch branch",
       },
     ];
@@ -713,7 +713,7 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
 
     const command: vscode.Command = isConflict
       ? {
-          command: "tr33.openMergeEditor",
+          command: "wildwood.openMergeEditor",
           title: "Open in Merge Editor",
           arguments: [
             resourceUri,
@@ -809,7 +809,7 @@ export class Tr33SourceControlProvider implements vscode.QuickDiffProvider {
 
   private logRemoteCapabilitySkip(operation: string, error: unknown): void {
     console.warn(
-      `[Tr33 SCM] Skipping unsupported remote operation "${operation}"`,
+      `[Wildwood SCM] Skipping unsupported remote operation "${operation}"`,
       error,
     );
   }

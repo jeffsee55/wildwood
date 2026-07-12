@@ -16,4 +16,5 @@ apps/shad-docs/.next/\*\*
 
 # temporary DB / local artifacts
 
+**/wildwood.db
 **/tr33.db

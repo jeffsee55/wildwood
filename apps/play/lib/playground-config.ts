@@ -1,5 +1,7 @@
-/** Playground-only: repo + collection shape; separate from tr33’s preview/ref cookies. */
-export const PLAYGROUND_CONFIG_COOKIE = "tr33_playground_v1";
+/** Playground-only: repo + collection shape; separate from wildwood's preview/ref cookies. */
+export const PLAYGROUND_CONFIG_COOKIE = "wildwood_playground_v1";
+/** @deprecated use PLAYGROUND_CONFIG_COOKIE */
+export const LEGACY_PLAYGROUND_CONFIG_COOKIE = "tr33_playground_v1";
 
 export type PlaygroundSource = "github" | "local";
 
@@ -18,7 +20,7 @@ export type PlaygroundConfig = {
 export const defaultPlaygroundConfig: PlaygroundConfig = {
   source: "github",
   org: "jeffsee55",
-  repo: "tr33-mono",
+  repo: "wildwood-mono",
   ref: "main",
   localPath: "",
   match: "content/docs/**/*.md",
@@ -60,13 +62,15 @@ function normalizeToPlaygroundConfig(
   const contentType = o.contentType === "json" ? "json" : "md";
   const org = o.org as string;
   const repo = o.repo as string;
-  const ref = o.ref as string;
   const match = o.match as string;
+  let ref = o.ref as string;
+  // migrate legacy repo name
+  const normalizedRepo = repo === "tr33-mono" || repo === "tr33" ? "wildwood-mono" : repo;
   if (o.source === "github" || o.source === "local") {
     return {
       source: o.source,
       org,
-      repo,
+      repo: normalizedRepo,
       ref,
       localPath: typeof o.localPath === "string" ? o.localPath : "",
       match,
@@ -77,7 +81,7 @@ function normalizeToPlaygroundConfig(
   return {
     source: "local",
     org,
-    repo,
+    repo: normalizedRepo,
     ref,
     localPath: ".",
     match,
@@ -104,7 +108,9 @@ function parseValue(raw: string | undefined): PlaygroundConfig {
 export function parsePlaygroundConfig(cookies: {
   get(name: string): { value: string } | undefined;
 }): PlaygroundConfig {
-  return parseValue(cookies.get(PLAYGROUND_CONFIG_COOKIE)?.value);
+  // Try new cookie first, fall back to legacy
+  const v = cookies.get(PLAYGROUND_CONFIG_COOKIE)?.value ?? cookies.get(LEGACY_PLAYGROUND_CONFIG_COOKIE)?.value;
+  return parseValue(v);
 }
 
 export function serializePlaygroundConfig(config: PlaygroundConfig): string {

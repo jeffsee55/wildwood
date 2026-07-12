@@ -1,7 +1,12 @@
 {
-  "name": "@tr33/shared",
-  "version": "0.0.0",
-  "private": true,
+  "name": "wildwood-shared",
+  "version": "0.1.0",
+  "description": "Shared constants and utilities for Wildwood",
+  "license": "MIT",
+  "author": "Jeff See <jeff@wildwood.dev>",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "exports": {
     ".": "./dist/index.mjs",

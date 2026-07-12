@@ -1,7 +1,10 @@
 {
-  "name": "tr33-store",
-  "version": "0.0.0",
-  "private": true,
+  "name": "wildwood-store",
+  "version": "0.1.0",
+  "description": "Git object store and merge primitives for Wildwood",
+  "license": "MIT",
+  "author": "Jeff See <jeff@wildwood.dev>",
+  "publishConfig": { "access": "public" },
   "type": "module",
   "exports": {
     ".": {

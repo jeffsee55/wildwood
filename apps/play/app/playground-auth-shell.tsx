@@ -1,5 +1,5 @@
 // Server-only auth boundary — isolated so Turbopack never merges `better-sqlite3`
-// into the same client chunk as `Tr33JsonView`.
+// into the same client chunk as `WildwoodJsonView`.
 
 import { PlaygroundControls } from "@/components/playground-controls";
 import type { PlaygroundConfig } from "@/lib/playground-config";

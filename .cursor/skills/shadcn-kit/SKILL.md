@@ -1,7 +1,7 @@
 ---
 name: shadcn-kit
 description: >-
-  Add and use shadcn/ui components in @tr33/kit (base-mira, Tailwind v4). Use when
+  Add and use shadcn/ui components in @wildwood/kit (base-mira, Tailwind v4). Use when
   adding UI primitives, theming dropdowns/menus, or portaling into the Kit shadow tree.
 ---
 

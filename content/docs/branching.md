@@ -10,19 +10,19 @@ Every markdown edit happens on a branch. tr33 wires branches to preview via a co
 
 ## The cookie
 
-Canonical name: `x-tr33-branch` (`TR33_BRANCH_COOKIE` in `@tr33/shared` / `tr33/nextjs/branch`). Legacy names `x-content-branch` and `tr33-active-ref` are still read (for migration) and are cleared on draft exit. New writes always use the canonical name.
+Canonical name: `x-tr33-branch` (`TR33_BRANCH_COOKIE` in `@wildwood/shared` / `tr33/nextjs/branch`). Legacy names `x-content-branch` and `tr33-active-ref` are still read (for migration) and are cleared on draft exit. New writes always use the canonical name.
 
 When the user switches branches or creates a branch in the Kit toolbar (or any UI that calls the git service API), the host sets the cookie. Next renders then use that branch for all queries even though the data layer is shared.
 
 ## Resolution
 
 ```ts
-import { getBranch, resolveBranch, cookiesFromCookieHeader } from "tr33/nextjs/branch";
-import type { Tr33ForBranch } from "tr33/nextjs/branch";
+import { getBranch, resolveBranch, cookiesFromCookieHeader } from "wildwood"nextjs/branch";
+import type { Tr33ForBranch } from "wildwood"nextjs/branch";
 
 // Server Component / Route (preferred): no manual cookie work
 const ref = await getBranch(tr33);
-// => tr33- cookie if present (canonical then fallbacks), else tr33._.config.ref
+// => tr33- cookie if present (canonical then fallbacks), else wildwood._.config.ref
 
 // With an explicit Next.js cookie store you already called:
 const ref = resolveBranch({ tr33, cookies: await cookies() });
@@ -43,7 +43,7 @@ resolveBranch({ tr33, cookies, cookieName: "x-my-branch", fallbackCookieNames: [
 
 1. `cookieName` (default `x-tr33-branch`)
 2. `TR33_BRANCH_COOKIE_FALLBACKS` (`x-content-branch`, `tr33-active-ref`)
-3. Falls back to `tr33._.config.ref`
+3. Falls back to `wildwood._.config.ref`
 
 ## Route factory owns the wiring
 
@@ -51,8 +51,8 @@ In a typical Next.js app this is all you write:
 
 ```ts
 // app/api/[...path]/route.ts
-import { createTr33Route } from "tr33/nextjs/route";
-import { tr33 } from "@/lib/tr33";
+import { createTr33Route } from "wildwood"nextjs/route";
+import { wildwood } from "@/lib/wildwood";
 
 export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createTr33Route(
   () => tr33,
@@ -89,7 +89,7 @@ Most apps don't need this file at all — draft is inside the catch-all above. W
 
 ```ts
 // app/api/draft/route.ts
-import { createDraftRoute } from "tr33/nextjs/draft";
+import { createDraftRoute } from "wildwood"nextjs/draft";
 export const { GET, POST } = createDraftRoute();
 ```
 
@@ -101,12 +101,12 @@ When `draftMode().enable()` has been called, Next.js automatically bypasses ever
 
 ```ts
 import { cacheLife, cacheTag } from "next/cache";
-import { TR33_CACHE_TAG } from "tr33/nextjs/branch";
-import { tr33 } from "@/lib/tr33";
+import { TR33_CACHE_TAG } from "wildwood"nextjs/branch";
+import { wildwood } from "@/lib/wildwood";
 
 async function DocList() {
   "use cache"; cacheLife("hours"); cacheTag(TR33_CACHE_TAG);
-  const { items } = await tr33.docs.findMany({});
+  const { items } = await wildwood.docs.findMany({});
   return <ul>{items.map(i => <li key={i.path}>{i.title}</li>)}</ul>;
 }
 ```
@@ -124,7 +124,7 @@ Entering a branch: any UI that `POST`s `/api/git/create-branch` or `/api/git/swi
 If you host tr33 in a non-Next Fetch runtime, skip `createTr33Route` and use the raw handler:
 
 ```ts
-import { handle } from "tr33/nextjs/handler";
+import { handle } from "wildwood"nextjs/handler";
 
 const api = handle(tr33);
 // Request → Response. Framework owns cookies + revalidateTag in that env too.

@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
 import Link from "next/link";
-import { Toolbar } from "tr33/nextjs/kit";
-import { tr33 } from "@/lib/tr33";
+import { Toolbar } from "wildwood/nextjs/kit";
+import { wildwood } from "@/lib/wildwood";
 import "./globals.css";
 
 const geistMono = Geist_Mono({
@@ -11,14 +11,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "tr33 — manual",
+  title: "wildwood — manual",
   description: "Git as content store. Typeset as man page.",
 };
 
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const navRes = await tr33.nav.findMany({ with: { children: true } });
+  const navRes = await wildwood.nav.findMany({ with: { children: true } });
   const nav = navRes.items[0] ?? null;
   const docs = (nav?.children ?? []) as Array<{
     _meta: { path: string };
@@ -44,7 +44,7 @@ export default async function RootLayout({
                 href="/"
                 className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] underline decoration-border underline-offset-4 hover:decoration-foreground"
               >
-                tr33(1)
+                wildwood(1)
               </Link>
               <span className="hidden font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground md:inline">
                 git as cms · typed · versioned · branchable
@@ -81,22 +81,22 @@ export default async function RootLayout({
 
             <div className="mt-12 border-t border-border pt-8 font-mono text-[11px] leading-[1.9] text-muted-foreground">
               <div className="uppercase tracking-[0.12em]">source</div>
-              <div className="mt-2 normal-case tracking-[-0.01em]">
+              <div className="mt-2 normal-case tracking-[-01em]">
                 <code className="rounded border border-border bg-card px-1 py-0.5 text-[11px]">content/</code>{" "}
                 in this repo.
                 <br />
-                queries via <code className="text-foreground">tr33.docs.findMany()</code>.
+                queries via <code className="text-foreground">wildwood.docs.findMany()</code>.
               </div>
               <div className="mt-5 uppercase tracking-[0.12em]">see also</div>
               <div className="mt-2 space-y-1">
                 <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/intro">
-                  tr33(1) intro
+                  wildwood(1) intro
                 </Link>
                 <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/api">
-                  tr33(5) api
+                  wildwood(5) api
                 </Link>
                 <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/guides">
-                  tr33(7) guides
+                  wildwood(7) guides
                 </Link>
               </div>
             </div>
@@ -110,7 +110,7 @@ export default async function RootLayout({
 
         {/* Toolbar is opt-out of typeset; deduce theme from system via CSS */}
         <div className="not-typeset">
-          <Toolbar tr33={tr33} apiBase="/api" />
+          <Toolbar wildwood={wildwood} apiBase="/api" />
         </div>
       </body>
     </html>

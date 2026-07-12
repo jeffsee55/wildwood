@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { Markdown } from "tr33/react/markdown";
-import { tr33 } from "@/lib/tr33";
+import { Markdown } from "wildwood/react/markdown";
+import { wildwood } from "@/lib/wildwood";
 
 export default async function Home() {
-  const res = await tr33.docs.findMany({});
+  const res = await wildwood.docs.findMany({});
   const current =
     res.items.toSorted((a, b) => a.title.localeCompare(b.title))[0] ?? null;
 
@@ -14,7 +14,7 @@ export default async function Home() {
           name
         </div>
         <h1 className="!mt-3 !border-0 !pt-0 !text-[28px] !font-semibold !normal-case !tracking-[-0.03em]">
-          tr33 — git as content store
+          wildwood — git as content store
         </h1>
         <p className="!mt-5 max-w-[60ch] !leading-[1.95] text-muted-foreground">
           Markdown and JSON in <code>content/</code> → typed collection API. Edits go through a
@@ -26,14 +26,14 @@ export default async function Home() {
           <div className="flex gap-3">
             <span className="w-[5.5rem] shrink-0 uppercase tracking-[0.12em] text-muted-foreground">synopsis</span>
             <span>
-              <code>tr33.docs.findMany()</code> · <code>with:{"{author:true}"}</code> ·{" "}
-              <code>tr33/api</code> · <code>draftMode()</code> per-user
+              <code>wildwood.docs.findMany()</code> · <code>with:{"{author:true}"}</code> ·{" "}
+              <code>wildwood/api</code> · <code>draftMode()</code> per-user
             </span>
           </div>
           <div className="flex gap-3">
             <span className="w-[5.5rem] shrink-0 uppercase tracking-[0.12em] text-muted-foreground">source</span>
-            <Link className="underline decoration-border underline-offset-4 hover:decoration-foreground" href="https://github.com/jeffsee55/tr33">
-              jeffsee55/tr33
+            <Link className="underline decoration-border underline-offset-4 hover:decoration-foreground" href="https://github.com/jeffsee55/wildwood">
+              jeffsee55/wildwood
             </Link>
           </div>
         </div>
@@ -61,8 +61,8 @@ export default async function Home() {
           <dd>nav collection — <code>z.json()</code> with <code>z.connect()</code></dd>
           <dt className="uppercase tracking-[0.08em] text-muted-foreground">app/api/[...path]/route.ts</dt>
           <dd>
-            one catch-all: <code>createTr33Route</code> owns <code>/git/*</code>,{" "}
-            <code>/tr33/draft</code>, <code>/tr33/preview</code>
+            one catch-all: <code>createWildwoodRoute</code> owns <code>/git/*</code>,{" "}
+            <code>/wildwood/draft</code>, <code>/wildwood/preview</code>
           </dd>
         </dl>
       </section>

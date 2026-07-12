@@ -1,11 +1,11 @@
 import * as vscode from "vscode";
-import { Tr33FileSystemProvider, generateBranchName, SCHEME } from "./filesystem";
+import { WildwoodFileSystemProvider, generateBranchName, SCHEME } from "./filesystem";
 import { subscribeHostRef, writeActiveRefToStorage } from "./host-bridge";
-import { whenTr33ExtensionContextReady } from "./resolve-context";
-import { Tr33SourceControlProvider } from "./source-control";
+import { whenWildwoodExtensionContextReady } from "./resolve-context";
+import { WildwoodSourceControlProvider } from "./source-control";
 
 export const logger = (...args: unknown[]) => {
-  console.log("[Tr33 Extension]", ...args);
+  console.log("[Wildwood Extension]", ...args);
 };
 
 const MIME_TYPES: Record<string, string> = {
@@ -19,10 +19,10 @@ const MIME_TYPES: Record<string, string> = {
   ico: "image/x-icon",
 };
 
-class Tr33ImageEditorProvider
+class WildwoodImageEditorProvider
   implements vscode.CustomReadonlyEditorProvider
 {
-  constructor(private fs: Tr33FileSystemProvider) {}
+  constructor(private fs: WildwoodFileSystemProvider) {}
 
   openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
     return { uri, dispose() {} };
@@ -75,35 +75,35 @@ class Tr33ImageEditorProvider
 export async function activate(context: vscode.ExtensionContext) {
   try {
     logger("Activating...", context.extensionUri.toString());
-    const resolved = await whenTr33ExtensionContextReady(
+    const resolved = await whenWildwoodExtensionContextReady(
       context.extensionUri,
     );
-    const tr33FS = new Tr33FileSystemProvider(
+    const wildwoodFS = new WildwoodFileSystemProvider(
       context.extensionUri,
       resolved,
     );
 
     const hostRefSub = subscribeHostRef((ref) => {
       writeActiveRefToStorage(ref);
-      void tr33FS.switchRef(ref, { notifyParent: false });
+      void wildwoodFS.switchRef(ref, { notifyParent: false });
     });
     context.subscriptions.push(
       new vscode.Disposable(() => hostRefSub.dispose()),
     );
 
     try {
-      await tr33FS.initializeWorkspace();
+      await wildwoodFS.initializeWorkspace();
       context.subscriptions.push(
-        vscode.workspace.registerFileSystemProvider(SCHEME, tr33FS, {
+        vscode.workspace.registerFileSystemProvider(SCHEME, wildwoodFS, {
           isCaseSensitive: true,
           isReadonly: false,
         }),
       );
-      await tr33FS.bindWorkspaceFolder();
-      await tr33FS.probeWorkspaceListing();
-      tr33FS.refreshExplorer();
-      queueMicrotask(() => tr33FS.refreshExplorer());
-      setTimeout(() => tr33FS.refreshExplorer(), 250);
+      await wildwoodFS.bindWorkspaceFolder();
+      await wildwoodFS.probeWorkspaceListing();
+      wildwoodFS.refreshExplorer();
+      queueMicrotask(() => wildwoodFS.refreshExplorer());
+      setTimeout(() => wildwoodFS.refreshExplorer(), 250);
       void vscode.commands.executeCommand(
         "workbench.files.action.refreshFilesExplorer",
       );
@@ -111,13 +111,13 @@ export async function activate(context: vscode.ExtensionContext) {
       const detail =
         error instanceof Error ? error.message : String(error);
       throw new Error(
-        `Tr33: failed to register "${SCHEME}" file system provider (${detail})`,
+        `Wildwood: failed to register "${SCHEME}" file system provider (${detail})`,
         { cause: error },
       );
     }
 
     context.subscriptions.push(
-      tr33FS.onDidCreateBranch((branchName) => {
+      wildwoodFS.onDidCreateBranch((branchName) => {
         vscode.window.showInformationMessage(
           `Created branch: ${branchName}`,
         );
@@ -126,24 +126,24 @@ export async function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
       vscode.window.registerCustomEditorProvider(
-      "tr33.imagePreview",
-      new Tr33ImageEditorProvider(tr33FS),
+      "wildwood.imagePreview",
+      new WildwoodImageEditorProvider(wildwoodFS),
         { supportsMultipleEditorsPerDocument: true },
       ),
     );
 
     context.subscriptions.push(
       vscode.commands.registerCommand(
-        "tr33.openMergeEditor",
+        "wildwood.openMergeEditor",
       async (
         resourceUri: vscode.Uri,
         commitTreeOid: string,
         configRefTreeOid: string,
         mergeBaseTreeOid: string,
       ) => {
-        const base = tr33FS.getTreeUri(resourceUri, mergeBaseTreeOid);
-        const input1 = tr33FS.getTreeUri(resourceUri, commitTreeOid);
-        const input2 = tr33FS.getTreeUri(resourceUri, configRefTreeOid);
+        const base = wildwoodFS.getTreeUri(resourceUri, mergeBaseTreeOid);
+        const input1 = wildwoodFS.getTreeUri(resourceUri, commitTreeOid);
+        const input2 = wildwoodFS.getTreeUri(resourceUri, configRefTreeOid);
         await vscode.commands.executeCommand("_open.mergeEditor", {
           base,
           input1: { uri: input1, title: "Current" },
@@ -154,12 +154,12 @@ export async function activate(context: vscode.ExtensionContext) {
       ),
     );
 
-    const workingScm = new Tr33SourceControlProvider(context, tr33FS, {
-    id: "tr33-scm",
-    label: "Tr33",
+    const workingScm = new WildwoodSourceControlProvider(context, wildwoodFS, {
+    id: "wildwood-scm",
+    label: "Wildwood",
     mode: "combined",
     primaryAction: {
-      command: "tr33.source-control.commit",
+      command: "wildwood.source-control.commit",
       title: "Commit",
     },
     getPrimaryActionTitle: (state) => {
@@ -188,7 +188,7 @@ export async function activate(context: vscode.ExtensionContext) {
     },
     secondaryActions: [
       {
-        command: "tr33.source-control.syncToConfigRef",
+        command: "wildwood.source-control.syncToConfigRef",
         title: "Create PR / Merge PR",
       },
     ],
@@ -196,10 +196,10 @@ export async function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(
-      vscode.commands.registerCommand("tr33.switchBranch", async () => {
-      const branches = await tr33FS.fetchBranches();
-      const currentRef = tr33FS.getCurrentRef();
-      const configRef = tr33FS.getConfigRef();
+      vscode.commands.registerCommand("wildwood.switchBranch", async () => {
+      const branches = await wildwoodFS.fetchBranches();
+      const currentRef = wildwoodFS.getCurrentRef();
+      const configRef = wildwoodFS.getConfigRef();
       const items: vscode.QuickPickItem[] = [
         {
           label: "$(add) New branch",
@@ -230,8 +230,8 @@ export async function activate(context: vscode.ExtensionContext) {
       if (picked.label.startsWith("$(add)")) {
         const branchName = generateBranchName();
         try {
-          await tr33FS.createBranch(branchName, configRef);
-          await tr33FS.switchRef(branchName);
+          await wildwoodFS.createBranch(branchName, configRef);
+          await wildwoodFS.switchRef(branchName);
           vscode.window.showInformationMessage(
             `Created and switched to branch: ${branchName}`,
           );
@@ -244,91 +244,91 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       const branch = picked.label.replace(/^\$\([^)]+\)\s*/, "");
       if (branch === currentRef) return;
-      await tr33FS.switchRef(branch);
+      await wildwoodFS.switchRef(branch);
         vscode.window.showInformationMessage(`Switched to branch: ${branch}`);
       }),
     );
 
     context.subscriptions.push(
-      vscode.commands.registerCommand("tr33.source-control.commit", () =>
+      vscode.commands.registerCommand("wildwood.source-control.commit", () =>
       workingScm.performCommit(),
     ),
     vscode.commands.registerCommand(
-      "tr33.source-control.commitAndPush",
+      "wildwood.source-control.commitAndPush",
       () => workingScm.performCommitAndPush(),
     ),
     vscode.commands.registerCommand(
-      "tr33.source-control.commitAndSyncWithPull",
+      "wildwood.source-control.commitAndSyncWithPull",
       () => workingScm.performCommitAndSyncWithPull(),
     ),
-    vscode.commands.registerCommand("tr33.source-control.commitAndMerge", () =>
+    vscode.commands.registerCommand("wildwood.source-control.commitAndMerge", () =>
       workingScm.performCommitAndMerge(),
     ),
-    vscode.commands.registerCommand("tr33.source-control.syncToConfigRef", () =>
+    vscode.commands.registerCommand("wildwood.source-control.syncToConfigRef", () =>
       workingScm.performSyncToConfigRef(),
     ),
     vscode.commands.registerCommand(
-      "tr33.source-control.skipCommitAndSync",
+      "wildwood.source-control.skipCommitAndSync",
       () => workingScm.performSyncToConfigRef(),
     ),
-    vscode.commands.registerCommand("tr33.source-control.discard", () =>
+    vscode.commands.registerCommand("wildwood.source-control.discard", () =>
       workingScm.performDiscard(),
     ),
-    vscode.commands.registerCommand("tr33.source-control.refresh", () =>
+    vscode.commands.registerCommand("wildwood.source-control.refresh", () =>
       workingScm.refresh(),
     ),
     vscode.commands.registerCommand(
-      "tr33.source-control.main.commitAndMerge",
+      "wildwood.source-control.main.commitAndMerge",
       () => workingScm.performCommitAndMerge(),
     ),
     vscode.commands.registerCommand(
-      "tr33.source-control.main.commitAndCreatePr",
+      "wildwood.source-control.main.commitAndCreatePr",
       () => workingScm.performCommitAndCreatePr(),
     ),
-    vscode.commands.registerCommand("tr33.source-control.main.commit", () =>
+    vscode.commands.registerCommand("wildwood.source-control.main.commit", () =>
       workingScm.performCommit(),
     ),
-    vscode.commands.registerCommand("tr33.source-control.main.viewPr", () =>
+    vscode.commands.registerCommand("wildwood.source-control.main.viewPr", () =>
       workingScm.viewExistingPr(),
     ),
     vscode.commands.registerCommand(
-      "tr33.source-control.main.pullFromRemote",
+      "wildwood.source-control.main.pullFromRemote",
       () => workingScm.performPullFromRemote(),
     ),
-    vscode.commands.registerCommand("tr33.openOnGitHub", () => {
-      const repo = tr33FS.getRepo();
+    vscode.commands.registerCommand("wildwood.openOnGitHub", () => {
+      const repo = wildwoodFS.getRepo();
       if (repo) {
         vscode.env.openExternal(
           vscode.Uri.parse(`https://github.com/${repo}`),
         );
       }
     }),
-    vscode.commands.registerCommand("tr33.openPullRequests", () => {
-      const repo = tr33FS.getRepo();
+    vscode.commands.registerCommand("wildwood.openPullRequests", () => {
+      const repo = wildwoodFS.getRepo();
       if (repo) {
         vscode.env.openExternal(
           vscode.Uri.parse(`https://github.com/${repo}/pulls`),
         );
       }
     }),
-    vscode.commands.registerCommand("tr33.openIssues", () => {
-      const repo = tr33FS.getRepo();
+    vscode.commands.registerCommand("wildwood.openIssues", () => {
+      const repo = wildwoodFS.getRepo();
       if (repo) {
         vscode.env.openExternal(
           vscode.Uri.parse(`https://github.com/${repo}/issues`),
         );
       }
     }),
-    vscode.commands.registerCommand("tr33.openBranchOnGitHub", () => {
-      const repo = tr33FS.getRepo();
-      const ref = tr33FS.getCurrentRef();
+    vscode.commands.registerCommand("wildwood.openBranchOnGitHub", () => {
+      const repo = wildwoodFS.getRepo();
+      const ref = wildwoodFS.getCurrentRef();
       if (repo && ref) {
         vscode.env.openExternal(
           vscode.Uri.parse(`https://github.com/${repo}/tree/${ref}`),
         );
       }
     }),
-    vscode.commands.registerCommand("tr33.closeEmbeddedEditor", () => {
+    vscode.commands.registerCommand("wildwood.closeEmbeddedEditor", () => {
       if (typeof globalThis.window === "undefined") {
         return;
       }
@@ -344,7 +344,7 @@ export async function activate(context: vscode.ExtensionContext) {
       } catch {
         /* cross-origin top */
       }
-        w.top.postMessage({ type: "tr33-kit-close-editor" }, targetOrigin);
+        w.top.postMessage({ type: "wildwood-kit-close-editor" }, targetOrigin);
       }),
     );
 

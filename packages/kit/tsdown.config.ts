@@ -33,7 +33,7 @@ export default defineConfig({
   exports: true,
   plugins: [tailwindPlugin()],
   deps: {
-    // Bundle `@tr33/shared` (pure JS / ~3KB) so consumers don't need `transpilePackages`.
+    // Bundle `wildwood-shared` (pure JS / ~3KB) so consumers don't need `transpilePackages`.
     alwaysBundle: [/@tr33\/shared/, /sonner.*\.css/],
     // Keep React + Next external to guarantee single React copy (fixes useRef-of-null).
     neverBundle: ["react", "react-dom", "react/jsx-runtime", "next", "next/navigation", "next/link"],

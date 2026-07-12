@@ -9,7 +9,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
-    ".tr33-cache/**",
+    ".wildwood-cache/**",
     "*.db",
     "next-env.d.ts",
   ]),

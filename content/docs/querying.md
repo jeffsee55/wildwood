@@ -19,7 +19,7 @@ tr33.docs
 tr33.nav
 
 // Internal:
-tr33._.config
+wildwood._.config
 tr33._.db       // LibsqlDatabase
 tr33._.git      // Git (remote, trees, caching)
 tr33._.logger
@@ -48,7 +48,7 @@ Throws when `findFirst` finds nothing; `findMany` returns empty `items`.
 Every field marked `z.filter(T)` is queryable:
 
 ```ts
-await tr33.docs.findMany({
+await wildwood.docs.findMany({
   where: {
     title: { eq: "Introduction" },
     // operators: eq, ne, gt, gte, lt, lte, in, notIn,
@@ -69,7 +69,7 @@ where: {
 System fields `path`, `slug`, and `ref` are always filterable even without `z.filter`:
 
 ```ts
-await tr33.docs.findFirst({ where: { slug: "intro" } });
+await wildwood.docs.findFirst({ where: { slug: "intro" } });
 ```
 
 ### Joined where (filter on connection target)
@@ -78,7 +78,7 @@ You can filter a collection by its related entries:
 
 ```ts
 // "docs whose author.name equals Jeff"
-await tr33.docs.findMany({
+await wildwood.docs.findMany({
   where: { author: { name: { eq: "Jeff See" } } },
   with: { author: true },
 });
@@ -91,7 +91,7 @@ This only works when `author` is a connection field (`z.connect(authors)` in the
 Eager-loads connections:
 
 ```ts
-const res = await tr33.docs.findFirst({
+const res = await wildwood.docs.findFirst({
   where: { slug: "intro" },
   with: { author: true },
 });
@@ -107,7 +107,7 @@ Invalid keys are a type error:
 
 ```ts
 // @ts-expect-error — author2 does not exist on docs
-await tr33.docs.findFirst({ with: { author2: true } });
+await wildwood.docs.findFirst({ with: { author2: true } });
 ```
 
 Arrays: `with: { children: true }` resolves each entry in the array. The result type carries transient optional semantics from the underlying wrappers (`optional()` / `nullable()`).
@@ -159,8 +159,8 @@ Reverse source detection uses `ReverseSources<CM, Target, RA>` (matching on `val
 Override the ref per query (useful without cookies / preview):
 
 ```ts
-const main = await tr33.docs.findMany({ ref: "main" });
-const feat = await tr33.docs.findMany({ ref: "feature/word-count" });
+const main = await wildwood.docs.findMany({ ref: "main" });
+const feat = await wildwood.docs.findMany({ ref: "feature/word-count" });
 ```
 
 In the docs app, the active ref is also supplied by cookie: see [Branching and preview](./branching.md).
@@ -170,7 +170,7 @@ In the docs app, the active ref is also supplied by cookie: see [Branching and p
 When `variants` is set on `config`, each query can request a variant axis:
 
 ```ts
-await tr33.docs.findMany({ variant: "locale:fr|version:v2" });
+await wildwood.docs.findMany({ variant: "locale:fr|version:v2" });
 ```
 
 See [Variants](./variants.md) for path modifier, selection, and scoring rules.
@@ -178,7 +178,7 @@ See [Variants](./variants.md) for path modifier, selection, and scoring rules.
 ## Pagination and ordering
 
 ```ts
-await tr33.docs.findMany({
+await wildwood.docs.findMany({
   limit: 20,
   offset: 0,
   orderBy: { title: "asc" },

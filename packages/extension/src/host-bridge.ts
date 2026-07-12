@@ -1,19 +1,19 @@
 /**
- * Re-exports from @tr33/shared so extension + kit stay in sync.
+ * Re-exports from wildwood-shared so extension + kit stay in sync.
  * Do not duplicate channel names / storage keys.
  */
 export {
-  TR33_ACTIVE_REF_STORAGE_KEY,
-  TR33_EXTENSION_TO_HOST_REF_CHANNEL,
-  TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL,
-  TR33_KIT_HOST_REF_CHANNEL,
+  WILDWOOD_ACTIVE_REF_STORAGE_KEY,
+  WILDWOOD_EXTENSION_TO_HOST_REF_CHANNEL,
+  WILDWOOD_EXTENSION_WORKSPACE_CHANGED_CHANNEL,
+  WILDWOOD_KIT_HOST_REF_CHANNEL,
   generateBranchName,
-} from "@tr33/shared";
+} from "wildwood-shared";
 
 import {
-  TR33_ACTIVE_REF_STORAGE_KEY as ACTIVE_REF_KEY,
-  TR33_KIT_HOST_REF_CHANNEL as KIT_REF_CHANNEL,
-} from "@tr33/shared";
+  WILDWOOD_ACTIVE_REF_STORAGE_KEY as ACTIVE_REF_KEY,
+  WILDWOOD_KIT_HOST_REF_CHANNEL as KIT_REF_CHANNEL,
+} from "wildwood-shared";
 
 export function readActiveRefFromStorage(): string | undefined {
   if (typeof localStorage === "undefined") return undefined;

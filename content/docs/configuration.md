@@ -11,7 +11,7 @@ tr33's runtime is driven by a single `defineConfig` call plus a database and opt
 ## defineConfig
 
 ```ts
-import { defineConfig, z } from "tr33";
+import { defineConfig, z } from "wildwood";
 
 const config = defineConfig({
   org: "jeffsee55",           // GitHub owner
@@ -46,7 +46,7 @@ Resolution order for `resolvedLocalPath` (the property the remote chooses, not t
 
 ```ts
 import { createClient as libsql } from "@libsql/client";
-import { createClient } from "tr33";
+import { createClient } from "wildwood";
 
 const database = libsql({
   url: process.env.TR33_DATABASE_URL || "file:./tr33.db",
@@ -63,7 +63,7 @@ During `next build` (which has the checkout), `findMany` / `findFirst` cold-cach
 Auth is optional. Pass `auth` to `createClient` when you need it:
 
 ```ts
-import type { Tr33AuthConfig } from "tr33";
+import type { Tr33AuthConfig } from "wildwood";
 
 const auth: Tr33AuthConfig = {
   github: {

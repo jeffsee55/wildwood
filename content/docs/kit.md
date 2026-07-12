@@ -11,13 +11,13 @@ Kit is the floating UI your app mounts once — at the bottom of the page or nea
 ## Import paths
 
 ```ts
-import { Tr33Kit, Toolbar } from "tr33/nextjs/kit";
-import type { KitAuthConfig, ToolbarProps, Tr33KitProps } from "tr33/nextjs/kit";
+import { Tr33Kit, Toolbar } from "wildwood"nextjs/kit";
+import type { KitAuthConfig, ToolbarProps, Tr33KitProps } from "wildwood"nextjs/kit";
 ```
 
 `Tr33Kit` and `Toolbar` are Server Components. They resolve cookies and VS Code CDN commit on the server, then render `ClientKitBoundary` (a `use client` + `dynamic(..., { ssr:false })` wrapper) whose ref/portal/shadow DOM avoids the `Cannot read useRef of null` RSC pre-resolution crash.
 
-`@tr33/kit` is the underlying client package — shadcn/ui + Vite library. You never import it directly unless you're building your own host frame.
+`@wildwood/kit` is the underlying client package — shadcn/ui + Vite library. You never import it directly unless you're building your own host frame.
 
 ## Toolbar (recommended)
 
@@ -25,8 +25,8 @@ One line:
 
 ```tsx
 // app/layout.tsx
-import { Toolbar } from "tr33/nextjs/kit";
-import { tr33 } from "@/lib/tr33";
+import { Toolbar } from "wildwood"nextjs/kit";
+import { wildwood } from "@/lib/wildwood";
 
 export default async function Layout({ children }) {
   const nav = await tr33.nav.findMany({ with: { children: true } });
@@ -71,14 +71,14 @@ async function Tr33Kit({ tr33, apiBase, theme, auth: authProp, activeRef: active
     shouldAutoResolve ? getBranch(tr33, cookieName ? { cookieName } : undefined)
                       : Promise.resolve(activeRefProp as string),
   ]);
-  const activeRef = resolvedRef ?? tr33._.config.ref;
+  const activeRef = resolvedRef ?? wildwood._.config.ref;
   const envAuth = resolveKitAuthFromEnv();
   const auth = mergeKitAuth(envAuth, authProp);
   return <ClientKitBoundary apiBase={apiBase} configRef={config.ref} activeRef={activeRef} vscodeCommit={commit} theme={theme} auth={auth} />;
 }
 ```
 
-`ClientKitBoundary` is `'use client'` and does `dynamic(()=>import("@tr33/kit"), { ssr:false })` internally. So no portalled DOM touches RSC SSR.
+`ClientKitBoundary` is `'use client'` and does `dynamic(()=>import("@wildwood/kit"), { ssr:false })` internally. So no portalled DOM touches RSC SSR.
 
 ## Tr33Kit (lower-level)
 
@@ -108,7 +108,7 @@ Your app's `html` should also have `suppressHydrationWarning` when color-scheme 
 
 Kit, the extension host (if running VS Code extension in desktop), and the docs page need to stay in sync when a branch changes:
 
-- `@tr33/shared` constants:
+- `@wildwood/shared` constants:
 
 ```ts
 TR33_KIT_HOST_REF_CHANNEL = "tr33-kit-host-ref"                    // Kit page → host
@@ -140,7 +140,7 @@ Errors render as pinned banner above FAB/overlay. Guard/run id monotonic via `ed
 
 ## FAB menu
 
-`KitFabMenu` in `@tr33/kit` provides the floating action button and menu:
+`KitFabMenu` in `@wildwood/kit` provides the floating action button and menu:
 
 - Auth panel (`KitAuthPanel`) — `KitAuthConfig`, GitHub OAuth state, GitHub App install links.
 - FAB: branch display (`activeRef ?? configRef`), switch branch UI, branch name generator (`generateBranchName()` from shared: picks a random city (`BRANCH_CITIES`) + 4-char base36 suffix).

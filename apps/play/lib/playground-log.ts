@@ -1,14 +1,14 @@
 import { inspect } from "node:util";
 
 /**
- * Verbose `[play] ...` lines: dev by default, or `TR33_PLAY_LOG=1` in production.
- * Set `TR33_PLAY_LOG=0` to silence non-error debug lines in development.
+ * Verbose `[play] ...` lines: dev by default, or `WILDWOOD_PLAY_LOG=1` in production.
+ * Set `WILDWOOD_PLAY_LOG=0` to silence non-error debug lines in development.
  */
 export function isPlayVerbose(): boolean {
-  if (process.env.TR33_PLAY_LOG === "0") {
+  if (process.env.WILDWOOD_PLAY_LOG === "0") {
     return false;
   }
-  if (process.env.TR33_PLAY_LOG === "1") {
+  if (process.env.WILDWOOD_PLAY_LOG === "1") {
     return true;
   }
   return process.env.NODE_ENV === "development";

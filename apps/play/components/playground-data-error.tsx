@@ -4,7 +4,7 @@ type Props = {
 };
 
 export function PlaygroundDataError({
-  title = "Tr33 preview error",
+  title = "Wildwood preview error",
   message,
 }: Props) {
   return (

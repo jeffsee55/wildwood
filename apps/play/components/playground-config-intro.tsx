@@ -33,12 +33,12 @@ export function PlaygroundConfigIntro() {
         runs <code className="text-zinc-700 dark:text-zinc-300">git</code> in a
         directory on this machine; org and repo are the{" "}
         <span className="font-medium">SQLite namespace</span> for this app’s{" "}
-        <code className="text-zinc-700 dark:text-zinc-300">tr33.db</code> (they
+        <code className="text-zinc-700 dark:text-zinc-300">wildwood.db</code> (they
         are not sent to GitHub). File contents are stored under that org+repo; if
         you change the repo name after the DB was first filled, re-use the
         previous name or delete{" "}
         <code className="text-zinc-700 dark:text-zinc-300">
-          apps/play/tr33.db
+          apps/play/wildwood.db
         </code>{" "}
         and <strong>Apply</strong> again to re-index.
       </p>

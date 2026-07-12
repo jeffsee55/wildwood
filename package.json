@@ -1,20 +1,20 @@
 {
-  "name": "tr33-mono",
+  "name": "wildwood-mono",
   "private": true,
   "scripts": {
     "build": "turbo build",
     "start": "turbo start",
     "dev": "turbo dev",
     "lint": "turbo lint",
-    "dev:web": "turbo run watch:deps next:dev studio:play --filter=tr33 --filter=@tr33/kit --filter=tr33-vscode --filter=play",
+    "dev:web": "turbo run watch:deps next:dev studio:play --filter=wildwood --filter=wildwood-kit --filter=wildwood-vscode --filter=play",
     "dev:web-play": "pnpm run dev:web",
-    "dev:docs": "turbo run watch:deps next:dev studio:play --filter=tr33 --filter=@tr33/kit --filter=tr33-vscode --filter=docs",
+    "dev:docs": "turbo run watch:deps next:dev studio:play --filter=wildwood --filter=wildwood-kit --filter=wildwood-vscode --filter=docs",
     "playground": "pnpm run dev:web",
-    "dev:vscode-playground": "turbo run playground studio --filter=tr33",
-    "studio:tr33": "turbo run studio --filter=tr33",
-    "studio:web-db": "turbo run studio:play --filter=tr33",
-    "test:tr33": "turbo run test --filter=tr33",
-    "test:tr33:watch": "turbo run test:watch --filter=tr33"
+    "dev:vscode-playground": "turbo run playground studio --filter=wildwood",
+    "studio:wildwood": "turbo run studio --filter=wildwood",
+    "studio:web-db": "turbo run studio:play --filter=wildwood",
+    "test:wildwood": "turbo run test --filter=wildwood",
+    "test:wildwood:watch": "turbo run test:watch --filter=wildwood"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.7",
