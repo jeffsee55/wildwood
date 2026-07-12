@@ -10,32 +10,35 @@ import {
   vscodeWebStaticCacheHeaders,
   withVscodeEmbedCors,
 } from "@/nextjs/vscode-embed-csp";
-import { extensionAssetContentType, readBundledExtensionAsset } from "@/nextjs/read-bundled-extension-asset";
+import {
+  extensionAssetContentType,
+  readBundledExtensionAsset,
+} from "@/nextjs/read-bundled-extension-asset";
+import {
+  getExtensionNlsJson,
+  getExtensionPackageJson,
+} from "@/nextjs/bundled-extension-bytes.gen";
 import { proxyMainVscodeCdnAsset, resolveVscodeWebCdn } from "@/nextjs/vscode-web-cdn";
 import { z } from "zod/v4";
-import { routeParamPath, routeParamString, resolveEventOrigin, resolveVscodeApiPrefix, setNoStoreHeaders } from "./util";
-// Provided via `wildwood/scripts/copy-bundled-extension.mjs` and `tr33-vscode` workspace install.
-// We use dynamic requires behind a build-time check to avoid `Cannot find module` tsc errors
-// when the sibling package is not hoisted during isolated `tsc --noEmit`.
+import {
+  routeParamPath,
+  routeParamString,
+  resolveEventOrigin,
+  resolveVscodeApiPrefix,
+  setNoStoreHeaders,
+} from "./util";
 
-// @ts-ignore optional bundled dep — present in real builds
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let extensionPkgRaw: any;
-let extensionNls: unknown = {};
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  extensionPkgRaw = require("wildwood-vscode/package.json");
-} catch {
-  extensionPkgRaw = { name: "wildwood-vscode", publisher: "wildwood", version: "0.0.0", enabledApiProposals: [] };
-}
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  extensionNls = require("wildwood-vscode/package.nls.json");
-} catch {
-  extensionNls = {};
-}
+// Extension manifest is now embedded at build time via
+// `scripts/copy-bundled-extension.mjs` → `bundled-extension-bytes.gen.ts`.
+// No runtime `require("wildwood-vscode/package.json")` — that breaks under
+// Next.js bundling and serverless where node_modules layout != monorepo.
 
-const extensionPkgSchema = z.object({ name: z.string(), publisher: z.string(), version: z.string(), enabledApiProposals: z.array(z.string()) });
+const extensionPkgSchema = z.object({
+  name: z.string(),
+  publisher: z.string(),
+  version: z.string(),
+  enabledApiProposals: z.array(z.string()),
+});
 
 type H3EventLite = {
   req: Request & { headers: Headers & { get(n: string): string | null } };
@@ -49,7 +52,8 @@ export function createVscodeRouter(client: WildwoodClient): H3 {
   const git = client._.git;
   const repoFull = `${git.config.org}/${git.config.repo}`;
   const ref = git.config.ref;
-  const pkg = extensionPkgSchema.parse(extensionPkgRaw as unknown);
+  const pkg = extensionPkgSchema.parse(getExtensionPackageJson());
+  const extensionNls = getExtensionNlsJson();
 
   const vscode = new H3();
   const getWorkbenchConfig = async (event: H3EventLite) => {
