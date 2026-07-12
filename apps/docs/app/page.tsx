@@ -3,9 +3,11 @@ import { Markdown } from "wildwood/react/markdown";
 import { wildwood } from "@/lib/wildwood";
 
 export default async function Home() {
-  let res: { items: Array<{ title: string; body: unknown }> } | null = null;
+  type DocsRes = Awaited<ReturnType<typeof wildwood.docs.findMany>>;
+  let current: DocsRes["items"][number] | null = null;
   try {
-    res = await wildwood.docs.findMany({});
+    const r = await wildwood.docs.findMany({});
+    current = r.items.toSorted((a, b) => a.title.localeCompare(b.title))[0] ?? null;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (
@@ -19,8 +21,6 @@ export default async function Home() {
       throw e;
     }
   }
-  const current =
-    res?.items.toSorted((a, b) => a.title.localeCompare(b.title))[0] ?? null;
 
   return (
     <div className="typeset typeset-man">
