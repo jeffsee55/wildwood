@@ -169,9 +169,15 @@ export class LibsqlDatabase {
     }
     if (!args.skipSiblingCopy) {
       const canonicals = new Set(cache.entries.map((entry) => entry.canonical));
+      // Derive request ref from cache entries (not this.config.ref) so
+      // variant fallback copy works when indexing a non-default ref / feature branch.
+      const targetRef =
+        (cache.entries[0]?.ref as string | undefined) ?? this.config.ref;
       const entries2 = await this.drizzle.query.entries.findMany({
         where: {
           path: { in: Array.from(canonicals) },
+          ref: targetRef,
+          version: this.config.version,
         },
         with: {
           siblings: true,
@@ -182,7 +188,7 @@ export class LibsqlDatabase {
           entry.siblings.map((sibling) => sibling.path),
         );
         for (const missingCombo of missingCombos) {
-          await this.entries.copy(missingCombo);
+          await this.entries.copy({ ...missingCombo, ref: targetRef });
         }
       }
     }
@@ -553,8 +559,9 @@ export class LibsqlDatabase {
   };
 
   entries = {
-    copy: async (args: { variant: string; path: string }) => {
+    copy: async (args: { variant: string; path: string; ref?: string }) => {
       const ns = this.schema.entries;
+      const copyRef = args.ref ?? this.config.ref;
       await this.drizzle
         .insert(ns)
         .select(
@@ -576,7 +583,7 @@ export class LibsqlDatabase {
               and(
                 eq(ns.orgName, this.config.org),
                 eq(ns.repoName, this.config.repo),
-                eq(ns.ref, this.config.ref),
+                eq(ns.ref, copyRef),
                 eq(ns.version, this.config.version),
                 eq(ns.path, args.path),
               ),

@@ -116,10 +116,10 @@ export class Git implements Gitable {
       ref: name,
       treeOid: refData.commit.treeOid,
     });
-    const v = refData.versions;
-    if (v != null && v.length > 0) {
-      await this.db.refs.updateVersions({ ref: name, versions: v });
-    }
+    // Do NOT copy `versions` — the new branch has no entries indexed yet.
+    // Copying versions would make findMany think the version is already indexed
+    // (rootTree exists + versions.includes) and skip reindex -> empty results.
+    // A lazy switch on first query will index + record the version correctly.
     console.info(
       `[wildwood:create-branch] name=${name} base=${base} ${Date.now() - started}ms (no full switch/index)`,
     );
@@ -343,10 +343,32 @@ export class Git implements Gitable {
     if (args.trees.length > 0) {
       await this.db.trees.batchPut(args.trees);
     }
+    const prevRoot = worktree.rootTree?.oid ?? null;
+    const rootChanged = prevRoot !== args.rootTreeOid;
+
     await this.db.refs.setTreeOid({
       ref: args.ref,
       treeOid: args.rootTreeOid,
     });
+
+    // Version accounting mirrors ensureTrees:
+    // - root changed (editor save creates new tree) → invalidate other versions
+    // - root unchanged (no-op save) → append
+    if (rootChanged) {
+      await this.db.refs.updateVersions({
+        ref: args.ref,
+        versions: [this.config.version],
+      });
+    } else {
+      const prev = worktree.versions ?? [];
+      if (!prev.includes(this.config.version)) {
+        await this.db.refs.updateVersions({
+          ref: args.ref,
+          versions: [...prev, this.config.version],
+        });
+      }
+    }
+
     const indexMs = Date.now();
     await this.indexChangedFiles({
       ref: args.ref,
@@ -414,8 +436,38 @@ export class Git implements Gitable {
           items: [],
         };
       }
-      if (result.rootTree && !retrying) {
-        if (!result.versions?.includes(this.config.version)) {
+      if (!retrying) {
+        const versionsIncludes = result.versions?.includes(this.config.version) ?? false;
+
+        // Canonical path: rootTree exists but version not yet indexed -> reindex.
+        // Guard against two extra failure modes:
+        // 1) rootTree==null row (ensureRefInDb / resolveWorktreeForApi created it without indexing).
+        //    Must index regardless of versions array.
+        // 2) Stale versions claim: createBranch / ensureTrees / crash could leave versions=[v]
+        //    while entries for that v are actually empty. If parsed entries are empty but we
+        //    did get a result row, retry once via switch to self-heal. Only for version mismatch OR empty.
+        const rootMissing = !result.rootTree;
+        const versionMismatch = !versionsIncludes;
+
+        // Fast pre-check for entries length without full zod parse when version already claims ok.
+        // We still need parse for real results, but for the self-heal probe we can use raw entries.
+        const rawEntryCount = (() => {
+          const raw = result as unknown as { entries?: unknown[] };
+          return Array.isArray(raw.entries) ? raw.entries.length : -1;
+        })();
+
+        if (rootMissing || versionMismatch) {
+          await this.switch({ ref });
+          return this.findMany(args, { retrying: true, didInit });
+        }
+
+        if (versionsIncludes && rawEntryCount === 0) {
+          // versions claims indexed but no entries returned. Could be legit empty collection or stale claim.
+          // Only self-heal if collection should have mats (we have at least one collection matching paths is always true for docs).
+          // We limit to one retry to avoid loop on truly empty repos.
+          console.warn(
+            `[wildwood:findMany] versions claims "${this.config.version}" indexed for ref="${ref}" but entries empty — forcing reindex`,
+          );
           await this.switch({ ref });
           return this.findMany(args, { retrying: true, didInit });
         }
@@ -575,7 +627,9 @@ export class Git implements Gitable {
     );
     const cache = this.createCache();
     for (const { oid, path, content } of files) {
-      this.config.index({ oid, content, path, ref: args.ref }, cache);
+      // config.index is sync today (zod parsing), but await-normalize so a
+      // future async visitor doesn't race writeCache.
+      await this.config.index({ oid, content, path, ref: args.ref }, cache);
     }
     await this.db.writeCache({
       status: "dirty",
@@ -815,19 +869,23 @@ export class Git implements Gitable {
     if (diff.conflicts.length > 0) {
       return { type: "conflict", diff };
     }
-    await this.ensureTrees({
-      ref: ours,
-      trees: diff.trees,
-    });
+    // Persist new blobs before indexing so writeEntries can find them.
     for (const b of diff.newBlobs) {
       this.blobStore.set(b.oid, b.content);
     }
     const entries = await this.trees.entriesFromTree({
       oid: diff.trees.rootOid,
     });
+    // Index first, then persist tree + mark version. If writeEntries fails we
+    // must NOT have already claimed the version via ensureTrees, otherwise
+    // findMany would think the version is indexed and return empty.
     await this.writeEntries({
       ref: ours,
       entries,
+    });
+    await this.ensureTrees({
+      ref: ours,
+      trees: diff.trees,
     });
 
     const commitPayload = {
@@ -870,22 +928,53 @@ export class Git implements Gitable {
     return chunks;
   }
 
+  /**
+   * Persist new tree objects and update `_refs.rootTreeOid`.
+   *
+   * Version accounting:
+   * - `rootTreeOid` is global per ref (in `_refs`), but `entries` are version-scoped.
+   * - When `rootTreeOid` changes (add/merge/patchWorktree), any version whose entries
+   *   were indexed against the old tree is now stale.
+   * - Correct invalidation: when tree changes, `versions=[currentVersion]`. Other
+   *   versions become invalid and will be lazily reindexed on next `findMany`.
+   * - When `rootTreeOid` stays the same (idempotent switch), append — both versions remain valid.
+   *
+   * This is intentionally not "append always": that would leave stale version claims
+   * alive (bug that broke `other versions detect change after switch`).
+   * And it's not "overwrite always": that thrashes valid versions on noop switch.
+   */
   async ensureTrees(args: {
     ref: string;
     trees: import("wildwood-store").ApplyTreesResult;
+    /** When true, rootTreeOid is known to be unchanged (switch fast-path). Append instead of invalidating. */
+    appendVersion?: boolean;
   }) {
     const treesToSave = await this.trees.exportTreesForPersist(args.trees.trees);
     if (treesToSave.length > 0) {
       await this.db.trees.batchPut(treesToSave);
     }
+
+    const before = await this.db.refs.get({ ref: args.ref });
+    const rootUnchanged = before?.rootTree?.oid === args.trees.rootOid;
+
     await this.db.refs.setTreeOid({
       ref: args.ref,
       treeOid: args.trees.rootOid,
     });
-    await this.db.refs.updateVersions({
-      ref: args.ref,
-      versions: [this.config.version],
-    });
+
+    if (args.appendVersion || rootUnchanged) {
+      // Root didn't change (idempotent switch) → keep existing valid versions, add current.
+      const prev = before?.versions ?? [];
+      const next = prev.includes(this.config.version) ? prev : [...prev, this.config.version];
+      await this.db.refs.updateVersions({ ref: args.ref, versions: next });
+    } else {
+      // Root changed (add/merge/patch) → invalidate: only current version remains valid.
+      // Other versions will reindex lazily on next query from the new root.
+      await this.db.refs.updateVersions({
+        ref: args.ref,
+        versions: [this.config.version],
+      });
+    }
   }
 
   async ensureBlobs({
