@@ -71,15 +71,39 @@ export default async function DocsPage({ params }: PageProps) {
 
       <footer className="mt-16 border-t border-border pt-6 font-mono text-[11px] leading-[1.9] text-muted-foreground">
         <div className="uppercase tracking-[0.12em]">see also</div>
-        <div className="mt-2 flex gap-4">
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
           <Link className="underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/intro">
-            tr33(1) intro
+            intro
+          </Link>
+          <Link className="underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/configuration">
+            configuration
+          </Link>
+          <Link className="underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/schemas">
+            schemas
+          </Link>
+          <Link className="underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/querying">
+            querying
+          </Link>
+          <Link className="underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/variants">
+            variants
+          </Link>
+          <Link className="underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/branching">
+            branching
+          </Link>
+          <Link className="underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/editor-routes">
+            editor-routes
+          </Link>
+          <Link className="underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/kit">
+            kit
+          </Link>
+          <Link className="underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/deploy">
+            deploy
           </Link>
           <Link className="underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/api">
-            tr33(5) api
+            api
           </Link>
           <Link className="underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/guides">
-            tr33(7) guides
+            guides
           </Link>
         </div>
       </footer>

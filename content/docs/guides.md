@@ -1,12 +1,12 @@
 ---
 title: Guides
 author: ../authors/jeff.md
-description: How to wire Tr33 in this repo's docs app — the pattern to copy for your own site.
+description: Patterns used in this docs app for collections, reads, mounting the API, preview, editor, and deploying.
 ---
 
 # Guides
 
-These are the patterns used in this docs site. It dogfoods against this repo (`jeffsee55/tr33`), local in dev and GitHub-backed in prod when `GITHUB_APP_*` is configured.
+This page collects the patterns actually used in `apps/docs` for `jeffsee55/tr33`. Copy them directly — the code compiles against this repo's `tr33` package.
 
 ## 1. Collections
 
@@ -30,13 +30,14 @@ const docs = z.collection({
   }),
 });
 
+// must be declared after `docs` so nav can connect to it without TDZ
 const nav = z.collection({
   name: "nav",
   match: "content/nav/**/*.json",
   schema: z.json({
     name: z.filter(z.string()),
     label: z.string(),
-    // Real relation: children resolve to docs, in declared order.
+    // Real relation — the indexer canonicalizes paths and resolves to docs.
     children: z.array(z.lazy(() => z.connect(docs))),
   }),
 });
@@ -50,122 +51,207 @@ export const config = defineConfig({
   version: "docs-0",
   collections,
 });
+// localPath omitted — tr33 auto-detects git checkout from cwd in dev/build.
+// In production, GitHub remote or already-populated Turso DB is used.
 ```
 
-`localPath` is absent — `tr33` auto-detects the git checkout from cwd.
+`docs` first so `nav.children` can `lazy(() => connect(docs))` without a TDZ; and `authors` first so `docs.author` connects back. Cycles via `lazy` are fine.
 
-## 2. The two queries (no franken-index)
+## 2. Two queries (no fallback)
 
-Layout owns nav. Pages own docs. No fallbacks — missing nav surfaces as empty sidebar, missing doc surfaces as `notFound()`.
+Layout owns nav. Pages own docs. No orphan-append or empty `notFound()` masking.
 
 ```tsx
-// apps/docs/app/layout.tsx — navigation
+// apps/docs/app/layout.tsx
 import { tr33 } from "@/lib/tr33";
-
-const navRes = await tr33.nav.findMany({
-  with: { children: true },
-});
+const navRes = await tr33.nav.findMany({ with: { children: true } });
 const nav = navRes.items[0] ?? null;
-// nav.children are the ordered docs
+const docs = (nav?.children ?? []) as Array<{ _meta:{path:string}; slug:string; title:string }>;
 ```
 
 ```tsx
-// apps/docs/app/docs/[slug]/page.tsx — static params = all docs
+// apps/docs/app/docs/[slug]/page.tsx
 export async function generateStaticParams() {
   const { items } = await tr33.docs.findMany({});
   return items.map((d) => ({ slug: d.slug }));
 }
 
-// doc page
-const { value: doc } = await tr33.docs.findFirst({ where: { slug } });
-if (!doc) notFound();
+export default async function DocsPage({ params }: { params: Promise<{slug:string}> }) {
+  const { slug } = await params;
+  const res = await tr33.docs.findFirst({ where:{slug}, with:{author:true} });
+  const doc = res.value;
+  if (!doc) notFound();
+  // doc.title, doc.description, doc.body (mdast Root), doc.author?.name — fully typed
+}
 ```
 
-If `nav.children` and `docs.findMany` diverge, that surfaces intent mismatch — don't mask it with orphans-appended fallback.
+If `nav.children` vs `docs.findMany` diverge (for example a doc exists but nav hasn't included it), that surfaces intentionally — don't mask with orphans fallback. Notice `navRes.items[0]` because `content/nav/index.json` yields single entry.
+
+No generic find types are exposed via a `Doc` interface file; everything inferred from `collections`.
 
 ## 3. Mounting the API — host owns cookies
 
 ```ts
 // apps/docs/app/api/[...path]/route.ts
-import { cookies } from "next/headers";
-import { revalidateTag } from "next/cache";
-import { NextResponse } from "next/server";
-import { activeRefSetCookieHeader, handle, TR33_ACTIVE_REF_COOKIE } from "tr33/nextjs";
+import { createTr33Route } from "tr33/nextjs/route";
 import { tr33 } from "@/lib/tr33";
 
-const REVALIDATE_TAG = "docs-content";
-const api = handle(tr33);
-
-export async function POST(req: Request) {
-  const pathname = new URL(req.url).pathname;
-
-  if (pathname.endsWith("/tr33/preview")) {
-    (await cookies()).delete(TR33_ACTIVE_REF_COOKIE);
-    revalidateTag(REVALIDATE_TAG, "default");
-    return NextResponse.json({ ok: true });
-  }
-
-  const upstream = await api(req);
-
-  // host sets the branch cookie on create / switch
-  if (/\/git\/(create-branch|switch-branch)\/?$/.test(pathname)) {
-    let branch: string | undefined;
-    try { branch = (await upstream.clone().json()).ref; } catch {}
-    if (branch) {
-      const headers = new Headers(upstream.headers);
-      headers.append("Set-Cookie", activeRefSetCookieHeader(branch));
-      return new NextResponse(upstream.body, { status: upstream.status, headers });
-    }
-  }
-
-  // revalidate after git mutations so server-components see the update
-  if (/\/git\/(commit|discard|merge|pull|create-branch|switch-branch)\/?$/.test(pathname)) {
-    revalidateTag(REVALIDATE_TAG, "default");
-  }
-
-  return upstream;
-}
-
-export const GET     = (req: Request) => api(req);
-export const HEAD    = (req: Request) => api(req);
-export const OPTIONS = (req: Request) => api(req);
+export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createTr33Route(
+  () => tr33,
+  { revalidateTagName: "docs-content" },
+);
 ```
 
-This is the full surface the library intentionally doesn't own: cookies + cache invalidation live in your app.
+That is the full wiring. `createTr33Route` is Next-specific and lazy-initializes the underlying H3 handler which mounts `/git`, `/vscode`, `/github`. Around it, the factory adds:
+
+- `GET/POST /api/tr33/draft?branch=<ref>` and `?disable=1` (and legacy `/api/draft` alias) → `draftMode().enable()/disable()` + canonical branch cookie.
+- `GET/POST /api/tr33/preview` and legacy `/preview/exit` → clears cookies + disables draft.
+- On `/git/create-branch` and `/git/switch-branch` responses, sets canonical branch cookie `x-tr33-branch` (decodes from returned `{ref}` or request `name` on create) and merges upstream `Set-Cookie` headers removed/replaced.
+- On mutations (`commit | discard | merge | pull | create-branch | switch-branch`, customizable via `mutationRe`) calls `revalidateTag(tagName, store)` so `"use cache"` boundaries refresh.
+- No `revalidateTag` on draft enter/exit — draft is per-user bypass (`__prerender_bypass`), purging would invalidate everyone else.
+
+If you manage cookies elsewhere (middleware, custom path), you can avoid `createTr33Route` and use `tr33/nextjs/handler` (`handle`) directly, plus own `cookies` + `revalidateTag` yourself.
+
+### Client singleton
+
+`apps/docs/lib/tr33.ts` owns the top-level singleton:
+
+```ts
+import { createClient as libsql } from "@libsql/client";
+import { createClient } from "tr33";
+
+const database = libsql({
+  url: process.env.TR33_DOCS_DATABASE_URL || "file:./tr33-docs.db",
+  authToken: process.env.TR33_DOCS_DATABASE_AUTH_TOKEN || "",
+});
+// auth optional — only when GitHub App or allow-list needed
+export const tr33 = createClient({ config, database, auth? });
+```
+
+No `getDocsTr33()` getter needed. Core factory stays pure — app owns the one singleton; Next reuses the module across requests. `createClient` self-heals via `findMany → switch → index` on cold cache.
 
 ## 4. Branch preview + editor
 
 ```tsx
-// Inlined auth — just check an env var, no extra module.
-const auth = process.env.GITHUB_APP_ID?.trim()
-  ? { githubApp: { appSlug: process.env.GITHUB_APP_SLUG?.trim(), name: "Tr33 Docs" } }
-  : undefined;
+// inlined auth — just check an env var, no extra module
+import { Toolbar } from "tr33/nextjs/kit";
+import { tr33 } from "@/lib/tr33";
 
-<Toolbar tr33={tr33} apiBase="/api" theme="light" auth={auth} />
+export function DocsLayout({ children }) {
+  return (
+    <html>
+      <body>
+        {children}
+        <Toolbar tr33={tr33} apiBase="/api" />
+      </body>
+    </html>
+  );
+}
 ```
 
-Switching or creating a branch in Kit:
+- With no `activeRef` / cookie logic in the host: `Toolbar`'s Server Component wrapper `Tr33Kit` now auto-resolves the active ref via `getBranch(tr33)` (internally `await cookies()` from `next/headers`). Passing `activeRef` still works for custom cookie name override. No `cookies()` in layout.
+- `theme` defaults to `"system"`. Remove `theme="light"` to respect `prefers-color-scheme`. If you pass `theme="light"` explicitly, Kit locks light ignoring system.
+- Preview flow:
 
-- `POST /api/git/switch-branch { ref }` or `POST /api/git/create-branch { name, baseRef }`
-- Host returns `Set-Cookie: tr33-active-ref=<branch>`
-- Server-component refresh re-reads `activeRef` → Kit highlights the ref
-- Exit preview `POST /api/tr33/preview` clears the cookie server-side
+```ts
+// inside Kit's FAB after branch mutation
+// POST /api/git/switch-branch { ref }
+or
+// POST /api/git/create-branch { name, baseRef }
+// Host's response path Sets cookie Set-Cookie: x-tr33-branch=<branch> and revalidates docs-content.
+// Client soft-refresh via startTransition+router.refresh() coalesced 800ms (Set-Cookie commit race guard).
 
-## 5. Common recipes
+// Exit Preview button inside Kit
+// POST /api/tr33/preview → route factory clears cookie server-side → refresh
+```
 
-### Read from a non-default branch
+- Toolbar's BroadcastChannel sync + localStorage `tr33.activeRef` are handled by Kit internally to keep extension host iframe in sync.
+
+### Auth interior
+
+- Library shows auth section when `_env` detects `GITHUB_APP_SLUG` + `GITHUB_APP_NAME` (public bits) or `auth` prop supplied. Private signing keys never leave server. `auth` merges `envAuth` + prop (`githubApp` shallow+mapped).
+- Prod check in Kit enforces: if `NODE_ENV=production` + `auth.enforceInProduction` defaults true + `githubApp.appSlug` missing → throw a clear error (`"GITHUB_APP_SLUG missing. Set GITHUB_APP_SLUG (and GITHUB_APP_ID)"`), preventing prod unauthed silent run.
+- Dev tolerance: shows auth panel if any of `githubApp.appSlug|githubApp.name|userEmail|githubOAuthEnabled` present, else hides. Pass `auth.enabled=false` to suppress in dev.
+
+## 5. Recipes
+
+### Read from another branch (no cookies)
 
 ```ts
 const main    = await tr33.docs.findMany({ ref: "main" });
-const feature = await tr33.docs.findMany({ ref: "feature/notion" });
+const feature = await tr33.docs.findMany({ ref: "feature/rewrite" });
 ```
 
-### Guard mutations
+### Guard mutations (authorize)
 
-`auth.authorize` in `createClient({ auth })` is called by the git-service router. Return `true` to allow, `false` or a custom `Response` to block.
+`auth.authorize` in `createClient({ auth: { github, authorize } })` is called by the git-service router. Return `true` to allow, `false` or a custom `Response` to block.
 
-### Client singleton
+```ts
+const tr33 = createClient({
+  config, database,
+  auth: {
+    github: { type:"app", app:{ appId, privateKey } },
+    betterAuth: betterAuthInstance,
+    authorize(ctx) {
+      // prevent pushes from non-editors, allow branch creation for editors etc.
+      if (ctx.action.type === "git.push" && !isEditor(ctx.user)) return false;
+      return true;
+    },
+  },
+});
+```
 
-`apps/docs/lib/tr33.ts` owns the top-level `export const tr33`. No `getDocsTr33()` wrapper. Core factory stays pure — app owns the one singleton; Next reuses the module. `createClient` self-heals on cold cache via `findMany → switch → index`.
+Caller actor is resolved via `betterAuth` (session via `api.getSession`) or custom `getUser(req)`.
 
-See [API](./api.md) for the surface spec.
+### Dark mode
+
+System dark auto via `prefers-color-scheme` media query and `color-scheme: light dark` + `.dark` class variant. Docs app's `globals.css` maps media and `dark` variants to same tokens — phosphor palette (`#0c0b0a` / `#f2ece6`) with looser `typeset` leading (1.95) on dark. Kit follows too (its ThemeProvider listens to media query and sets shadow host `dark` class, `colorScheme`, `data-kit-theme`). No toggle needed; if you add toggle in future inject before-paint script and toggle `.dark` class on `html`.
+
+### Links in markdown
+
+```tsx
+function resolveHref(href: string): string {
+  if (!href) return "#";
+  if (href.endsWith(".md")) return `/docs/${href.replace(/^\.\//,"").replace(/\.md$/,"")}`;
+  return href;
+}
+
+<Markdown
+  root={doc.body}
+  components={{
+    a: ({ href, children, ...rest }) => (
+      <Link href={resolveHref(href ?? "#")} {...(rest as any)}>{children}</Link>
+    )
+  }}
+/>
+```
+
+`Markdown` forwards `Link` when present, otherwise own `<a>`. Avoid wrapping `Markdown` in layout — own the `a` component override in each page.
+
+### Nav generation
+
+```ts
+// generateStaticParams from docs
+const { items } = await tr33.docs.findMany({});
+return items.map((d)=>({ slug: d.slug }));
+
+// Sidebar sorting — fully ordered by nav.children, not slug lexicographic
+const navRes = await tr33.nav.findMany({ with:{children:true} });
+const docs = navRes.items[0]?.children ?? [];
+```
+
+### Deploying
+
+- Use `TR33_DOCS_DATABASE_URL=libsql://...` Turso on Vercel (or `file:` relative only in preview/dev).
+- In build, `.git` present → `NativeRemote` indexes to that Turso (build prefetch).
+- Runtime on Vercel has no `.git` → reads only Turso. Cold miss fails fast with actionable message vs cryptic `Missing schema`.
+- `.env.example` in repo root lists full contract: `TR33_GITHUB_ORG/REPO`, `TR33_DOCS_REF`(or `VERCEL_GIT_COMMIT_SHA`), `TR33_DOCS_DATABASE_{URL,AUTH_TOKEN}`, `GITHUB_APP_*`, `TR33_DOCS_SOURCE` override.
+
+## 6. Common failures
+
+- `Cannot read useRef of null` in Kit before → fixed by `ClientKitBoundary` gating shadow DOM/portal behind SSR boundary (Server → dynamic import with `ssr:false`).
+- Phantom SCM changes on new draft draft branches → fixed by new branches starting clean (never inheriting base ref's sparse overlay).
+- SCM walking entire repo on editor open → limited traversal, git-service tree cache + `git.getTree` reuse.
+- Editor 500 from relative URLs on server → normalized origin base for iframe src + header normalization via `normalizeApiBase`.
+
+See [API](./api.md) for the surface spec and [Deploy](./deploy.md) for Vercel details.

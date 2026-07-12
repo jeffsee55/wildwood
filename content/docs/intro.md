@@ -1,20 +1,102 @@
 ---
 title: Introduction
 author: ../authors/jeff.md
-description: Git as your content store — typed, versioned, branchable. This site is this repo's content/ folder rendered through Tr33.
+description: What tr33 is, how it stores content in Git, and the minimal setup to go from content/ files to a typed client.
 ---
 
 # Introduction
 
-Tr33 treats your Git repo as the CMS. Markdown and JSON files in `content/` are indexed into a typed collection API; edits go through a shared H3/HTTP surface that powers both Kit's floating editor and your own API routes.
+tr33 is a Git-native content layer. You write Markdown and JSON files in `content/`, declare their shapes with Zod, and query them with a fully typed client. Git is the source of truth — branches are content branches, commits are content publishes, and the database is a derived index that can always be rebuilt.
 
-This docs app is the canonical example. The source is `jeffsee55/tr33`, `content/docs/**/*.md` — the same repo you are browsing.
+This site is itself a tr33 app. Its source is `content/docs/**/*.md` in this repository, indexed and served through tr33's own API.
 
-## Surface
+## Why Git as the CMS?
+
+Most CMSs introduce a separate database, auth system, editor, and deploy pipeline for content. tr33 collapses that stack:
+
+- **Content lives in Git.** Review, diff, revert, and branch with the tools you already use.
+- **The database is derived.** LibSQL (local or Turso) holds an index of filters, entries, and connections. If it's missing or stale, tr33 rebuilds it from Git.
+- **Edits are just Git operations.** The editor writes blobs, updates trees, and commits through the same remote abstraction (local checkout or GitHub API) the CLI would use.
+- **Preview is a branch.** Switching branches sets a cookie (`x-tr33-branch`). The app reads it and queries the target ref. No separate preview infrastructure.
+
+## Core concepts
+
+### Collections
+
+A collection maps a glob pattern to a schema:
 
 ```ts
-import { createClient, defineConfig, z } from "tr33";
+import { z } from "tr33";
+
+const docs = z.collection({
+  name: "docs",
+  match: "content/docs/**/*.md",
+  schema: z.markdown({
+    title: z.filter(z.string()),
+    description: z.string().optional(),
+  }),
+});
+```
+
+- `name` — the collection's identity in queries (`tr33.docs`).
+- `match` — glob that selects files. `z.json` collections use the same.
+- `schema` — `z.markdown()` for `.md` files (frontmatter + `body` AST), `z.json()` for JSON files.
+- `z.filter(T)` — marks a field as queryable in `where`. Unmarked fields still exist in results but can't be filtered on without joining.
+
+### Connections
+
+Collections relate through file-path references:
+
+```ts
+const authors = z.collection({
+  name: "authors",
+  match: "content/authors/**/*.md",
+  schema: z.markdown({ name: z.filter(z.string()) }),
+});
+
+const docs = z.collection({
+  name: "docs",
+  match: "content/docs/**/*.md",
+  schema: z.markdown({
+    title: z.filter(z.string()),
+    author: z.lazy(() => z.connect(authors)).optional(),
+  }),
+});
+```
+
+A doc's frontmatter `author: ../authors/jeff.md` (relative) or `../authors/jeff.md` resolved against the doc's directory becomes a link. The indexer canonicalizes the path, verifies it matches the target collection, and records a connection row. At query time, `with: { author: true }` joins it.
+
+Arrays of connections work too:
+
+```ts
+const nav = z.collection({
+  name: "nav",
+  match: "content/nav/**/*.json",
+  schema: z.json({
+    label: z.string(),
+    children: z.array(z.lazy(() => z.connect(docs))),
+  }),
+});
+```
+
+### Client
+
+`createClient` takes a config and a LibSQL client. The returned object has one property per collection named after the collection, each with `findMany` and `findFirst`. An internal `_.` namespace holds `config`, `git`, `db`, and `logger`.
+
+In development, tr33 auto-detects a local Git checkout by walking up from `cwd` to `.git`. In production it uses the GitHub remote or a remote Turso database. See [Configuration](./configuration.md).
+
+## Minimal example
+
+```ts
+// lib/tr33.ts
 import { createClient as libsql } from "@libsql/client";
+import { createClient, defineConfig, z } from "tr33";
+
+const authors = z.collection({
+  name: "authors",
+  match: "content/authors/**/*.md",
+  schema: z.markdown({ name: z.filter(z.string()) }),
+});
 
 const docs = z.collection({
   name: "docs",
@@ -26,59 +108,25 @@ const docs = z.collection({
   }),
 });
 
-const config = defineConfig({
+export const config = defineConfig({
   org: "jeffsee55",
   repo: "tr33",
   ref: "main",
-  // localPath points at this repo in dev / build prefetch.
-  localPath: process.cwd(),
-  version: "docs-0",
-  collections: { docs },
+  version: "1",
+  collections: { authors, docs },
 });
 
-const database = libsql({ url: "file:./tr33-docs.db" });
-const tr33 = createClient({ config, database });
+const database = libsql({ url: "file:./tr33.db" });
+export const tr33 = createClient({ config, database });
+```
 
-// Works against any ref (branch). `ref` falls back to config.ref.
-const all = await tr33.docs.findMany({});
-const byTitle = await tr33.docs.findMany({
+```ts
+// anywhere in your app
+const { items } = await tr33.docs.findMany({
   where: { title: { eq: "Introduction" } },
+  with: { author: true },
 });
+// items[0].author.name — fully typed, inferred from collections
 ```
 
-## API handler (framework-agnostic)
-
-`handle()` is a pure Fetch handler. It never imports `next/*`. The host owns cookies and `revalidateTag`:
-
-```ts
-// apps/docs/app/api/[...path]/route.ts
-import { handle, activeRefSetCookieHeader } from "tr33/nextjs";
-
-const api = handle(getDocsTr33());
-
-export const GET  = (req: Request) => api(req);
-export const POST = async (req: Request) => {
-  const res = await api(req);
-  // set tr33-active-ref cookie on branch create/switch, clear on preview exit
-  // call revalidateTag("docs-content") after mutations — host-owned
-  return res;
-};
-```
-
-## Branch preview
-
-Switching branches or creating a branch sets a `tr33-active-ref` cookie. The docs app reads it on the server (`resolveActiveRef`) and feeds it to `Toolbar`:
-
-```ts
-import { cookies } from "next/headers";
-import { resolveActiveRef, Toolbar } from "tr33/nextjs";
-
-const cookieStore = await cookies();
-const activeRef = resolveActiveRef({ tr33, cookies: cookieStore });
-
-<Toolbar tr33={tr33} activeRef={activeRef} apiBase="/api" />
-```
-
-This is the full loop we dogfood: local repo as source, typed queries, H3 API, Kit toolbar — no hidden Next wrapper in the library.
-
-See also: [API](./api.md) and [Guides](./guides.md).
+Next: [Configuration](./configuration.md) to wire env and remotes, then [Querying](./querying.md) for the full query API.

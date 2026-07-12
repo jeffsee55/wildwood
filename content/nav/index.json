@@ -1,5 +1,17 @@
 {
   "name": "index",
-  "label": "Getting Started",
-  "children": ["../docs/intro.md", "../docs/guides.md", "../docs/api.md"]
+  "label": "Manual",
+  "children": [
+    "../docs/intro.md",
+    "../docs/configuration.md",
+    "../docs/schemas.md",
+    "../docs/querying.md",
+    "../docs/variants.md",
+    "../docs/branching.md",
+    "../docs/editor-routes.md",
+    "../docs/kit.md",
+    "../docs/deploy.md",
+    "../docs/api.md",
+    "../docs/guides.md"
+  ]
 }

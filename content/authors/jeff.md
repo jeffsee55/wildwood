@@ -1,4 +1,4 @@
 ---
-name: Jeff
+name: Jeff See
 avatar: /jeff.jpeg
 ---
