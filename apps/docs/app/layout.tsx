@@ -27,7 +27,14 @@ export default async function RootLayout({
   }>;
 
   return (
-    <html lang="en" className={`${geistMono.variable} antialiased`}>
+    // suppressHydrationWarning — color-scheme is driven by prefers-color-scheme,
+    // no FOUC toggle. If we add manual theme switching later, inject the
+    // before-paint script here. For now system-only, so pure CSS.
+    <html
+      lang="en"
+      className={`${geistMono.variable} antialiased`}
+      suppressHydrationWarning
+    >
       <body className="min-h-screen">
         {/* top rule — man header */}
         <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
@@ -101,9 +108,9 @@ export default async function RootLayout({
           </main>
         </div>
 
-        {/* toolbar — stays out of typeset flow */}
+        {/* Toolbar is opt-out of typeset; deduce theme from system via CSS */}
         <div className="not-typeset">
-          <Toolbar tr33={tr33} apiBase="/api" theme="light" />
+          <Toolbar tr33={tr33} apiBase="/api" />
         </div>
       </body>
     </html>

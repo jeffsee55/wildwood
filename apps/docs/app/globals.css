@@ -1,8 +1,15 @@
 @import "tailwindcss";
 @import "./typeset.css";
 
+/* shadcn uses `.dark` class for the `dark:` variant.
+   Our own colors come from CSS vars that switch via media query,
+   so we don't need `dark:` for the man theme — `prefers-color-scheme`
+   below is enough. Keep the class variant intact for any imported
+   shadcn components that still use `dark:`. */
+@custom-variant dark (&:is(.dark *));
+
 :root {
-  /* man page — paper / ink, no pastels */
+  /* man page — paper / ink, light default */
   --background: #fefcfb;
   --foreground: #11100f;
   --muted: #6b6460;
@@ -11,15 +18,15 @@
   --card: #ffffff;
   --radius: 8px;
 
-  /* shadcn token bridge — typeset picks these up */
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-geist-mono);
 
-  /* man rhythm: mono-first, generous whitespace */
   --measure: 72ch;
   --content-measure: 66ch;
   --gutter: 2.5rem;
+
+  color-scheme: light dark;
 }
 
 @theme inline {
@@ -32,6 +39,35 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --radius: var(--radius);
+}
+
+/* ── system dark — papery to phosphor ───────────────────────────────
+ * Variables in :root are inherited automatically; no JS toggle needed.
+ * `color-scheme: light dark` above tells the UA we support both so
+ * scrollbars, form controls, etc adapt. Keep `.dark` class variant too
+ * (for future manual override) via the same token overrides. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0c0b0a;
+    --foreground: #f2ece6;
+    --muted: #9a928c;
+    --muted-foreground: #a8a19b;
+    --border: #221e1b;
+    --card: #151311;
+  }
+}
+
+/* Explicit `.dark` escape to allow future toggle without media query.
+   Same values as the media query so both paths match. */
+:root.dark,
+.dark {
+  --background: #0c0b0a;
+  --foreground: #f2ece6;
+  --muted: #9a928c;
+  --muted-foreground: #a8a19b;
+  --border: #221e1b;
+  --card: #151311;
+  color-scheme: dark;
 }
 
 /* presets — the only place you tune docs rhythm */

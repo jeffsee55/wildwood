@@ -256,6 +256,38 @@
   max-width: 100%;
 }
 
+/* dark — typeset stays on tokens, just loosen leading slightly per spec */
+@media (prefers-color-scheme: dark) {
+  .typeset {
+    --typeset-leading: 1.95;
+    --typeset-code-bg: color-mix(in oklab, var(--foreground) 10%, var(--background));
+  }
+
+  .typeset :where(pre):where(:not(.not-typeset *)) {
+    background: #1a1816;
+    color: #f2ece6;
+    border-color: #2a2521;
+  }
+}
+:root.dark .typeset,
+.dark .typeset,
+.typeset:where(.dark *, :root.dark *) {
+  --typeset-leading: 1.95;
+  --typeset-code-bg: color-mix(in oklab, var(--foreground) 10%, var(--background));
+}
+:root.dark .typeset :where(pre):where(:not(.not-typeset *)),
+.dark .typeset :where(pre):where(:not(.not-typeset *)) {
+  background: #1a1816;
+  color: #f2ece6;
+  border-color: #2a2521;
+}
+
+@media (prefers-color-scheme: dark) and (max-width: 640px) {
+  .typeset {
+    --typeset-leading: 2;
+  }
+}
+
 /* small bump on small screens for readability */
 @media (max-width: 640px) {
   .typeset {
