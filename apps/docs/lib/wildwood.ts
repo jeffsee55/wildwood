@@ -83,9 +83,26 @@ const config = defineConfig({
 
 const gh = githubAuth();
 
+function resolveDatabaseUrl(): string {
+  return (
+    process.env.WILDWOOD_DOCS_DATABASE_URL?.trim() ||
+    process.env.TURSO_DATABASE_URL?.trim() ||
+    process.env.LIBSQL_URL?.trim() ||
+    "file:./wildwood-docs.db"
+  );
+}
+function resolveAuthToken(): string {
+  return (
+    process.env.WILDWOOD_DOCS_DATABASE_AUTH_TOKEN?.trim() ||
+    process.env.TURSO_AUTH_TOKEN?.trim() ||
+    process.env.LIBSQL_AUTH_TOKEN?.trim() ||
+    ""
+  );
+}
+
 const database = createLibsqlClient({
-  url: process.env.WILDWOOD_DOCS_DATABASE_URL || "file:./wildwood-docs.db",
-  authToken: process.env.WILDWOOD_DOCS_DATABASE_AUTH_TOKEN || "",
+  url: resolveDatabaseUrl(),
+  authToken: resolveAuthToken(),
 });
 
 export const wildwood = createClient({
