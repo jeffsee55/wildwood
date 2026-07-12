@@ -1,14 +1,9 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { Toolbar } from "tr33/nextjs/kit";
 import { tr33 } from "@/lib/tr33";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -16,50 +11,100 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Tr33 Docs",
-  description: "Documentation powered by the public Tr33 API.",
+  title: "tr33 — manual",
+  description: "Git as content store. Typeset as man page.",
 };
 
 export default async function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
-  // Single query: nav with resolved children. Fully typed, no casts.
-  const navRes = await tr33.nav.findMany({
-    with: { children: true },
-  });
+}: Readonly<{ children: React.ReactNode }>) {
+  const navRes = await tr33.nav.findMany({ with: { children: true } });
   const nav = navRes.items[0] ?? null;
+  const docs = (nav?.children ?? []) as Array<{
+    _meta: { path: string };
+    slug: string;
+    title: string;
+  }>;
 
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-    >
-      <body>
-        <div className="mx-auto flex min-h-screen w-full max-w-6xl gap-10 px-6 py-10">
-          <aside className="hidden w-64 shrink-0 border-r border-[color:var(--border)] pr-8 lg:block">
-            <Link href="/" className="text-lg font-semibold tracking-tight">
-              Tr33 Docs
-            </Link>
-            <p className="mt-3 text-sm font-medium uppercase tracking-[0.2em] text-[color:var(--muted)]">
-              {nav?.label ?? "Documentation"}
-            </p>
-            <nav className="mt-6 space-y-2">
-              {(nav?.children ?? []).map((doc) => (
-                <Link
-                  key={doc._meta.path}
-                  href={`/docs/${doc.slug}`}
-                  className="block rounded-xl px-3 py-2 text-sm text-[color:var(--muted)] hover:bg-white hover:text-foreground"
-                >
-                  {doc.title}
-                </Link>
+    <html lang="en" className={`${geistMono.variable} antialiased`}>
+      <body className="min-h-screen">
+        {/* top rule — man header */}
+        <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          <div className="mx-auto flex h-[2.75rem] w-full max-w-[112ch] items-center justify-between gap-6 px-6 tabular-nums">
+            <div className="flex items-center gap-8">
+              <Link
+                href="/"
+                className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] underline decoration-border underline-offset-4 hover:decoration-foreground"
+              >
+                tr33(1)
+              </Link>
+              <span className="hidden font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground md:inline">
+                git as cms · typed · versioned · branchable
+              </span>
+            </div>
+            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+              MANUAL
+            </span>
+          </div>
+        </header>
+
+        <div className="mx-auto grid w-full max-w-[112ch] grid-cols-1 gap-0 px-6 md:grid-cols-[18rem_1fr]">
+          {/* sidebar — SYNOPSIS style index */}
+          <aside className="border-border py-10 pr-8 max-md:border-b md:sticky md:top-[2.75rem] md:h-[calc(100svh-2.75rem)] md:overflow-auto md:border-r">
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              {nav?.label ?? "INDEX"}
+            </div>
+
+            <nav className="mt-6 space-y-[0.65rem] font-mono text-[12.5px] leading-[1.9]">
+              {docs.map((doc, i) => (
+                <div key={doc._meta.path} className="flex gap-3">
+                  <span className="w-5 shrink-0 tabular-nums text-muted-foreground/70">
+                    {(i + 1).toString().padStart(2, "0")}
+                  </span>
+                  <Link
+                    href={`/docs/${doc.slug}`}
+                    className="underline decoration-border underline-offset-[0.28em] decoration-[0.5px] hover:decoration-foreground"
+                  >
+                    {doc.title.toLowerCase()}
+                  </Link>
+                </div>
               ))}
             </nav>
+
+            <div className="mt-12 border-t border-border pt-8 font-mono text-[11px] leading-[1.9] text-muted-foreground">
+              <div className="uppercase tracking-[0.12em]">source</div>
+              <div className="mt-2 normal-case tracking-[-0.01em]">
+                <code className="rounded border border-border bg-card px-1 py-0.5 text-[11px]">content/</code>{" "}
+                in this repo.
+                <br />
+                queries via <code className="text-foreground">tr33.docs.findMany()</code>.
+              </div>
+              <div className="mt-5 uppercase tracking-[0.12em]">see also</div>
+              <div className="mt-2 space-y-1">
+                <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/intro">
+                  tr33(1) intro
+                </Link>
+                <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/api">
+                  tr33(5) api
+                </Link>
+                <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/guides">
+                  tr33(7) guides
+                </Link>
+              </div>
+            </div>
           </aside>
-          <div className="min-w-0 flex-1">{children}</div>
+
+          {/* main — whitespace-first, measure constrained */}
+          <main className="min-w-0 py-10 pl-0 md:pl-10">
+            <div className="max-w-[var(--content-measure)]">{children}</div>
+          </main>
         </div>
-        <Toolbar tr33={tr33} apiBase="/api" theme="light" />
+
+        {/* toolbar — stays out of typeset flow */}
+        <div className="not-typeset">
+          <Toolbar tr33={tr33} apiBase="/api" theme="light" />
+        </div>
       </body>
     </html>
   );

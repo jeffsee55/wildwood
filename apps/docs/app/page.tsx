@@ -1,33 +1,71 @@
+import Link from "next/link";
 import { Markdown } from "tr33/react/markdown";
 import { tr33 } from "@/lib/tr33";
 
 export default async function Home() {
   const res = await tr33.docs.findMany({});
-  const current = res.items.toSorted((a, b) => a.title.localeCompare(b.title))[0] ?? null;
+  const current =
+    res.items.toSorted((a, b) => a.title.localeCompare(b.title))[0] ?? null;
 
   return (
-    <div>
-      <div className="mb-10 rounded-3xl border border-[color:var(--border)] bg-white p-8 shadow-sm">
-        <p className="text-sm font-medium uppercase tracking-[0.2em] text-[color:var(--muted)]">
-          Powered by Tr33
-        </p>
-        <h1 className="mt-4 text-5xl font-semibold tracking-tight">
-          Docs from this repo&apos;s content folder
-        </h1>
-        <p className="mt-5 max-w-2xl text-lg leading-8 text-[color:var(--muted)]">
-          Source is <code>content/</code>; queries use <code>tr33.docs.findMany()</code>. Slug and path are first-class.
-        </p>
-      </div>
-
-      {current ? (
-        <article className="rounded-3xl border border-[color:var(--border)] bg-white p-8 shadow-sm">
-          <Markdown root={current.body} />
-        </article>
-      ) : (
-        <div className="rounded-3xl border border-[color:var(--border)] bg-white p-8 text-[color:var(--muted)] shadow-sm">
-          No docs found in <code>content/docs</code>.
+    <div className="typeset typeset-man">
+      <section>
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+          name
         </div>
-      )}
+        <h1 className="!mt-3 !border-0 !pt-0 !text-[28px] !font-semibold !normal-case !tracking-[-0.03em]">
+          tr33 — git as content store
+        </h1>
+        <p className="!mt-5 max-w-[60ch] !leading-[1.95] text-muted-foreground">
+          Markdown and JSON in <code>content/</code> → typed collection API. Edits go through a
+          shared H3/HTTP surface that powers both the floating editor and your own routes. This
+          site is <code>content/</code> from this repo rendered through itself.
+        </p>
+
+        <div className="mt-8 grid gap-3 border border-border p-4 font-mono text-[11px] leading-[1.9]">
+          <div className="flex gap-3">
+            <span className="w-[5.5rem] shrink-0 uppercase tracking-[0.12em] text-muted-foreground">synopsis</span>
+            <span>
+              <code>tr33.docs.findMany()</code> · <code>with:{"{author:true}"}</code> ·{" "}
+              <code>tr33/api</code> · <code>draftMode()</code> per-user
+            </span>
+          </div>
+          <div className="flex gap-3">
+            <span className="w-[5.5rem] shrink-0 uppercase tracking-[0.12em] text-muted-foreground">source</span>
+            <Link className="underline decoration-border underline-offset-4 hover:decoration-foreground" href="https://github.com/jeffsee55/tr33">
+              jeffsee55/tr33
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>description</h2>
+        {current ? (
+          <div className="typeset typeset-docs max-w-none border-t border-border pt-6">
+            <Markdown root={current.body} />
+          </div>
+        ) : (
+          <p className="border border-dashed border-border p-4 font-mono text-[11px] text-muted-foreground">
+            no docs found in <code>content/docs</code>.
+          </p>
+        )}
+      </section>
+
+      <section>
+        <h2>files</h2>
+        <dl className="mt-4 grid grid-cols-[12rem_1fr] gap-x-6 gap-y-3 border-t border-border pt-5 font-mono text-[11px] leading-[1.9]">
+          <dt className="uppercase tracking-[0.08em] text-muted-foreground">content/docs/**/*.md</dt>
+          <dd>markdown collections — <code>z.markdown()</code></dd>
+          <dt className="uppercase tracking-[0.08em] text-muted-foreground">content/nav/index.json</dt>
+          <dd>nav collection — <code>z.json()</code> with <code>z.connect()</code></dd>
+          <dt className="uppercase tracking-[0.08em] text-muted-foreground">app/api/[...path]/route.ts</dt>
+          <dd>
+            one catch-all: <code>createTr33Route</code> owns <code>/git/*</code>,{" "}
+            <code>/tr33/draft</code>, <code>/tr33/preview</code>
+          </dd>
+        </dl>
+      </section>
     </div>
   );
 }

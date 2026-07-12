@@ -1,26 +1,84 @@
 @import "tailwindcss";
+@import "./typeset.css";
 
 :root {
-  --background: #fbfaf8;
-  --foreground: #171412;
-  --muted: #6f6861;
-  --border: #e8e0d8;
+  /* man page — paper / ink, no pastels */
+  --background: #fefcfb;
+  --foreground: #11100f;
+  --muted: #6b6460;
+  --muted-foreground: #6b6460;
+  --border: #e9e1d9;
   --card: #ffffff;
+  --radius: 8px;
+
+  /* shadcn token bridge — typeset picks these up */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-mono);
+
+  /* man rhythm: mono-first, generous whitespace */
+  --measure: 72ch;
+  --content-measure: 66ch;
+  --gutter: 2.5rem;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-card: var(--card);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --radius: var(--radius);
+}
+
+/* presets — the only place you tune docs rhythm */
+.typeset-docs {
+  --typeset-font-body: var(--font-geist-mono);
+  --typeset-font-heading: var(--font-geist-mono);
+  --typeset-font-mono: var(--font-geist-mono);
+  --typeset-size: 13.5px;
+  --typeset-leading: 1.85;
+  --typeset-flow: 1.6em;
+}
+
+.typeset-man {
+  --typeset-font-body: var(--font-geist-mono);
+  --typeset-font-heading: var(--font-geist-mono);
+  --typeset-font-mono: var(--font-geist-mono);
+  --typeset-size: 13px;
+  --typeset-leading: 1.9;
+  --typeset-flow: 1.75em;
+}
+
+html {
+  scrollbar-gutter: stable;
+  font-variant-ligatures: common-ligatures;
+  text-rendering: optimizeLegibility;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
+  font-family: var(--font-geist-mono);
+  font-size: 13px;
+  line-height: 1.85;
+  letter-spacing: -0.01em;
 }
 
 ::selection {
-  background: #171412;
-  color: #fbfaf8;
+  background: var(--foreground);
+  color: var(--background);
+}
+
+/* hairline rulers look sharper on paper */
+hr {
+  border-color: var(--border);
+}
+
+/* links outside typeset */
+a {
+  text-underline-offset: 0.2em;
 }
