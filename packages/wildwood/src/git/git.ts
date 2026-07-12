@@ -404,15 +404,17 @@ export class Git implements Gitable {
       })) as Worktree;
 
       if (!result && !retrying) {
-        try {
-          await this.switch({ ref });
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : "";
-          if (
-            msg.includes("No local path found") ||
-            msg.includes("Not a git repository")
-          ) {
-            // Production (Vercel): no local checkout expected. Surface clear message instead of cryptic git error.
+        // Production Vercel runtime: no checkout, no gh CLI.
+        // If DB has no index and we can't fetch from GitHub (no creds),
+        // short-circuit with the actionable DB-missing error instead of
+        // attempting `switch()` -> `fetchCommit()` -> `gh auth token` -> 500.
+        const isProdRuntime =
+          process.env.NODE_ENV === "production" && !process.env.NEXT_PHASE;
+        if (isProdRuntime) {
+          const hasGithubCreds =
+            !!process.env.GITHUB_TOKEN ||
+            (!!process.env.GITHUB_APP_ID && !!process.env.GITHUB_PRIVATE_KEY);
+          if (!hasGithubCreds) {
             const hasRemoteDb =
               process.env.WILDWOOD_DOCS_DATABASE_URL ||
               process.env.LIBSQL_URL ||
@@ -420,7 +422,31 @@ export class Git implements Gitable {
             throw new Error(
               `Wildwood index missing for ref "${ref}" (version "${this.config.version}"). ` +
                 (hasRemoteDb
-                  ? `Database at ${hasRemoteDb.slice(0, 40)}… is empty — re-run \`next build\` so the local checkout is indexed into it.`
+                  ? `Database at ${String(hasRemoteDb).slice(0, 40)}… is empty — re-run \`next build\` with TURSO_DATABASE_URL set so the Vercel build host indexes into it.`
+                  : `No database URL configured and no local checkout found. In production, set TURSO_DATABASE_URL (+ TURSO_AUTH_TOKEN) and redeploy.`),
+            );
+          }
+        }
+
+        try {
+          await this.switch({ ref });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "";
+          if (
+            msg.includes("No local path found") ||
+            msg.includes("Not a git repository") ||
+            msg.includes("Failed to get GitHub token")
+          ) {
+            // Production (Vercel): no local checkout, possibly no GitHub creds.
+            // Surface clear message instead of cryptic git/gh error.
+            const hasRemoteDb =
+              process.env.WILDWOOD_DOCS_DATABASE_URL ||
+              process.env.LIBSQL_URL ||
+              process.env.TURSO_DATABASE_URL;
+            throw new Error(
+              `Wildwood index missing for ref "${ref}" (version "${this.config.version}"). ` +
+                (hasRemoteDb
+                  ? `Database at ${String(hasRemoteDb).slice(0, 40)}… is empty — re-run \`next build\` so the local checkout is indexed into it.`
                   : `No database URL configured and no local checkout found. In production, set WILDWOOD_DOCS_DATABASE_URL and build with a local git checkout; in dev, run from a git repo root or set WILDWOOD_DOCS_REPO_PATH.`),
             );
           }

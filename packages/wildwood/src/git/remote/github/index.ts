@@ -23,6 +23,18 @@ function getGitHubToken(): string {
     return process.env.GITHUB_TOKEN;
   }
 
+  // In production (Vercel, etc) `gh` CLI never exists.
+  // Don't spawn at runtime — go straight to the installable error.
+  const isProdServer =
+    process.env.NODE_ENV === "production" && !process.env.NEXT_PHASE;
+  if (isProdServer) {
+    throw new Error(
+      "Failed to get GitHub token. In production there is no `gh` CLI — " +
+        "set GITHUB_TOKEN (PAT) or GITHUB_APP_ID + GITHUB_PRIVATE_KEY + GITHUB_APP_INSTALLATION_ID. " +
+        "For read-only docs, ensure the Turso DB was populated at build time so no GitHub fetch is needed at runtime.",
+    );
+  }
+
   try {
     const token = execSync("gh auth token", {
       encoding: "utf-8",
