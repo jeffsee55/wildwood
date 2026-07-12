@@ -1,7 +1,7 @@
 ---
 title: Configuration
 author: ../authors/jeff.md
-description: defineConfig, remotes, database, auth, and how resolution works across environments.
+description: "defineConfig, remotes, database, auth, and resolution across environments."
 ---
 
 # Configuration

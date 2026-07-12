@@ -1,7 +1,7 @@
 ---
 title: Branching and preview
 author: ../authors/jeff.md
-description: How branches become preview environments: cookies, draft mode, revalidation, and exit.
+description: "How branches become preview environments — cookies, draft mode, revalidation, and exit."
 ---
 
 # Branching and preview

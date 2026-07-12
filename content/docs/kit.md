@@ -1,7 +1,7 @@
 ---
 title: Kit (toolbar and editor)
 author: ../authors/jeff.md
-description: The floating editor surface — Tr33Kit, Toolbar, ThemeProvider, branch sync, and the VS Code embedded shell.
+description: "The floating editor surface — Tr33Kit, Toolbar, ThemeProvider, branch sync, and the VS Code embedded shell."
 ---
 
 # Kit (toolbar and editor)

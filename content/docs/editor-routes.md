@@ -1,7 +1,7 @@
 ---
 title: Editor routes
 author: ../authors/jeff.md
-description: git/*, tr33/*, vscode/* endpoints mounted by the H3 handler and the branch cookie they interact with.
+description: "git/*, tr33/*, vscode/* endpoints mounted by the H3 handler and the branch cookie."
 ---
 
 # Editor routes

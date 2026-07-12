@@ -1,7 +1,7 @@
 ---
 title: Deploy
 author: ../authors/jeff.md
-description: Building for production, Turso / LibSQL indexing, Vercel setup, and GitHub App manifest.
+description: "Building for production, Turso and LibSQL indexing, Vercel setup, and GitHub App manifest."
 ---
 
 # Deploy

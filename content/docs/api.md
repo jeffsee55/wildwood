@@ -1,7 +1,7 @@
 ---
 title: API reference
 author: ../authors/jeff.md
-description: The public surface — collections, client, queries, routes, Kit, and branch helpers with types.
+description: "The public surface — collections, client, queries, routes, Kit, and branch helpers."
 ---
 
 # API reference

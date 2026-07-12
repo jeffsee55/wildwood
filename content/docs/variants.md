@@ -1,7 +1,7 @@
 ---
 title: Variants
 author: ../authors/jeff.md
-description: Locale/version-like axes, path modifiers, resolution order, and scoring for matching entries to variants.
+description: "Locale/version-like axes, path modifiers, resolution order, and scoring for matching entries to variants."
 ---
 
 # Variants

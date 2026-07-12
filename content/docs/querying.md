@@ -1,7 +1,7 @@
 ---
 title: Querying
 author: ../authors/jeff.md
-description: findMany, findFirst, with, where, references, variants, and how collection typing flows.
+description: "findMany, findFirst, with, where, references, variants, and how collection typing flows."
 ---
 
 # Querying

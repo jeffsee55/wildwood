@@ -1,7 +1,7 @@
 ---
 title: Guides
 author: ../authors/jeff.md
-description: Patterns used in this docs app for collections, reads, mounting the API, preview, editor, and deploying.
+description: "Patterns used in this docs app for collections, reads, mounting the API, preview, editor, and deploying."
 ---
 
 # Guides

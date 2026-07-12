@@ -1,7 +1,7 @@
 ---
 title: Introduction
 author: ../authors/jeff.md
-description: What tr33 is, how it stores content in Git, and the minimal setup to go from content/ files to a typed client.
+description: "What tr33 is, how it stores content in Git, and the minimal setup to go from content/ files to a typed client."
 ---
 
 # Introduction

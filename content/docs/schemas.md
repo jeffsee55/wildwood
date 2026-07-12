@@ -1,7 +1,7 @@
 ---
 title: Schemas
 author: ../authors/jeff.md
-description: Collections, z.markdown, z.json, filters, connections, and the visitor that turns frontmatter into index rows.
+description: "Collections, z.markdown, z.json, filters, connections, and the visitor that turns frontmatter into index rows."
 ---
 
 # Schemas
