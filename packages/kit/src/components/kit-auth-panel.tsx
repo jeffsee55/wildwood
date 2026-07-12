@@ -30,6 +30,11 @@ export type KitAuthConfig = {
      */
     configured?: boolean;
   };
+  /**
+   * @deprecated The Kit is a UI affordance — it must never throw in production when
+   * GitHub App env is missing. Keep for API-level gates only, if you really need it,
+   * and handle it server-side. Client `authEnabled` will ignore it.
+   */
   enforceInProduction?: boolean;
 };
 

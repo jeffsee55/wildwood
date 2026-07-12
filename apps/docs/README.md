@@ -40,7 +40,9 @@ GITHUB_APP_ID=<numeric>
 GITHUB_PRIVATE_KEY=<PEM, \n escapes OK>
 # Optional — skips GET /repos/{owner}/{repo}/installation lookup on each request
 GITHUB_APP_INSTALLATION_ID=<numeric>
-# Required in prod for UI: Kit throws if missing when enforceInProduction (default true)
+# Public slug/name for install links. If missing, Kit stays usable (content still
+# renders); editing is visually disabled and a setup entrypoint is shown inline.
+# No throw — enforce writes server-side in /api/wildwood/github/* if you need it.
 GITHUB_APP_SLUG=wildwood
 GITHUB_APP_NAME=Wildwood
 ```

@@ -94,29 +94,34 @@ function isProd(): boolean {
 
 function authEnabled(auth: KitAuthConfig | undefined): boolean {
   if (!auth) return false;
-  const enforce = auth.enforceInProduction ?? isProd();
   if (auth.enabled != null) return auth.enabled;
 
-  // Dev: tolerant — show if we have anything, hide if completely empty.
-  // Exception: always show when GitHub App is NOT configured, so setup is reachable.
   const isUnconfigured = githubAppIsUnconfigured(auth);
-  if (isUnconfigured && !enforce) return true;
+  // Always allow the setup entrypoint to show — render-time never throws.
+  // The actual GitHub App install flow gates itself with guards.
+  if (isUnconfigured) return true;
 
   const hasAny =
     !!auth.githubApp?.appSlug?.trim() ||
     !!auth.githubApp?.name?.trim() ||
     !!auth.userEmail ||
     !!auth.githubOAuthEnabled;
-  if (!enforce) return hasAny;
+  return hasAny;
+}
 
-  // Prod: require at least appSlug to consider configured.
-  const ok = !!auth.githubApp?.appSlug?.trim();
-  if (!ok && enforce) {
-    throw new Error(
-      "[wildwood] Kit auth: GITHUB_APP_SLUG missing. Set GITHUB_APP_SLUG (and GITHUB_APP_ID) in production — hosts should always pass { githubApp: { appSlug, name } }.",
-    );
-  }
-  return ok;
+/**
+ * Prod warning — not a hard error. Callers that need to enforce at *API* level
+ * should do it in `/api/wildwood/github/*` handlers, not in a UI render path.
+ * The Kit must never crash a production page.
+ */
+function warnIfMissingGithubAppInProd(auth: KitAuthConfig | undefined): void {
+  if (!isProd()) return;
+  if (!githubAppIsUnconfigured(auth)) return;
+  // One-time per render cycle — dedupe via console.warn grouping is enough.
+  if (typeof window !== "undefined" && auth?.githubApp?.name) return;
+  console.warn(
+    "[wildwood] Kit: GitHub App is not configured (GITHUB_APP_SLUG missing). Editing / draft branches will be disabled. To enable, set GITHUB_APP_SLUG / GITHUB_APP_NAME / GITHUB_APP_ID / GITHUB_PRIVATE_KEY and reinstall the app on the repo. Docs: /docs/kit#github-app",
+  );
 }
 
 function githubAppIsUnconfigured(auth: KitAuthConfig | undefined): boolean {
@@ -127,13 +132,14 @@ function githubAppIsUnconfigured(auth: KitAuthConfig | undefined): boolean {
   return !auth.githubApp.appSlug?.trim();
 }
 
-function shouldShowDevSetup(auth: KitAuthConfig | undefined): boolean {
-  // Developer menu should be visible:
-  // - always in dev (tolerant), so you can create an app
-  // - in prod only if you already have a slug (so prod users can still re-create)
-  // Caller already gates overall auth menu via authEnabled; this is for sub-menu.
-  // For unconfigured case we force it visible even if authEnabled would otherwise hide.
-  if (!auth) return !isProd(); // fresh project, no auth at all — offer setup
+function setupHintLabel(auth: KitAuthConfig | undefined): string {
+  const name = auth?.githubApp?.name?.trim();
+  if (!name) return "Disabled — set up GitHub App";
+  return `Disabled — set up ${name}`;
+}
+
+function shouldShowDevSetup(_auth: KitAuthConfig | undefined): boolean {
+  // Always offer setup — non-throwing model. The Kit must never gate off its own setup UI.
   return true;
 }
 
@@ -237,6 +243,11 @@ export function KitFabMenu({
   React.useEffect(() => {
     persistActiveRefToStorage(displayRef);
   }, [displayRef]);
+
+  // Soft warning (no throw) when GH App is missing — useful even when toolbar is collapsed.
+  React.useEffect(() => {
+    warnIfMissingGithubAppInProd(auth);
+  }, [auth]);
 
   const switchBranchCookie = React.useCallback(
     async (ref: string) => {
@@ -828,50 +839,66 @@ export function KitFabMenu({
                   </DropdownMenuGroup>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={openEditor}>
-                {offDefaultRef ? `Edit on ${displayRef}` : "Edit"}
-              </DropdownMenuItem>
-              {offDefaultRef ? (
-                <DropdownMenuItem
-                  onClick={async () => {
-                    try {
-                      await fetch(
-                        `${window.location.origin}${base}/wildwood/preview`,
-                        {
-                          method: "POST",
-                          credentials: "include",
-                        },
-                      );
-                      scheduleRefresh();
-                    } catch {
-                      /* ignore */
-                    }
-                  }}
-                >
-                  Exit preview (live / cached)
-                </DropdownMenuItem>
-              ) : null}
-              {/* ── GitHub App setup: always surface when unconfigured ── */}
-              {githubAppIsUnconfigured(auth) ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger className="text-xs font-semibold text-amber-600 dark:text-amber-400">
-                      Set up GitHub App
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent
-                      side="left"
-                      align="end"
-                      sideOffset={8}
-                      className="w-auto max-w-[min(100vw-2rem,26rem)] p-0"
-                      container={portalContainer ?? undefined}
+              {(() => {
+                const isUnconfigured = githubAppIsUnconfigured(auth);
+                return (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={openEditor}
+                      disabled={isUnconfigured}
+                      title={isUnconfigured ? setupHintLabel(auth) : undefined}
+                      className={isUnconfigured ? "opacity-60" : undefined}
                     >
-                      <KitAuthPanel auth={auth ?? {}} mode="dev-setup" />
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                </>
-              ) : null}
+                      {offDefaultRef ? `Edit on ${displayRef}` : "Edit"}
+                      {isUnconfigured ? (
+                        <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                          setup needed
+                        </span>
+                      ) : null}
+                    </DropdownMenuItem>
+                    {offDefaultRef ? (
+                      <DropdownMenuItem
+                        onClick={async () => {
+                          try {
+                            await fetch(
+                              `${window.location.origin}${base}/wildwood/preview`,
+                              {
+                                method: "POST",
+                                credentials: "include",
+                              },
+                            );
+                            scheduleRefresh();
+                          } catch {
+                            /* ignore */
+                          }
+                        }}
+                      >
+                        Exit preview (live / cached)
+                      </DropdownMenuItem>
+                    ) : null}
+                    {isUnconfigured ? (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuSub>
+                          <DropdownMenuSubTrigger className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                            {setupHintLabel(auth)}
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent
+                            side="left"
+                            align="end"
+                            sideOffset={8}
+                            className="w-auto max-w-[min(100vw-2rem,26rem)] p-0"
+                            container={portalContainer ?? undefined}
+                          >
+                            <KitAuthPanel auth={auth ?? {}} mode="dev-setup" />
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
+                      </>
+                    ) : null}
+                  </>
+                );
+              })()}
               {authEnabled(auth) ? (
                 <>
                   <DropdownMenuSeparator />

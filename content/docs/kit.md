@@ -145,17 +145,22 @@ Errors render as pinned banner above FAB/overlay. Guard/run id monotonic via `ed
 - Auth panel (`KitAuthPanel`) — `KitAuthConfig`, GitHub OAuth state, GitHub App install links.
 - FAB: branch display (`activeRef ?? configRef`), switch branch UI, branch name generator (`generateBranchName()` from shared: picks a random city (`BRANCH_CITIES`) + 4-char base36 suffix).
 - Menu groups via shadcn `DropdownMenu` subcomponents (`DropdownMenu`, `DropdownMenuItem`, etc). Portal via `createPortal` into shadow host container (`useShadowContainer` from `lib/shadow-root`).
-- Auth enable rule: `authEnabled(auth)` — dev tolerant (shows if `githubApp.appSlug`, `githubApp.name`, `userEmail`, or `githubOAuthEnabled` any truthy). Prod strict (`!auth.enabled` optional override, `enforceInProduction` default when `NODE_ENV=production` — require `githubApp.appSlug`, throw clear error if missing): `"GITHUB_APP_SLUG missing. Set GITHUB_APP_SLUG (and GITHUB_APP_ID) in production"`.
+- Auth affordance (no-throw): `authEnabled(auth)` returns `true` even when `githubApp` is not configured so the Kit can keep showing a “Set up GitHub App” entrypoint. Editing is visually disabled with an inline hint (`setupHintLabel`). Missing GitHub App in prod is a `console.warn`, not a throw — the content page must remain usable. The host can still gate write API routes server‑side if desired. Client Kit never enforces `enforceInProduction` by throwing.
+- Error isolation: `Kit` and `Toolbar` are wrapped in React error boundaries (`KitErrorBoundary`, `WildwoodToolbarBoundary`) so any render or chunk‑load failure in the floating editor surface renders a fixed‑position fallback or hides itself, and never unmounts the page content.
 
 ## Auth shape
 
 ```ts
 export type KitAuthConfig = {
   enabled?: boolean;
+  /**
+   * @deprecated Client Kit never throws when this is missing — it shows a
+   * setup entrypoint. Keep only for server-side gating of write APIs.
+   */
   enforceInProduction?: boolean;
   userEmail?: string;
   githubOAuthEnabled?: boolean;
-  githubApp?: { appSlug?: string; name?: string; origin?: string };
+  githubApp?: { appSlug?: string; name?: string; origin?: string; configured?: boolean };
 };
 ```
 

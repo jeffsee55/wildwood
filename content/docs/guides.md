@@ -170,8 +170,8 @@ or
 ### Auth interior
 
 - Library shows auth section when `_env` detects `GITHUB_APP_SLUG` + `GITHUB_APP_NAME` (public bits) or `auth` prop supplied. Private signing keys never leave server. `auth` merges `envAuth` + prop (`githubApp` shallow+mapped).
-- Prod check in Kit enforces: if `NODE_ENV=production` + `auth.enforceInProduction` defaults true + `githubApp.appSlug` missing → throw a clear error (`"GITHUB_APP_SLUG missing. Set GITHUB_APP_SLUG (and GITHUB_APP_ID)"`), preventing prod unauthed silent run.
-- Dev tolerance: shows auth panel if any of `githubApp.appSlug|githubApp.name|userEmail|githubOAuthEnabled` present, else hides. Pass `auth.enabled=false` to suppress in dev.
+- Auth is non-throwing in the client Kit: when `githubApp` is missing in prod, the Kit surfaces a `console.warn` and disables editing affordances with an inline “Set up GitHub App” entrypoint (`setupHintLabel`). The floating editor is wrapped in `KitErrorBoundary`/`WildwoodToolbarBoundary` so any render or chunk error shows a fixed-position fallback and never crashes the content page. Gate writes server-side in `/api/wildwood/github/*` if you need to enforce production auth; the Kit itself is UI-only.
+- Dev tolerance: shows auth/setup panel even when no GitHub App is configured (so first-run setup is discoverable). Pass `auth.enabled=false` to suppress the auth entry entirely when you embed the Kit in read-only mode.
 
 ## 5. Recipes
 
