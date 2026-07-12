@@ -1,9 +1,8 @@
 import { Markdown } from "tr33/react/markdown";
 import { tr33 } from "@/lib/tr33";
-import type { DocPage } from "@/lib/content";
 
 export default async function Home() {
-  const res = (await tr33.docs.findMany({})) as unknown as { items: DocPage[] };
+  const res = await tr33.docs.findMany({});
   const current = res.items.toSorted((a, b) => a.title.localeCompare(b.title))[0] ?? null;
 
   return (

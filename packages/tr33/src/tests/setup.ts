@@ -1,5 +1,5 @@
 import { createClient as libsqlCreateClient } from "@libsql/client";
-import type { ConfigInput } from "@/client/config";
+import type { AnyCollections, DefineConfigInput } from "@/client/config";
 import { defineConfig } from "@/client/config";
 import { createClient } from "@/client/index";
 import { z } from "@/index";
@@ -43,9 +43,9 @@ export function createTestSetup({ useMemoryDb = true }: { useMemoryDb?: boolean 
     client,
     git: client._.git,
     db: client._.db,
-    createClientWithConfig: (config: ConfigInput) =>
+    createClientWithConfig: <C extends AnyCollections>(config: DefineConfigInput<C>) =>
       createClient({
-        config: defineConfig(config),
+        config: defineConfig(config as DefineConfigInput<C>),
         database: libsqlClient,
       }) as unknown as typeof client,
   };

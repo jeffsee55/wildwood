@@ -13,9 +13,25 @@ export const variant = <T extends z.ZodType>(schema: T) => {
   return union;
 };
 
-export const connect = <C extends CollectionParams>(
+// ---- connection plumbing --------------------------------------------------
+// We keep the runtime `z.custom` marker but make the TS return type preserve
+// the target collection's schema shape without touching `_zod.def.shape`
+// (which widens to `LooseShape` in emitted `.d.mts`). Instead we infer the
+// object shape via `CollectionParams["schema"] extends ZodCodec<..., ZodObject<infer S>>`
+// which is stable through `const` generics.
+
+type InferObjectShapeFromCodec<C> = C extends z.ZodCodec<z.ZodString, z.ZodObject<infer S extends z.core.$ZodLooseShape>>
+  ? S
+  : C extends z.ZodObject<infer S extends z.core.$ZodLooseShape>
+    ? S
+    : z.core.$ZodLooseShape;
+
+export const connect = <
+  C extends CollectionParams,
+  const RA extends string | undefined = undefined,
+>(
   collection: C,
-  options?: { referencedAs?: string },
+  options?: { referencedAs?: RA },
 ) => {
   return z.custom(
     () => {
@@ -28,15 +44,24 @@ export const connect = <C extends CollectionParams>(
       },
     },
   ) as unknown as z.ZodCustom<
-    z.infer<z.ZodObject<UnresolvedConnectionMetaSchema<C["name"]>>>,
+    UnresolvedConnectionOutput<C["name"], RA>,
     z.ZodObject<
-      C["schema"]["_zod"]["def"]["out"]["_zod"]["def"]["shape"] &
-        ResolvedConnectionMetaSchema<C["name"]>
+      InferObjectShapeFromCodec<C["schema"]> &
+        ResolvedConnectionMetaSchema<C["name"]> &
+        (RA extends string ? { _referencedAs: z.ZodLiteral<RA> } : {})
     >
   >;
 };
 
-type MetaSchema<CollectionName extends string> = {
+type UnresolvedConnectionOutput<
+  Name extends string,
+  RA extends string | undefined,
+> = {
+  _collection: Name;
+  _meta: { resolved: false; value: string };
+} & (RA extends string ? { _referencedAs: RA } : {});
+
+export type MetaSchema<CollectionName extends string> = {
   _collection: z.ZodLiteral<CollectionName>;
   _meta: z.ZodObject<{
     raw: z.ZodString;
@@ -45,17 +70,8 @@ type MetaSchema<CollectionName extends string> = {
     canonicalPath: z.ZodString;
     slug: z.ZodString;
   }>;
-  // First-class slug/path: `content/docs/path-to-file.md` → slug=`path-to-file`
   slug: z.ZodString;
   path: z.ZodString;
-};
-
-type UnresolvedConnectionMetaSchema<CollectionName extends string> = {
-  _collection: z.ZodLiteral<CollectionName>;
-  _meta: z.ZodObject<{
-    resolved: z.ZodLiteral<false>;
-    value: z.ZodString;
-  }>;
 };
 
 type ResolvedConnectionMetaSchema<CollectionName extends string> = {
@@ -73,16 +89,39 @@ type ResolvedConnectionMetaSchema<CollectionName extends string> = {
   path: z.ZodString;
 };
 
-export const collection = <T extends z.ZodObject, const Name extends string>(
-  args: CollectionParams<z.ZodCodec<z.ZodString, T>, Name>,
-) => {
-  return args as unknown as CollectionParams<
-    z.ZodCodec<
-      z.ZodString,
-      z.ZodObject<T["_zod"]["def"]["shape"] & MetaSchema<Name>>
-    >,
-    Name
-  >;
+/**
+ * `collection` now preserves the exact `Schema` generic passed in instead of
+ * re-building it via `T["_zod"]["def"]["shape"]`. That previous trick caused
+ * the emitted declaration to become `ZodObject<$ZodLooseShape>` and made
+ * `FindTypes` return `never`, which is why `with:{author:true}` and the join
+ * `where:{author:{name:{eq}}}` didn't type-check in `apps/docs` (which consumes
+ * `tr33` via its built `dist/index.d.mts`).
+ *
+ * We still augment the output with `_collection`/`_meta`/`slug`/`path` – but
+ * that augmentation now lives in `OrmConfig`'s `EntrySystemFields` rather than
+ * requiring the collection schema itself to carry it, so the literal frontmatter
+ * shape stays intact.
+ */
+export const collection = <
+  const Name extends string,
+  const Schema extends z.core.$ZodType,
+>(args: {
+  name: Name;
+  match: string;
+  basePath?: string;
+  schema: Schema;
+}): {
+  name: Name;
+  match: string;
+  basePath?: string;
+  schema: Schema;
+} => {
+  return args as unknown as {
+    name: Name;
+    match: string;
+    basePath?: string;
+    schema: Schema;
+  };
 };
 
 export const filter = <T extends z.ZodType>(type: T) => {
@@ -170,15 +209,11 @@ export const markdown = <
 };
 
 export type CollectionParams<
-  T extends z.ZodCodec<z.ZodString, z.ZodObject> = z.ZodCodec<
-    z.ZodString,
-    z.ZodObject
-  >,
+  T extends z.core.$ZodType = z.core.$ZodType,
   Name extends string = string,
 > = {
   name: Name;
   schema: T;
   match: string;
-  /** Optional base path for slug derivation. Defaults to fixed prefix of `match`. */
   basePath?: string;
 };

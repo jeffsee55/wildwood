@@ -1,10 +1,8 @@
 import { z } from "zod/v4";
-import type { Collection } from "@/client/config";
+import type { AnyCollection } from "@/client/config";
+import type { WhereClause, WithClause } from "@/types";
 
-// // Collection type representing a collection with a schema
-// type Collection = {
-// 	schema: z.ZodObject<z.core.$ZodLooseShape, z.core.$strip>;
-// };
+// ── primitives ───────────────────────────────────────────────────────────
 
 export type StringQueryType = z.infer<typeof QuerySchema>;
 
@@ -18,76 +16,310 @@ const QuerySchema = z
     lte: z.string().optional(),
     in: z.string().array().optional(),
     notIn: z.string().array().optional(),
-    // SQLITE does not support arrayContains, arrayContained, or arrayOverlaps
-    // arrayContains?: (T extends Array<infer E> ? (E | Placeholder)[] : T) | Placeholder | undefined;
-    // arrayContained?: (T extends Array<infer E> ? (E | Placeholder)[] : T) | Placeholder | undefined;
-    // arrayOverlaps?: (T extends Array<infer E> ? (E | Placeholder)[] : T) | Placeholder | undefined;
     like: z.string().optional(),
     ilike: z.string().optional(),
     notLike: z.string().optional(),
     notIlike: z.string().optional(),
     isNull: z.boolean().optional(),
     isNotNull: z.boolean().optional(),
-    // This one is a bit finicky https://zod.dev/api?id=circularity-errors
     get OR(): z.ZodLazy<z.ZodOptional<z.ZodArray<typeof QuerySchema>>> {
       return z.lazy(() => z.array(QuerySchema).optional());
     },
   })
-  .refine(
-    (obj) => {
-      return Object.values(obj).some((val) => val !== undefined);
-    },
-    {
-      message: "At least one query condition must be specified.",
-      path: [],
-    },
-  );
+  .refine((o) => Object.values(o).some((v) => v !== undefined), {
+    message: "At least one query condition must be specified.",
+  });
+
+// ── helpers ──────────────────────────────────────────────────────────────
+
+type MaybePrefix<P extends string> = P extends "" ? "" : `${P}.`;
+type Inc<N extends number> = N extends 0 ? 1 : N extends 1 ? 2 : N extends 2 ? 3 : 4;
+type Prettify<T> = { [K in keyof T]: T[K] } & {};
+
+type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void ? I : never;
+
+/** Unwrap `z.codec(in, out)` or `z.coerce`/pipe wrappers to get the output object type.
+ *  Crucially we handle multiple layers: `z.codec` is itself a `ZodPipe`,
+ *  and `markdown` returns `codec(string, object)`. We unwrap recursively.
+ */
+type UnwrapCodec<T> = T extends z.ZodCodec<infer _I, infer O extends z.core.$ZodType>
+  ? UnwrapCodec<O>
+  : T extends { def: { out: infer O } }
+    ? O extends z.core.$ZodType
+      ? UnwrapCodec<O>
+      : O
+    : T extends { _zod: { def: { out: infer O } } }
+      ? O extends z.core.$ZodType
+        ? UnwrapCodec<O>
+        : O
+      : T;
+
+// ── FindTypes – collect filter & connection markers from a Zod schema ───
+
+export type FindTypes<
+  T extends z.core.$ZodType,
+  Cur extends string = "",
+> = T extends z.ZodObject<infer S>
+  ? { [K in keyof S]: FindTypes<S[K], `${MaybePrefix<Cur>}${K & string}`> }[keyof S]
+  : T extends z.ZodArray<infer U extends z.core.$ZodType>
+    ? FindTypes<U, Cur>
+    : T extends z.ZodLazy<infer U extends z.core.$ZodType>
+      ? FindTypes<U, Cur>
+      : T extends z.ZodOptional<infer U extends z.core.$ZodType>
+        ? FindTypes<U, Cur>
+        : T extends z.ZodNullable<infer U extends z.core.$ZodType>
+          ? FindTypes<U, Cur>
+          : T extends z.ZodDefault<infer U extends z.core.$ZodType>
+            ? FindTypes<U, Cur>
+            : T extends z.ZodPipe<infer _I extends z.ZodType, infer O extends z.core.$ZodType>
+              ? FindTypes<O, Cur>
+              : T extends z.ZodUnion<infer Opts extends readonly z.core.$ZodType[]>
+                ? { [K in keyof Opts]: FindTypes<Opts[K], WithDisc<Cur, Opts[K]>> }[number]
+                : T extends z.ZodIntersection<infer A extends z.core.$ZodType, infer B extends z.core.$ZodType>
+                  ? FindTypes<A, Cur> | FindTypes<B, Cur>
+                  : T extends z.ZodCustom<infer Out, infer In>
+                    ? In extends { __internalFilter: infer FT }
+                      ? { type: "filter"; value: FT; path: Cur }
+                      : Out extends { _collection: infer Coll extends string }
+                        ? Out extends { _referencedAs: infer RA extends string }
+                          ? { type: "connection"; value: Coll; path: Cur; referencedAs: RA }
+                          : { type: "connection"; value: Coll; path: Cur }
+                        : Out extends { _collection: string }
+                          ? In extends z.ZodObject<infer IS>
+                            ? IS extends { _referencedAs: z.ZodLiteral<infer RA extends string> }
+                              ? {
+                                  type: "connection";
+                                  value: Out extends { _collection: infer C extends string } ? C : string;
+                                  path: Cur;
+                                  referencedAs: RA;
+                                }
+                              : {
+                                  type: "connection";
+                                  value: Out extends { _collection: infer C extends string } ? C : string;
+                                  path: Cur;
+                                }
+                            : {
+                                type: "connection";
+                                value: Out extends { _collection: infer C extends string } ? C : string;
+                                path: Cur;
+                              }
+                          : never
+                    : never;
+
+type WithDisc<P extends string, T extends z.core.$ZodType> = T extends z.ZodObject<infer S>
+  ? { [K in keyof S]: S[K] extends z.ZodLiteral<infer L> ? `${MaybePrefix<P>}${L & string}` : never }[keyof S]
+  : T extends z.ZodCustom<infer Out>
+    ? Out extends { _collection: infer C extends string }
+      ? `${MaybePrefix<P>}${C}`
+      : never
+    : P;
+
+type CollSchema<C> = C extends { schema: infer S } ? (S extends z.core.$ZodType ? S : never) : never;
+
+export type OptionsForColl<T extends AnyCollection> = FindTypes<UnwrapCodec<CollSchema<T>> & z.core.$ZodType>;
+
+// ── connection / filter maps ─────────────────────────────────────────────
+
+type ConnEntryBase = { type: "connection"; path: string; value: string; referencedAs?: string };
+type FiltEntry = { type: "filter"; path: string; value: unknown };
+
+type ConnMap = Record<string, ConnEntryBase>;
+type FiltMap = Record<string, FiltEntry>;
+
+// ── forward `with` ───────────────────────────────────────────────────────
+
+type ConnArgs<CM extends ConnMap, FM extends FiltMap, CName extends string, D extends number = 0> = D extends 4
+  ? {}
+  : CName extends keyof CM
+    ? Prettify<
+        UnionToIntersection<
+          CM[CName] extends { path: infer P extends string; value: infer V extends string }
+            ? { [K in P]?: boolean | WithShape<CM, FM, V, Inc<D>> }
+            : {}
+        >
+      >
+    : {};
+
+type WithShape<CM extends ConnMap, FM extends FiltMap, V extends string, D extends number = 0> = {
+  where?: Filters<FM, V, CM> | WhereClause;
+  limit?: number;
+  offset?: number;
+  orderBy?: Record<string, "asc" | "desc">;
+  with?: ConnArgs<CM, FM, V, D>;
+  references?: ReverseConns<CM, FM, V, D>;
+};
+
+// ── reverse `references` ─────────────────────────────────────────────────
+
+type ReverseSources<CM extends ConnMap, Target extends string, RA extends string> = {
+  [Src in keyof CM & string]: CM[Src] extends infer E
+    ? E extends any
+      ? E extends { value: Target; referencedAs: RA }
+        ? Src
+        : never
+      : never
+    : never;
+}[keyof CM & string];
+
+type ReverseConns<CM extends ConnMap, FM extends FiltMap, K extends string, D extends number = 0> = D extends 4
+  ? Record<string, WithClause | boolean>
+  : keyof ReverseEntries<CM, K> extends never
+    ? Record<string, WithClause | boolean>
+    : Prettify<
+        {
+          [RA in keyof ReverseEntries<CM, K> & string]?: boolean | WithShape<CM, FM, ReverseEntries<CM, K>[RA] & string, Inc<D>>;
+        } & Record<string, WithClause | boolean>
+      >;
+
+type ReverseEntries<CM extends ConnMap, K extends string> = {
+  [Src in keyof CM & string as CM[Src] extends infer E
+    ? E extends any
+      ? E extends { value: K; referencedAs: infer RA extends string }
+        ? RA
+        : never
+      : never
+    : never]: Src;
+};
+
+// ── filters ──────────────────────────────────────────────────────────────
+
+type StringOrFilter = string | StringFiltersObj;
+type SystemFilters = { path?: StringOrFilter; slug?: StringOrFilter; ref?: StringOrFilter };
+
+// Split into two layers so CM join does not get intersected into readonly index signature incorrectly.
+type DirectFilters<FM extends FiltMap, K extends string> = Prettify<
+  {
+    [E in FM[K & keyof FM] as E extends { path: infer P extends string } ? P : never]?: E extends {
+      value: infer _V;
+    }
+      ? StringFiltersObj
+      : never;
+  } & SystemFilters
+>;
+
+type JoinFilters<CM extends ConnMap, FM extends FiltMap, K extends string> = [K] extends [keyof CM]
+  ? [CM[K]] extends [never]
+    ? {}
+    : UnionToIntersection<
+        CM[K] extends { path: infer P extends string; value: infer V extends string }
+          ? { [KK in P]?: V extends string ? Filters<FM, V, CM> : never }
+          : {}
+      >
+  : {};
+
+export type Filters<FM extends FiltMap, K extends string, CM extends ConnMap> = Prettify<
+  DirectFilters<FM, K> & JoinFilters<CM, FM, K> & { AND?: Filters<FM, K, CM>[]; OR?: Filters<FM, K, CM>[] }
+>;
+
+type StringFiltersObj = StringQueryType;
+
+// ── ResultType – schema + forward `with` → enriched output ───────────────
+
+type InferRes<T extends z.core.$ZodType, W extends object> = ResType<T, W> extends z.core.$ZodType<infer O> ? O : never;
+
+type ResType<
+  T extends z.core.$ZodType,
+  W extends object,
+  Cur extends string = "",
+> = T extends z.ZodObject<infer S, infer Cfg>
+  ? z.ZodObject<{ [K in keyof S]: ResType<S[K], W, `${MaybePrefix<Cur>}${K & string}`> }, Cfg>
+  : T extends z.ZodPipe<infer I extends z.ZodType, infer O extends z.core.$ZodType>
+    ? z.ZodPipe<I, ResType<O, W, Cur>>
+    : T extends z.ZodArray<infer U extends z.core.$ZodType>
+      ? z.ZodArray<ResType<U, W, Cur>>
+      : T extends z.ZodLazy<infer U extends z.core.$ZodType>
+        ? z.ZodLazy<ResType<U, W, Cur>>
+        : T extends z.ZodUnion<infer Opts extends readonly z.core.$ZodType[]>
+          ? z.ZodUnion<{ [K in keyof Opts]: ResType<Opts[K], W, WithDisc<Cur, Opts[K]>> }>
+          : T extends z.ZodOptional<infer U extends z.core.$ZodType>
+            ? z.ZodOptional<ResType<U, W, Cur>>
+            : T extends z.ZodNullable<infer U extends z.core.$ZodType>
+              ? z.ZodNullable<ResType<U, W, Cur>>
+              : T extends z.ZodCustom<infer Out, infer In>
+                ? Cur extends keyof W
+                  ? W[Cur] extends false
+                    ? T
+                    : In extends z.core.$ZodType
+                      ? ResType<In, ExtractWith<W, Cur>>
+                      : never
+                  : Out extends z.core.$ZodType
+                    ? Out
+                    : T
+                : T;
+
+type ExtractWith<W, P extends string> = P extends keyof W
+  ? W[P] extends { with: infer NW extends object }
+    ? NW
+    : W[P] extends true
+      ? {}
+      : W[P] extends object
+        ? {}
+        : {}
+  : {};
+
+// ── system meta appended at runtime by Config.buildEntry ────────────
+
+export type EntrySystemFields = {
+  _meta: {
+    raw: string;
+    oid: string;
+    path: string;
+    canonicalPath: string;
+    slug: string;
+  };
+  _collection: string;
+  slug: string;
+  path: string;
+};
+
+// ── reverse result typing ────────────────────────────────────────────────
+
+type GetReverseWith<R, P extends PropertyKey> = P extends keyof R ? (R[P] extends { with: infer W extends object } ? W : {}) : {};
+type GetReverseRefs<R, P extends PropertyKey> = P extends keyof R ? (R[P] extends { references: infer RR extends object } ? RR : {}) : {};
+
+type ReverseRes<
+  CM extends ConnMap,
+  T extends Record<string, AnyCollection>,
+  K extends string,
+  R,
+  FM extends FiltMap,
+  D extends number = 0,
+> = D extends 4
+  ? {}
+  : {
+      [P in keyof R as P & string]: ReverseSources<CM, K, P & string> extends infer Src
+        ? Src extends string
+          ? Src extends keyof T
+            ? (InferRes<CollSchema<T[Src]>, GetReverseWith<R, P>> &
+                EntrySystemFields &
+                ReverseRes<CM, T, Src, GetReverseRefs<R, P>, FM, Inc<D>>)[]
+            : unknown[]
+          : unknown[]
+        : unknown[];
+    };
+
+// ── OrmConfig ────────────────────────────────────────────────────────────
 
 export type OrmConfig<
-  // biome-ignore lint/complexity/noBannedTypes: This rule is dumb
-  T extends Record<string, Collection> = {}, // Don't change this to Record
-  Options extends { [K in keyof T]: object } = {
-    [K in keyof T]: OptionsForCollection<T[K]>;
+  T extends Record<string, AnyCollection> = {},
+  Opts extends { [K in keyof T]: object } = {
+    [K in keyof T]: OptionsForColl<T[K]>;
   },
-  ConnectionOptions extends {
-    [K in keyof T]: { type: "connection"; path: string; value: keyof T };
-  } = {
-    [K in keyof T]: Extract<
-      Options[K],
-      { type: "connection"; path: string; value: keyof T }
-    >;
+  CM extends ConnMap = {
+    [K in keyof T]: Extract<Opts[K], { type: "connection"; path: string; value: string }>;
   },
-  FilterOptions extends {
-    [K in keyof T]: { type: "filter"; path: string; value: unknown };
-  } = {
-    [K in keyof T]: Extract<
-      Options[K],
-      { type: "filter"; path: string; value: unknown }
-    >;
-  },
-  ConnectionArgs extends {
-    [K in keyof T]: object;
-  } = {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    [K in keyof T]: any;
-  },
-  FilterArgs extends {
-    [K in keyof T]: object;
-  } = {
-    [K in keyof T]: Filters<SystemAndFilterArgs<FilterOptions, K, ConnectionOptions>>;
+  FM extends FiltMap = {
+    [K in keyof T]: Extract<Opts[K], { type: "filter"; path: string; value: unknown }>;
   },
 > = {
   [K in keyof T]: {
-    /**
-     * Find the first item in the collection.
-     *
-     * TIP: for cache tags, you should use a composite of the `ref` and the returned `_meta.path`
-     */
-    findFirst: <TT extends ConnectionArgs[K]>(args?: {
-      where?: FilterArgs[K];
-      // per instruction: ignore with type errors → any for now
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      with?: any;
+    findFirst: <
+      W extends ConnArgs<CM, FM, K & string>,
+      R extends ReverseConns<CM, FM, K & string>,
+    >(args?: {
+      where?: Filters<FM, K & string, CM>;
+      with?: W;
+      references?: R;
       ref?: string;
     }) => Promise<{
       org: string;
@@ -97,226 +329,31 @@ export type OrmConfig<
       name: string;
       commit: string;
       collection: T[K]["name"];
-      value: InferResultType<T[K]["schema"], TT> & {
-        slug: string;
-        path: string;
-      };
+      value: (InferRes<CollSchema<T[K]>, W> & EntrySystemFields) & ReverseRes<CM, T, K & string, R, FM>;
     }>;
-    /**
-     * Find the first item in the collection.
-     *
-     * TIP: for cache tags, you should use the `ref`
-     */
-    findMany: <TT extends ConnectionArgs[K]>(args?: {
-      where?: FilterArgs[K];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      with?: any;
-      ref?: string;
+
+    findMany: <
+      W extends ConnArgs<CM, FM, K & string>,
+      R extends ReverseConns<CM, FM, K & string>,
+    >(args?: {
+      where?: Filters<FM, K & string, CM>;
+      with?: W;
+      references?: R;
+      limit?: number;
+      offset?: number;
+      orderBy?: Record<string, "asc" | "desc">;
       variant?: string;
+      ref?: string;
     }) => Promise<{
       collection: T[K]["name"];
       commitOid: string;
-      items: (InferResultType<T[K]["schema"], TT> & {
-        slug: string;
-        path: string;
-      })[];
+      items: ((InferRes<CollSchema<T[K]>, W> & EntrySystemFields) & ReverseRes<CM, T, K & string, R, FM>)[];
     }>;
   };
 };
 
-export type FindManyResult<T extends Collection, TT extends object> = {
+export type FindManyResult<T extends AnyCollection, TT extends object> = {
   collection: T["name"];
   commitOid: string;
-  items: InferResultType<T["schema"], TT>[];
+  items: (InferRes<CollSchema<T>, TT> & EntrySystemFields)[];
 };
-
-// Helper to infer the output type from ResultType
-type InferResultType<T extends z.core.$ZodType, W extends object> = ResultType<
-  T,
-  W
-> extends z.core.$ZodType<infer O>
-  ? O
-  : never;
-
-type ResultType<
-  T extends z.core.$ZodType,
-  W extends object,
-  CurrentPath extends string = "",
-> = T extends z.ZodObject<infer Shape, infer Config>
-  ? z.ZodObject<
-      {
-        [K in keyof Shape]: ResultType<
-          Shape[K],
-          W,
-          `${MaybePrefix<CurrentPath>}${K & string}`
-        >;
-      },
-      Config
-    >
-  : T extends z.ZodCodec<
-        infer In extends z.ZodType,
-        infer U extends z.core.$ZodType
-      >
-    ? z.ZodCodec<In, ResultType<U, W, CurrentPath>>
-    : T extends z.ZodArray<infer U extends z.core.$ZodType>
-      ? z.ZodArray<ResultType<U, W, CurrentPath>>
-      : T extends z.ZodLazy<infer U extends z.core.$ZodType>
-        ? z.ZodLazy<ResultType<U, W, CurrentPath>>
-        : T extends z.ZodUnion<infer Options>
-          ? z.ZodUnion<{
-              [K in keyof Options]: ResultType<
-                Options[K] extends z.core.$ZodType ? Options[K] : never,
-                W,
-                WithDiscriminant<
-                  CurrentPath,
-                  Options[K] extends z.core.$ZodType ? Options[K] : never
-                >
-              >;
-            }>
-          : T extends z.ZodOptional<infer U extends z.core.$ZodType>
-            ? z.ZodOptional<ResultType<U, W, CurrentPath>>
-            : T extends z.ZodCustom<infer Output, infer Input>
-              ? CurrentPath extends keyof W
-                ? W[CurrentPath] extends false
-                  ? T
-                  : Input extends z.ZodType
-                    ? ResultType<
-                        Input,
-                        W[CurrentPath] extends { with: object }
-                          ? W[CurrentPath]["with"]
-                          : object
-                      >
-                    : never
-                : Output extends z.ZodType
-                  ? Output
-                  : T
-              : T;
-
-// type OptionsForCollection<T extends Collection> = Paths<T["schema"]>;
-type OptionsForCollection<T extends Collection> = Paths<
-  T["schema"]["def"]["out"]
->;
-
-type Paths<T extends z.ZodObject> = Prettify<
-  {
-    [Key in keyof T["shape"]]: FindTypes<T>;
-  }[keyof T["shape"]]
->;
-
-type Prettify<T> = {
-  [K in keyof T]: T[K];
-} & {};
-
-type MaybePrefix<P extends string> = P extends "" ? "" : `${P}.`;
-
-export type FindTypes<
-  T extends z.core.$ZodType,
-  CurrentPath extends string = "",
-> = T extends z.ZodObject<infer Shape>
-  ? {
-      [K in keyof Shape]: FindTypes<
-        Shape[K],
-        `${MaybePrefix<CurrentPath>}${K & string}`
-      >;
-    }[keyof Shape]
-  : T extends z.ZodArray<infer U extends z.core.$ZodType>
-    ? FindTypes<U, CurrentPath>
-    : T extends z.ZodLazy<infer U extends z.core.$ZodType>
-      ? FindTypes<U, CurrentPath>
-      : T extends z.ZodUnion<infer Options>
-        ? {
-            [K in keyof Options]: FindTypes<
-              Options[K] extends z.core.$ZodType ? Options[K] : never,
-              WithDiscriminant<
-                CurrentPath,
-                Options[K] extends z.core.$ZodType ? Options[K] : never
-              >
-            >;
-          }[number]
-        : T extends z.ZodOptional<infer U extends z.core.$ZodType>
-          ? FindTypes<U, CurrentPath>
-          : T extends z.ZodCustom<infer Output, infer Input>
-            ? Input extends { __internalFilter: infer FilterType }
-              ? { type: "filter"; value: FilterType; path: CurrentPath }
-              : Output extends {
-                    _collection: infer CollectionName;
-                  }
-                ? {
-                    type: "connection";
-                    value: CollectionName;
-                    path: CurrentPath;
-                  }
-                : never
-            : never;
-
-type WithDiscriminant<
-  P extends string,
-  T extends z.core.$ZodType,
-> = T extends z.ZodObject<infer Shape>
-  ? {
-      // FIXME this just grabs the first literal it finds, which is not always correct
-      [K in keyof Shape]: Shape[K] extends z.ZodLiteral<infer Literal>
-        ? `${MaybePrefix<P>}${Literal & string}`
-        : never;
-    }[keyof Shape]
-  : T extends z.ZodCustom<infer Output>
-    ? // When a connect is part of a union, treat is a discriminant
-      Output extends { _collection: infer CollectionName }
-      ? `${MaybePrefix<P>}${CollectionName & string}`
-      : never
-    : P;
-
-type Connections<
-  ConnectionOptions extends Record<
-    string,
-    {
-      type: "connection";
-      path: string;
-      value: keyof ConnectionOptions;
-    }
-  >,
-  K extends keyof ConnectionOptions,
-> = {
-  [C in ConnectionOptions[K] as C["path"]]?: C["value"] extends keyof ConnectionOptions
-    ? // I _think_ this will make it lazy-ish so we dont get recursive loops. Not sure
-      boolean | { readonly with?: Connections<ConnectionOptions, C["value"]> }
-    : never;
-};
-
-type StringOrFilter = string | StringFiltersObj;
-
-type SystemFilters = {
-  path?: StringOrFilter;
-  slug?: StringOrFilter;
-  ref?: StringOrFilter;
-  // also allow array form of eq/in etc still typed as object via StringFiltersObj
-};
-
-type SystemAndFilterArgs<
-  FilterOptions extends Record<string, { type: "filter"; path: string; value: unknown }>,
-  K extends keyof FilterOptions,
-  ConnectionOptions extends Record<string, { type: "connection"; path: string; value: keyof ConnectionOptions }>,
-> = SystemFilters &
-  {
-    [C in FilterOptions[K] as C["path"]]?: C["value"] extends string ? StringFiltersObj : never;
-  } & (K extends keyof ConnectionOptions
-    ? {
-        readonly [KK in ConnectionOptions[K] as KK["path"]]?: KK["value"] extends keyof ConnectionOptions
-          ? KK["value"] extends keyof FilterOptions
-            ? Filters<SystemAndFilterArgs<FilterOptions, KK["value"], ConnectionOptions>>
-            : never
-          : never;
-      }
-    : object);
-
-/**
- * TODO: this currenlty doesn't support OR operations across different fields.
- * I don't think there's any actual limitation to this except that it feels kind
- * of hard to type properly. It should be supported since I think Drizzle supports it.
- */
-type Filters<
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  F extends Record<string, any>,
-> = F;
-
-type StringFiltersObj = StringQueryType;

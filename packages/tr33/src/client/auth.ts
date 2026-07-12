@@ -1,4 +1,4 @@
-import type { Config, ConfigInput } from "@/client/config";
+import type { Config } from "@/client/config";
 
 export type Tr33AuthUser = {
   id?: string;
@@ -44,7 +44,7 @@ export type Tr33AuthAction =
 
 export type Tr33AuthorizeContext = {
   action: Tr33AuthAction;
-  config: Config<ConfigInput>;
+  config: Config;
   request: Request;
   user: Tr33AuthUser | null;
 };

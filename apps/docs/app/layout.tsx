@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Link from "next/link";
 import { Toolbar } from "tr33/nextjs/kit";
 import { tr33 } from "@/lib/tr33";
-import type { NavItem } from "@/lib/content";
 import "./globals.css";
-import Link from "next/link";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -26,11 +25,10 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Layout owns nav: single `nav.findMany({ with: { children } })` — no franken-index helper.
-  const navRes = (await tr33.nav.findMany({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    with: { children: true } as any,
-  })) as unknown as { items: NavItem[] };
+  // Single query: nav with resolved children. Fully typed, no casts.
+  const navRes = await tr33.nav.findMany({
+    with: { children: true },
+  });
   const nav = navRes.items[0] ?? null;
 
   return (

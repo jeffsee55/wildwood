@@ -1,4 +1,4 @@
-import type { ConfigInput } from "@/client/config";
+import type { AnyCollections, DefineConfigInput } from "@/client/config";
 
 export type ScenarioHelper = {
   createBranch(branchName: string): Promise<void>;
@@ -30,6 +30,6 @@ export type PlaygroundScenarioDefinition = {
     org: string;
     repo: string;
     localPath?: string;
-  }) => ConfigInput;
+  }) => DefineConfigInput<AnyCollections>;
   apply: (helper: ScenarioHelper) => Promise<void>;
 };

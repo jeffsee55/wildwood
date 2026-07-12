@@ -2,7 +2,7 @@ import type { Client as LibsqlClient } from "@libsql/client";
 import { calculateCommitOid } from "tr33-store";
 import { and, eq, type InferSelectModel, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
-import type { Config, ConfigInput } from "@/client/config";
+import type { Config } from "@/client/config";
 import { buildWorktreeQuery } from "@/sqlite/query-builder";
 import { relations } from "@/sqlite/relations";
 import * as schema from "@/sqlite/schema";
@@ -64,13 +64,13 @@ export type { Cache } from "@/types";
 
 export class LibsqlDatabase {
   client: LibsqlClient;
-  config: Config<ConfigInput>;
+  config: Config;
   drizzle: ReturnType<typeof createDrizzle>;
   schema = schema;
 
   constructor(args: {
     client: LibsqlClient;
-    config: Config<ConfigInput>;
+    config: Config;
   }) {
     this.client = args.client;
     this.drizzle = createDrizzle(this.client);

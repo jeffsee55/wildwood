@@ -1,5 +1,5 @@
 import z from "zod/v4";
-import type { Config, ConfigInput } from "@/client/config";
+import type { Config } from "@/client/config";
 import type { FindWorktreeEntriesArgs, WhereClause } from "@/types";
 
 // Query operators that can be applied to any field
@@ -446,7 +446,7 @@ function fromConnsSpecToDrizzle(
 
 export function buildWorktreeQuery(
   args: FindWorktreeEntriesArgs,
-  config: Config<ConfigInput>,
+  config: Config,
 ) {
   // 1) entry-level conditions (version, collection, variant, path + delegated filters)
   const namespaceConditions: unknown[] = [

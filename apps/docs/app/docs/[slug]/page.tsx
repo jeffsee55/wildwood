@@ -3,31 +3,37 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Markdown } from "tr33/react/markdown";
 import { tr33 } from "@/lib/tr33";
-import { docHrefFromUrl } from "@/lib/content";
-import type { DocPage } from "@/lib/content";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
-// Static params = all docs. No nav required — content defines existence.
+function resolveHref(href: string): string {
+  if (!href) return "#";
+  if (href.endsWith(".md")) return `/docs/${href.replace(/^\.\//, "").replace(/\.md$/, "")}`;
+  return href;
+}
+
+// Static params = all docs. No manual DocPage cast – inferred from schema + with.
 export async function generateStaticParams() {
-  const res = (await tr33.docs.findMany({})) as unknown as { items: DocPage[] };
+  const res = await tr33.docs.findMany({});
   return res.items.map((d) => ({ slug: d.slug }));
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
-  const res = (await tr33.docs.findFirst({
+  const res = await tr33.docs.findFirst({
     where: { slug },
-  })) as unknown as { value: DocPage | null };
+    with: { author: true },
+  });
   if (!res.value) return { title: "Not found | Tr33 Docs" };
   return { title: `${res.value.title} | Tr33 Docs`, description: res.value.description };
 }
 
 export default async function DocsPage({ params }: PageProps) {
   const { slug } = await params;
-  const res = (await tr33.docs.findFirst({
+  const res = await tr33.docs.findFirst({
     where: { slug },
-  })) as unknown as { value: DocPage | null };
+    with: { author: true },
+  });
   const doc = res.value;
   if (!doc) notFound();
 
@@ -45,11 +51,10 @@ export default async function DocsPage({ params }: PageProps) {
 
       <Markdown
         root={doc.body}
-        getLinkHref={docHrefFromUrl}
         components={{
           a: ({ href, children, ...rest }) => (
             <Link
-              href={href ?? "#"}
+              href={resolveHref(href ?? "#")}
               className="font-medium text-foreground underline decoration-black/20 underline-offset-4 hover:decoration-black"
               {...rest}
             >

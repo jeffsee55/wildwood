@@ -6,7 +6,7 @@ import {
   type TreeEntries,
   Trees,
 } from "tr33-store";
-import type { Config, ConfigInput } from "@/client/config";
+import type { Config } from "@/client/config";
 import { type PrInput, type Remote, resolvePrField } from "@/git/remote";
 import { isMissingSchemaError, type LibsqlDatabase } from "@/sqlite/database";
 import {
@@ -36,14 +36,14 @@ function gitAddTimer(ref: string, onProgress?: (message: string) => void) {
 }
 
 export class Git implements Gitable {
-  config: Config<ConfigInput>;
+  config: Config;
   db: LibsqlDatabase;
   remote: Remote;
   blobStore = new Map<string, string>();
   trees: Trees;
 
   constructor(args: {
-    config: Config<ConfigInput>;
+    config: Config;
     remote: Remote;
     db: LibsqlDatabase;
   }) {
@@ -368,7 +368,7 @@ export class Git implements Gitable {
   ): Promise<{
     collection: string;
     commitOid: string;
-    items: ReturnType<Config<ConfigInput>["buildEntry"]>[];
+    items: ReturnType<Config["buildEntry"]>[];
   }> {
     const { where, ...rest } = args;
     try {
@@ -455,7 +455,7 @@ export class Git implements Gitable {
   ): Promise<{
     collection: string;
     commitOid: string;
-    value: ReturnType<Config<ConfigInput>["buildEntry"]> | null;
+    value: ReturnType<Config["buildEntry"]> | null;
     org: string;
     repo: string;
     ref: string;

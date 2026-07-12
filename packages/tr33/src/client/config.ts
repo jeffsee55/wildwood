@@ -80,12 +80,29 @@ export function deriveSlug(
   return p;
 }
 
+/**
+ * Runtime validation still uses a loose schema. The TS type for collections
+ * is intentionally broad (`schema: $ZodType`) so that `defineConfig` can
+ * capture the literal schema shape via `T extends ConfigInput`. If we typed
+ * `Collection["schema"]` as `ZodCodec<ZodString, ZodObject>` (or via
+ * `z.infer<typeof collectionSchema>`), we erase the inner frontmatter shape and
+ * lose `FindTypes` information for `with`/`where` join inference, especially
+ * after `dist` `.d.ts` emit (where `_zod.def.shape` widens to `LooseShape`).
+ */
 export const collectionSchema = z.object({
   name: z.string(),
   match: z.string(),
   basePath: z.string().optional(),
-  schema: z.custom<z.ZodCodec<z.ZodString, z.ZodObject>>(),
+  schema: z.custom<z.core.$ZodType>(),
 });
+
+// TS-level collection – schema is any Zod type so literals are preserved via `T`.
+export type Collection = {
+  name: string;
+  match: string;
+  basePath?: string;
+  schema: z.core.$ZodType;
+};
 
 /**
  * Variants allow for multiple reprentations of your content
@@ -149,16 +166,18 @@ export const configSchema = z.codec(configInputSchema, configOutputSchema, {
   },
 });
 
-export class Config<C extends ConfigInput> {
+export class Config<Colls extends AnyCollections = AnyCollections> {
   configObject: ConfigObject;
-  configInput: C;
+  configInput: DefineConfigInput<Colls>;
   /** Auto-detected git root when `localPath` was omitted and we're in dev/build. */
   private _autoLocalPath: string | null | undefined = undefined;
 
-  constructor(config: C) {
-    this.configInput = config;
-    const parsed = configSchema.decode(config);
-    this.configObject = parsed;
+  constructor(config: DefineConfigInput<Colls>) {
+    // store as generic to preserve literal shapes
+    this.configInput = config as unknown as DefineConfigInput<Colls>;
+    // runtime validation: safe because schema is loose
+    const parsed = configSchema.decode(config as unknown as z.infer<typeof configInputSchema>);
+    this.configObject = parsed as unknown as ConfigObject;
   }
 
   get org() {
@@ -534,9 +553,17 @@ export class Config<C extends ConfigInput> {
     }
     const { name, schema } = maybeCollection;
 
-    const result = schema.schema.safeDecode(content);
+    // `schema.schema` is `z.core.$ZodType` after our shape-preserving refactor.
+    // Runtime it is still a Zod schema (codec), so we call via `any` and fall back
+    // from v4 `safeDecode` to `safeParse`.
+    const _codec: any = schema.schema as any;
+    const result = _codec.safeDecode
+      ? _codec.safeDecode(content)
+      : _codec.safeParse
+        ? _codec.safeParse(content)
+        : { success: false, error: new Error("no parse") };
 
-    if (result.error) {
+    if (result.error || !result.success) {
       return { indexed: false };
     }
 
@@ -744,7 +771,13 @@ export class Config<C extends ConfigInput> {
       _meta.resolved = true;
     }
 
-    const result = schema.schema.decode(entry.blob.content);
+    const _codec2: any = schema.schema as any;
+    const decoded = _codec2.decode
+      ? _codec2.decode(entry.blob.content)
+      : _codec2.parse
+        ? _codec2.parse(entry.blob.content)
+        : JSON.parse(entry.blob.content);
+    const result = decoded;
     zodVisitor({
       schema: schema.schema,
       value: result,
@@ -773,9 +806,7 @@ export class Config<C extends ConfigInput> {
     if (entry.fromConnections && entry.fromConnections.length > 0) {
       for (const conn of entry.fromConnections) {
         if (conn.fromEntry) {
-          let nestedEntry: Awaited<
-            ReturnType<Config<ConfigInput>["buildEntry"]>
-          >;
+          let nestedEntry: Awaited<ReturnType<Config["buildEntry"]>>;
           try {
             nestedEntry = this.buildEntry(conn.fromEntry, true);
           } catch (err) {
@@ -825,11 +856,59 @@ export class Config<C extends ConfigInput> {
   }
 }
 
-export const defineConfig = <T extends ConfigInput>(config: T) => {
-  // const parsed = configSchema.decode(config);
-  return new Config<T>(config);
+// ---------------------------------------------------------------------------
+// Generic, shape-preserving config input. `Colls` captures literal collection
+// types (including their `schema` generic) so that `FindTypes` can see
+// `z.lazy(() => z.connect(...)).optional()` etc. Previously `ConfigInput`
+// was `z.infer<typeof configInputSchema>` where `collections` was
+// `Record<string, Collection>` and `Collection["schema"]` was
+// `ZodCodec<ZodString, ZodObject>` – that erased inner shape and caused
+// `with:{author:true}` to yield `never` after `.d.ts` emit (widened to
+// `LooseShape`). Now we keep `Colls` as the source of truth for types; runtime
+// validation still goes through `configInputSchema` inside `Config` ctor.
+// ---------------------------------------------------------------------------
+
+export type AnyCollection = {
+  name: string;
+  match: string;
+  basePath?: string;
+  schema: z.core.$ZodType;
 };
 
-export type ConfigInput = z.infer<typeof configInputSchema>;
-export type ConfigObject = z.infer<typeof configSchema>;
-export type Collection = z.infer<typeof collectionSchema>;
+export type AnyCollections = Record<string, AnyCollection>;
+
+export type DefineConfigInput<Colls extends AnyCollections = AnyCollections> = {
+  org: string;
+  repo: string;
+  ref: string;
+  localPath?: string;
+  version?: string;
+  collections: Colls;
+  variants?: Record<string, z.infer<typeof variantsConfigSchema>>;
+};
+
+// For backwards compat, `ConfigInput` stays as the erased runtime type,
+// but `defineConfig` is now generic over `Colls` preserving shapes.
+export type ConfigInput = {
+  org: string;
+  repo: string;
+  ref: string;
+  localPath?: string;
+  version?: string;
+  collections: AnyCollections;
+  variants?: Record<string, z.infer<typeof variantsConfigSchema>>;
+};
+
+export type ConfigObject = {
+  org: string;
+  repo: string;
+  ref: string;
+  localPath?: string;
+  version: string;
+  variants?: Record<string, z.infer<typeof variantsConfigSchema>>;
+  collections: AnyCollections;
+};
+
+export const defineConfig = <const Colls extends AnyCollections>(config: DefineConfigInput<Colls>) => {
+  return new Config<Colls>(config as unknown as ConfigInput & { collections: Colls });
+};

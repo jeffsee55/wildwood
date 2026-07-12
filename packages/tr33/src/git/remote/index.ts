@@ -1,4 +1,4 @@
-import type { Config, ConfigInput } from "@/client/config";
+import type { Config } from "@/client/config";
 import type { Tr33AuthConfig } from "@/client/auth";
 import type { Commit } from "@/types";
 
@@ -59,9 +59,9 @@ export function resolvePrField<T>(value: PrFieldValue<T>, prev: T): T {
 }
 
 export abstract class Remote {
-  config: Config<ConfigInput>;
+  config: Config;
   auth?: Tr33AuthConfig;
-  constructor(args: { auth?: Tr33AuthConfig; config: Config<ConfigInput> }) {
+  constructor(args: { auth?: Tr33AuthConfig; config: Config }) {
     this.config = args.config;
     this.auth = args.auth;
   }

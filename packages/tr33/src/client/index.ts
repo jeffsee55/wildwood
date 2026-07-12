@@ -1,6 +1,6 @@
 import type { Client as LibsqlClient } from "@libsql/client";
 import type { Tr33AuthConfig } from "@/client/auth";
-import type { Config, ConfigInput } from "@/client/config";
+import type { AnyCollections, Config } from "@/client/config";
 import type { OrmConfig } from "@/client/types";
 import { Git } from "@/git/git";
 import { GitHubRemote } from "@/git/remote/github";
@@ -9,9 +9,16 @@ import { Logger } from "@/git/util/logger";
 import { LibsqlDatabase } from "@/sqlite/database";
 import type { FindWorktreeEntriesArgs } from "@/types";
 
-export const createClient = <C extends Config<ConfigInput>>(args: {
+/**
+ * `createClient` now captures `Colls` literally from `Config<Colls>` so that
+ * `FindTypes` can infer connections / filters from `z.lazy(() => z.connect(...)).optional()`
+ * without being erased by `dist` declaration emit. Previously `C extends Config<ConfigInput>`
+ * where `ConfigInput["collections"]` was `Record<string, Collection>` with
+ * `Collection["schema"] = ZodCodec<ZodString, ZodObject>` lost inner shape → `with` became `never`.
+ */
+export const createClient = <Colls extends AnyCollections>(args: {
   auth?: Tr33AuthConfig;
-  config: C;
+  config: Config<Colls>;
   database: LibsqlClient;
 }) => {
   const { auth, config, database } = args;
@@ -20,27 +27,28 @@ export const createClient = <C extends Config<ConfigInput>>(args: {
       "createClient requires a LibSQL database client. Pass createClient({ config, database }).",
     );
   }
-  const db = new LibsqlDatabase({ client: database, config });
+  const db = new LibsqlDatabase({ client: database, config: config as unknown as Config });
   // Prefer `resolvedLocalPath` (explicit `localPath` or auto-detected git root in dev)
-  // so that zero-config dev just works without the host wiring repo-root discovery.
   const useNative =
     typeof (config as { resolvedLocalPath?: string | undefined }).resolvedLocalPath === "string"
       ? Boolean((config as { resolvedLocalPath?: string | undefined }).resolvedLocalPath)
       : Boolean((config as { wantsLocal?: boolean }).wantsLocal ?? config.localPath);
   const remote = useNative
-    ? new NativeRemote({ auth, config })
-    : new GitHubRemote({ auth, config });
-  // const git = new Git({ config, remote, db });
-  const git = new Git({ config, remote, db });
-  const collections = {} as OrmConfig<{
-    [K in keyof C["configInput"]["collections"] as C["configInput"]["collections"][K]["name"]]: C["configInput"]["collections"][K];
-  }>;
+    ? new NativeRemote({ auth, config: config as unknown as Config })
+    : new GitHubRemote({ auth, config: config as unknown as Config });
+  const git = new Git({ config: config as unknown as Config, remote, db });
+
+  type Mapped = {
+    [K in keyof Colls as Colls[K]["name"] & string]: Colls[K];
+  };
+
+  const collections = {} as OrmConfig<Mapped>;
   for (const collection of Object.values(config.collections)) {
     (collections as Record<string, unknown>)[collection.name] = {
-      findMany: (args: Omit<FindWorktreeEntriesArgs, "collection">) =>
-        git.findMany({ ...args, collection: collection.name }),
-      findFirst: (args: Omit<FindWorktreeEntriesArgs, "collection"> = {}) =>
-        git.findFirst({ ...(args as FindWorktreeEntriesArgs), collection: collection.name }),
+      findMany: (a: Omit<FindWorktreeEntriesArgs, "collection">) =>
+        git.findMany({ ...a, collection: collection.name }),
+      findFirst: (a: Omit<FindWorktreeEntriesArgs, "collection"> = {}) =>
+        git.findFirst({ ...(a as FindWorktreeEntriesArgs), collection: collection.name }),
     };
   }
   return {
@@ -61,7 +69,7 @@ export const createClient = <C extends Config<ConfigInput>>(args: {
  */
 export type Tr33Client = {
   _: {
-    config: Config<ConfigInput>;
+    config: Config;
     auth?: Tr33AuthConfig;
     git: Git;
     logger: Logger;
