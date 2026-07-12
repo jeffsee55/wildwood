@@ -43,7 +43,11 @@ type MetaSchema<CollectionName extends string> = {
     oid: z.ZodString;
     path: z.ZodString;
     canonicalPath: z.ZodString;
+    slug: z.ZodString;
   }>;
+  // First-class slug/path: `content/docs/path-to-file.md` → slug=`path-to-file`
+  slug: z.ZodString;
+  path: z.ZodString;
 };
 
 type UnresolvedConnectionMetaSchema<CollectionName extends string> = {
@@ -63,7 +67,10 @@ type ResolvedConnectionMetaSchema<CollectionName extends string> = {
     oid: z.ZodString;
     path: z.ZodString;
     canonicalPath: z.ZodString;
+    slug: z.ZodString;
   }>;
+  slug: z.ZodString;
+  path: z.ZodString;
 };
 
 export const collection = <T extends z.ZodObject, const Name extends string>(
@@ -172,4 +179,6 @@ export type CollectionParams<
   name: Name;
   schema: T;
   match: string;
+  /** Optional base path for slug derivation. Defaults to fixed prefix of `match`. */
+  basePath?: string;
 };

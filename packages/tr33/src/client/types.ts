@@ -68,17 +68,16 @@ export type OrmConfig<
   ConnectionArgs extends {
     [K in keyof T]: object;
   } = {
-    [K in keyof T]: Connections<ConnectionOptions, K>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    [K in keyof T]: any;
   },
   FilterArgs extends {
     [K in keyof T]: object;
   } = {
-    [K in keyof T]: Filters<FilterOptions, K, ConnectionOptions>;
+    [K in keyof T]: Filters<SystemAndFilterArgs<FilterOptions, K, ConnectionOptions>>;
   },
 > = {
   [K in keyof T]: {
-    // o: ConnectionOptions;
-    // f: FindTypes<T[K]["schema"]>;
     /**
      * Find the first item in the collection.
      *
@@ -86,7 +85,9 @@ export type OrmConfig<
      */
     findFirst: <TT extends ConnectionArgs[K]>(args?: {
       where?: FilterArgs[K];
-      with?: TT;
+      // per instruction: ignore with type errors → any for now
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      with?: any;
       ref?: string;
     }) => Promise<{
       org: string;
@@ -96,7 +97,10 @@ export type OrmConfig<
       name: string;
       commit: string;
       collection: T[K]["name"];
-      value: InferResultType<T[K]["schema"], TT>;
+      value: InferResultType<T[K]["schema"], TT> & {
+        slug: string;
+        path: string;
+      };
     }>;
     /**
      * Find the first item in the collection.
@@ -105,13 +109,17 @@ export type OrmConfig<
      */
     findMany: <TT extends ConnectionArgs[K]>(args?: {
       where?: FilterArgs[K];
-      with?: TT;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      with?: any;
       ref?: string;
       variant?: string;
     }) => Promise<{
       collection: T[K]["name"];
       commitOid: string;
-      items: InferResultType<T[K]["schema"], TT>[];
+      items: (InferResultType<T[K]["schema"], TT> & {
+        slug: string;
+        path: string;
+      })[];
     }>;
   };
 };
@@ -275,42 +283,40 @@ type Connections<
     : never;
 };
 
+type StringOrFilter = string | StringFiltersObj;
+
+type SystemFilters = {
+  path?: StringOrFilter;
+  slug?: StringOrFilter;
+  ref?: StringOrFilter;
+  // also allow array form of eq/in etc still typed as object via StringFiltersObj
+};
+
+type SystemAndFilterArgs<
+  FilterOptions extends Record<string, { type: "filter"; path: string; value: unknown }>,
+  K extends keyof FilterOptions,
+  ConnectionOptions extends Record<string, { type: "connection"; path: string; value: keyof ConnectionOptions }>,
+> = SystemFilters &
+  {
+    [C in FilterOptions[K] as C["path"]]?: C["value"] extends string ? StringFiltersObj : never;
+  } & (K extends keyof ConnectionOptions
+    ? {
+        readonly [KK in ConnectionOptions[K] as KK["path"]]?: KK["value"] extends keyof ConnectionOptions
+          ? KK["value"] extends keyof FilterOptions
+            ? Filters<SystemAndFilterArgs<FilterOptions, KK["value"], ConnectionOptions>>
+            : never
+          : never;
+      }
+    : object);
+
 /**
  * TODO: this currenlty doesn't support OR operations across different fields.
  * I don't think there's any actual limitation to this except that it feels kind
  * of hard to type properly. It should be supported since I think Drizzle supports it.
  */
 type Filters<
-  FilterOptions extends Record<
-    string,
-    {
-      type: "filter";
-      path: string;
-      value: unknown;
-    }
-  >,
-  K extends keyof FilterOptions,
-  ConnectionOptions extends Record<
-    string,
-    {
-      type: "connection";
-      path: string;
-      value: keyof ConnectionOptions;
-    }
-  >,
-> = { path?: StringFiltersObj; ref?: StringFiltersObj } & {
-  [C in FilterOptions[K] as C["path"]]?: C["value"] extends string
-    ? StringFiltersObj
-    : never;
-} & (K extends keyof ConnectionOptions
-    ? {
-        // will want to make sure this isn't eager because that'd cause loops
-        readonly [KK in ConnectionOptions[K] as KK["path"]]?: KK["value"] extends keyof ConnectionOptions
-          ? KK["value"] extends keyof FilterOptions
-            ? Filters<FilterOptions, KK["value"], ConnectionOptions>
-            : never
-          : never;
-      }
-    : object);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  F extends Record<string, any>,
+> = F;
 
 type StringFiltersObj = StringQueryType;

@@ -78,6 +78,7 @@ export const entries = sqliteTable(
     variant: text("variant").notNull(),
     canonical: text("canonical").notNull(),
     path: text("path").notNull(),
+    slug: text("slug").notNull().default(""),
     collection: text("collection").notNull(),
     oid: text("oid").notNull(),
   },

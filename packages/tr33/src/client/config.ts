@@ -1,12 +1,89 @@
-import { dirname, join, normalize } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { minimatch } from "minimatch";
 import { z } from "zod/v4";
 import type { Cache, Entry, Namespace } from "@/types";
 import { zodVisitor } from "@/zod/visitor";
 
+/**
+ * Walk up from `start` until we find a `.git` marker. Returns the git root
+ * or null. Used when `localPath` is omitted for zero-config dev.
+ */
+export function resolveLocalGitRoot(start = process.cwd()): string | null {
+  const override =
+    process.env.TR33_DOCS_REPO_PATH?.trim() ||
+    process.env.TR33_PLAYGROUND_LOCAL_ROOT?.trim() ||
+    "";
+  if (override) {
+    const abs = isAbsolute(override) ? normalize(override) : resolve(start, override);
+    return existsSync(abs) ? abs : null;
+  }
+
+  let dir = start;
+  for (let depth = 0; depth < 12; depth++) {
+    try {
+      if (existsSync(join(dir, ".git"))) return dir;
+    } catch {
+      // ignore
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/** Normalize a user-supplied `localPath`: relative -> cwd-absolute, or pass through absolute. */
+export function normalizeLocalPath(p: string, cwd = process.cwd()): string {
+  const t = p.trim();
+  if (!t) return t;
+  return isAbsolute(t) ? normalize(t) : resolve(cwd, t);
+}
+
+function shouldAutoUseLocal(): boolean {
+  // In production (Vercel etc) there is no checkout — don't auto-select native.
+  if (process.env.NODE_ENV === "production" && process.env.NEXT_PHASE !== "phase-production-build") {
+    return false;
+  }
+  if (process.env.TR33_DOCS_SOURCE === "github") return false;
+  if (process.env.TR33_DOCS_SOURCE === "local") return true;
+  // Dev / build prefetch: auto-use local if we can find a git root.
+  return true;
+}
+
+export function fixedPrefixFromMatch(match: string): string {
+  const normalized = match.replace(/\\/g, "/");
+  const segs = normalized.split("/");
+  const out: string[] = [];
+  for (const s of segs) {
+    if (/[*?[\]{}()!+]/.test(s)) break;
+    if (!s) continue;
+    out.push(s);
+  }
+  return out.join("/");
+}
+
+export function deriveSlug(
+  filePath: string,
+  opts: { basePath?: string; match: string },
+): string {
+  let p = filePath.replace(/\\/g, "/").replace(/^\.?\//, "").replace(/^\/+/, "");
+  const base = (opts.basePath != null ? opts.basePath : fixedPrefixFromMatch(opts.match))
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "")
+    .replace(/^\.?\//, "");
+  if (base && (p === base || p.startsWith(base + "/"))) {
+    p = p === base ? "" : p.slice(base.length + 1);
+  }
+  p = p.replace(/\.[^/]+$/, "");
+  p = p === "index" ? "" : p.replace(/\/index$/, "");
+  return p;
+}
+
 export const collectionSchema = z.object({
   name: z.string(),
   match: z.string(),
+  basePath: z.string().optional(),
   schema: z.custom<z.ZodCodec<z.ZodString, z.ZodObject>>(),
 });
 
@@ -75,6 +152,9 @@ export const configSchema = z.codec(configInputSchema, configOutputSchema, {
 export class Config<C extends ConfigInput> {
   configObject: ConfigObject;
   configInput: C;
+  /** Auto-detected git root when `localPath` was omitted and we're in dev/build. */
+  private _autoLocalPath: string | null | undefined = undefined;
+
   constructor(config: C) {
     this.configInput = config;
     const parsed = configSchema.decode(config);
@@ -90,9 +170,37 @@ export class Config<C extends ConfigInput> {
   get ref() {
     return this.configObject.ref;
   }
-  get localPath() {
+  /** Explicit `localPath` from `defineConfig` (may be undefined). */
+  get localPath(): string | undefined {
     return this.configObject.localPath;
   }
+
+  /**
+   * Resolved local git root:
+   * - explicit `localPath` wins,
+   * - else in dev/build prefetch, auto-detect by walking up from cwd to `.git`,
+   * - else undefined (=> GitHubRemote / prod DB-only).
+   *
+   * This is what `createClient` and `NativeRemote` should use for decisions,
+   * not the raw `localPath`.
+   */
+  get resolvedLocalPath(): string | undefined {
+    if (this.configObject.localPath) return this.configObject.localPath;
+    if (this._autoLocalPath !== undefined) return this._autoLocalPath ?? undefined;
+    if (!shouldAutoUseLocal()) {
+      this._autoLocalPath = null;
+      return undefined;
+    }
+    const found = resolveLocalGitRoot(process.cwd());
+    this._autoLocalPath = found;
+    return found ?? undefined;
+  }
+
+  /** Whether this config wants a native git checkout (explicit or auto-detected). */
+  get wantsLocal(): boolean {
+    return this.resolvedLocalPath !== undefined;
+  }
+
   get version() {
     return this.configObject.version;
   }
@@ -186,6 +294,22 @@ export class Config<C extends ConfigInput> {
     } catch {
       return null;
     }
+  }
+
+  slugForPath(filePath: string, collectionName?: string): string {
+    const name = collectionName ?? this.getCollectionForPath(filePath);
+    let match = "**/*";
+    let basePath: string | undefined;
+    if (name) {
+      const col = this.configObject.collections[name] as
+        | { match: string; basePath?: string }
+        | undefined;
+      if (col) {
+        match = col.match;
+        basePath = col.basePath;
+      }
+    }
+    return deriveSlug(filePath, { basePath, match });
   }
 
   /**
@@ -433,6 +557,11 @@ export class Config<C extends ConfigInput> {
       });
     };
 
+    const slug = deriveSlug(filePath, {
+      basePath: (schema as unknown as { basePath?: string }).basePath,
+      match: schema.match,
+    });
+
     const addEntry = (
       variant: string,
       canonical: string,
@@ -443,6 +572,7 @@ export class Config<C extends ConfigInput> {
         path: filePath,
         variant,
         canonical,
+        slug,
         collection,
         oid,
       });
@@ -563,37 +693,21 @@ export class Config<C extends ConfigInput> {
       }
 
       if (Object.keys(matchedVariants).length > 0) {
-        // Build the exact variant combo from all matched dimensions,
-        // filling in defaults for unmatched dimensions.
+        // File is a variant file: build exact combo from matched + defaults.
         const comboParts: string[] = [];
         for (const [variantKey, variantConfig] of Object.entries(variants)) {
-          const matched = matchedVariants[variantKey];
-          const option = matched ?? variantConfig.default;
-          comboParts.push(`${variantKey}:${option}`);
+          comboParts.push(`${variantKey}:${matchedVariants[variantKey] ?? variantConfig.default}`);
         }
         const exactCombo = comboParts.join("|");
         processVariant(exactCombo, canonical);
         addEntry(exactCombo, canonical, name);
       } else {
-        // EDIT: I dont think we can do this here, this only works when
-        // the more specific variant comes after the default variant during write
-        // cache. It doesn't even check the existing data either. We should only write
-        // 1 entry per index. And then during write cache, once we've written to the db,
-        // we can query siblings and make sure all variant combos are present.
-
-        // File doesn't match any variant pattern (default file)
-        // Write for ALL variant combos with canonical = path
-        // These are fallbacks and WON'T override existing variant matches
+        // Default file: one entry for default combo. Sibling copy in writeCache fills the rest.
         const defaultCombo = this.defaultVariant();
         if (defaultCombo) {
           processVariant(defaultCombo, filePath);
           addEntry(defaultCombo, filePath, name);
         }
-        // for (const combo of allVariantCombos) {
-        // 	console.log("combo", combo, path);
-        // 	processVariant(combo, path);
-        // 	addEntry(combo, path, name);
-        // }
       }
     } else {
       // No variants defined, use "__" as the variant
@@ -615,11 +729,13 @@ export class Config<C extends ConfigInput> {
     }
     const oid = entry.oid;
     const path = entry.path;
+    const slug = entry.slug;
     const _meta = {
       raw: entry.blob.content,
       oid,
       path,
       canonicalPath: entry.canonical,
+      slug,
     };
     if (isConnection) {
       // @ts-expect-error
@@ -686,7 +802,26 @@ export class Config<C extends ConfigInput> {
       }
     }
 
-    return { ...result, _meta, _collection: collection };
+    // First-class slug/path (not just _meta). Content front-matter wins if it defines slug/path.
+    const resultRec = result as Record<string, unknown>;
+    const withSystemFields: Record<string, unknown> = {
+      ...result,
+      _meta,
+      _collection: collection,
+    };
+    if (!Object.prototype.hasOwnProperty.call(resultRec, "slug")) {
+      withSystemFields["slug"] = slug;
+    }
+    if (!Object.prototype.hasOwnProperty.call(resultRec, "path")) {
+      withSystemFields["path"] = path;
+    }
+
+    return withSystemFields as typeof result & {
+      _meta: typeof _meta;
+      _collection: typeof collection;
+      slug: string;
+      path: string;
+    };
   }
 }
 

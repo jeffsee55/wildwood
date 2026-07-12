@@ -19,29 +19,18 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { generateBranchName } from "@/lib/generate-branch-name";
+import {
+  TR33_ACTIVE_REF_STORAGE_KEY,
+  TR33_EXTENSION_TO_HOST_REF_CHANNEL,
+  TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL,
+  TR33_KIT_BRANCH_CHANGED_MESSAGE,
+  TR33_KIT_CLOSE_MESSAGE,
+  TR33_KIT_HOST_REF_CHANNEL,
+  TR33_KIT_WORKSPACE_CHANGED_MESSAGE,
+  generateBranchName,
+} from "@tr33/shared";
 import { useShadowContainer } from "@/lib/shadow-root";
 import { cn } from "@/lib/utils";
-
-/** Must match `tr33.closeEmbeddedEditor` in packages/extension (postMessage to top). */
-const TR33_KIT_CLOSE_MESSAGE = "tr33-kit-close-editor";
-/** Must match `notifyKitParentBranchChanged` in packages/extension. */
-const TR33_KIT_BRANCH_CHANGED_MESSAGE = "tr33-kit-branch-changed";
-/** Must match `notifyKitParentWorkspaceChanged` in packages/extension. */
-const TR33_KIT_WORKSPACE_CHANGED_MESSAGE = "tr33-kit-workspace-changed";
-/**
- * Same-origin BroadcastChannel name — must match `subscribeHostRef` in `tr33-vscode` (`host-bridge.ts`).
- */
-const TR33_KIT_HOST_REF_CHANNEL = "tr33-kit-host-ref";
-/**
- * Extension host → Kit (branch / ref sync). Must match `TR33_EXTENSION_TO_HOST_REF_CHANNEL` in `host-bridge.ts`.
- */
-const TR33_EXTENSION_TO_HOST_REF_CHANNEL = "tr33-extension-to-host";
-/** Must match `TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL` in `host-bridge.ts`. */
-const TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL =
-  "tr33-extension-workspace-changed";
-/** Same-origin localStorage key — must match `host-bridge.ts` / `active-ref-storage.ts`. */
-const TR33_ACTIVE_REF_STORAGE_KEY = "tr33.activeRef";
 
 const persistActiveRefToStorage = (ref: string): void => {
   try {
@@ -88,14 +77,48 @@ function normalizeApiBase(base: string): string {
 
 type KitFabMenuProps = {
   apiBase?: string;
-  /** Pinned VS Code web commit — iframe loads `/vscode/editor/{commit}` directly. */
   vscodeCommit?: string;
-  /** Default ref when cookie is absent */
   configRef?: string;
-  /** Active ref from cookie (server) */
   activeRef?: string | null;
+  /** Always pass — library shows/throws based on NODE_ENV. */
   auth?: KitAuthConfig;
 };
+
+function isProd(): boolean {
+  try {
+    return typeof process !== "undefined" && process.env.NODE_ENV === "production";
+  } catch {
+    return false;
+  }
+}
+
+function authEnabled(auth: KitAuthConfig | undefined): boolean {
+  if (!auth) return false;
+  const enforce = auth.enforceInProduction ?? isProd();
+  if (auth.enabled != null) return auth.enabled;
+
+  // Dev: tolerant — show if we have anything, hide if completely empty.
+  const hasAny =
+    !!auth.githubApp?.appSlug?.trim() ||
+    !!auth.githubApp?.name?.trim() ||
+    !!auth.userEmail ||
+    !!auth.githubOAuthEnabled;
+  if (!enforce) return hasAny;
+
+  // Prod: require at least appSlug to consider configured.
+  // Host has already passed optimistically; if caller forgets enforce flag,
+  // we enforce in prod by default.
+  const ok = !!auth.githubApp?.appSlug?.trim();
+  if (!ok && enforce) {
+    // Surface immediately — matches ask: if NODE_ENV=production, must have auth.
+    // Throwing here means layout's `<Toolbar auth={...}>` blows up build/runtime
+    // with a clear message rather than silently running unauthed in prod.
+    throw new Error(
+      "[tr33] Kit auth: GITHUB_APP_SLUG missing. Set GITHUB_APP_SLUG (and GITHUB_APP_ID) in production — hosts should always pass { githubApp: { appSlug, name } }.",
+    );
+  }
+  return ok;
+}
 
 type EditorOpenState =
   | { kind: "idle" }
@@ -812,7 +835,7 @@ export function KitFabMenu({
                   Exit preview (live / cached)
                 </DropdownMenuItem>
               ) : null}
-              {auth?.enabled ? (
+              {authEnabled(auth) ? (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuSub>

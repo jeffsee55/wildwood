@@ -12,7 +12,7 @@ describe("binary and untracked files", () => {
   let t: ReturnType<typeof createTestSetup>;
 
   beforeEach(async () => {
-    t = createTestSetup({ useMemoryDb: false });
+    t = createTestSetup({ useMemoryDb: true });
     await t.db.reset();
     await t.helper.resetRepo();
     await t.helper.addFilesAndCommit(

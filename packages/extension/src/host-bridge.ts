@@ -1,21 +1,24 @@
 /**
- * Same-origin channel from the embedding Kit page → extension host. Must match
- * {@link TR33_KIT_HOST_REF_CHANNEL} in `packages/kit` (`kit-fab-menu.tsx`).
+ * Re-exports from @tr33/shared so extension + kit stay in sync.
+ * Do not duplicate channel names / storage keys.
  */
-export const TR33_KIT_HOST_REF_CHANNEL = "tr33-kit-host-ref";
+export {
+  TR33_ACTIVE_REF_STORAGE_KEY,
+  TR33_EXTENSION_TO_HOST_REF_CHANNEL,
+  TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL,
+  TR33_KIT_HOST_REF_CHANNEL,
+  generateBranchName,
+} from "@tr33/shared";
 
-/**
- * Same-origin `localStorage` key for the active git ref. Must match
- * `TR33_ACTIVE_REF_STORAGE_KEY` in `packages/tr33/src/nextjs/active-ref-storage.ts`.
- */
-export const TR33_ACTIVE_REF_STORAGE_KEY = "tr33.activeRef";
+import {
+  TR33_ACTIVE_REF_STORAGE_KEY as ACTIVE_REF_KEY,
+  TR33_KIT_HOST_REF_CHANNEL as KIT_REF_CHANNEL,
+} from "@tr33/shared";
 
 export function readActiveRefFromStorage(): string | undefined {
-  if (typeof localStorage === "undefined") {
-    return undefined;
-  }
+  if (typeof localStorage === "undefined") return undefined;
   try {
-    const ref = localStorage.getItem(TR33_ACTIVE_REF_STORAGE_KEY)?.trim();
+    const ref = localStorage.getItem(ACTIVE_REF_KEY)?.trim();
     return ref && ref.length > 0 ? ref : undefined;
   } catch {
     return undefined;
@@ -23,48 +26,22 @@ export function readActiveRefFromStorage(): string | undefined {
 }
 
 export function writeActiveRefToStorage(ref: string): void {
-  if (typeof localStorage === "undefined") {
-    return;
-  }
+  if (typeof localStorage === "undefined") return;
   try {
-    localStorage.setItem(TR33_ACTIVE_REF_STORAGE_KEY, ref);
+    localStorage.setItem(ACTIVE_REF_KEY, ref);
   } catch {
     /* private mode / blocked storage */
   }
 }
 
-/**
- * Same-origin channel from **extension host → Kit page** when the active ref changes
- * (e.g. branch switch). Distinct from {@link TR33_KIT_HOST_REF_CHANNEL} so messages do not
- * echo into {@link subscribeHostRef}. Must match `packages/kit` (`kit-fab-menu.tsx`).
- */
-export const TR33_EXTENSION_TO_HOST_REF_CHANNEL = "tr33-extension-to-host";
-
-/**
- * Extension host → Kit: worktree content changed (save / add / commit / discard) so the host
- * can soft-refresh RSC (`router.refresh()`). Must match `packages/kit`.
- */
-export const TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL =
-  "tr33-extension-workspace-changed";
-
 export type HostRefMessage = { ref: string };
 
-export function subscribeHostRef(onRef: (ref: string) => void): {
-  dispose(): void;
-} {
-  if (typeof BroadcastChannel === "undefined") {
-    return { dispose() {} };
-  }
-  const bc = new BroadcastChannel(TR33_KIT_HOST_REF_CHANNEL);
+export function subscribeHostRef(onRef: (ref: string) => void): { dispose(): void } {
+  if (typeof BroadcastChannel === "undefined") return { dispose() {} };
+  const bc = new BroadcastChannel(KIT_REF_CHANNEL);
   bc.onmessage = (ev: MessageEvent<HostRefMessage>) => {
-    const ref = ev.data?.ref;
-    if (typeof ref === "string" && ref.length > 0) {
-      onRef(ref);
-    }
+    const r = ev.data?.ref;
+    if (typeof r === "string" && r.length > 0) onRef(r);
   };
-  return {
-    dispose() {
-      bc.close();
-    },
-  };
+  return { dispose() { bc.close(); } };
 }

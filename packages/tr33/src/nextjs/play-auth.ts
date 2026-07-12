@@ -1,19 +1,29 @@
 import { createClient as libsqlCreateClient } from "@libsql/client";
 import { LibsqlDialect } from "@libsql/kysely-libsql";
-import BetterSqlite3 from "better-sqlite3";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
 import { headers } from "next/headers";
 import fs from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { SqliteDialect } from "kysely";
+import Database from "better-sqlite3";
 
 type Tr33PlayAuthOptions = {
   databaseUrl: () => string;
   appName?: string;
   allowedEmailsEnv?: string;
 };
+
+// keep native dep behind a lazy require so `tr33/dist/index.mjs` (docs, etc)
+// never has to bundle better-sqlite3. Only play-auth users hit this path.
+function createBetterSqlite3(dbPath: string) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const Ctor = (Database as any).default ?? Database;
+  return new Ctor(dbPath);
+}
 
 function resolveFileDatabasePath(databaseUrl: string): string {
   if (databaseUrl.startsWith("file://")) {
@@ -28,23 +38,42 @@ function resolveFileDatabasePath(databaseUrl: string): string {
   return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
 }
 
-function readBetterAuthSchemaSql(): string {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    path.resolve(here, "../sqlite/better-auth-schema.sql"),
-    path.resolve(process.cwd(), "packages/tr33/src/sqlite/better-auth-schema.sql"),
-    path.resolve(
-      process.cwd(),
-      "../../packages/tr33/src/sqlite/better-auth-schema.sql",
-    ),
-  ];
-  const schemaPath = candidates.find((candidate) => fs.existsSync(candidate));
-  if (!schemaPath) {
-    throw new Error(
-      `Could not find Better Auth schema SQL. Checked: ${candidates.join(", ")}`,
+function tr33PackageRoot(): string {
+  // After `tsdown`, this file lives at `dist/nextjs/play-auth.mjs`
+  // so twoups gets us back to the package root.
+  try {
+    return path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../..",
     );
+  } catch {
+    try {
+      const r = createRequire(import.meta.url);
+      return path.dirname(r.resolve("tr33/package.json"));
+    } catch {
+      return path.join(process.cwd(), "packages/tr33");
+    }
   }
-  return fs.readFileSync(schemaPath, "utf8");
+}
+
+async function readBetterAuthSchemaSql(): Promise<string> {
+  const pkgRoot = tr33PackageRoot();
+  const fromDist = path.join(pkgRoot, "src/sqlite/better-auth-schema.sql");
+  const fromPkg = path.join(pkgRoot, "sqlite/better-auth-schema.sql");
+  const cwdCandidates = [
+    path.join(process.cwd(), "packages/tr33/src/sqlite/better-auth-schema.sql"),
+    path.join(process.cwd(), "../../packages/tr33/src/sqlite/better-auth-schema.sql"),
+  ];
+  for (const p of [fromDist, fromPkg, ...cwdCandidates]) {
+    try {
+      if (fs.existsSync(p)) return await readFile(p, "utf8");
+    } catch {
+      /* try next */
+    }
+  }
+  throw new Error(
+    `Could not find Better Auth schema SQL. Checked: ${[fromDist, fromPkg, ...cwdCandidates].join(", ")}`,
+  );
 }
 
 function splitSqlStatements(sql: string): string[] {
@@ -92,7 +121,7 @@ export function createTr33PlayAuth(options: Tr33PlayAuthOptions) {
     if (url.startsWith("file:")) {
       return {
         dialect: new SqliteDialect({
-          database: new BetterSqlite3(resolveFileDatabasePath(url)),
+          database: createBetterSqlite3(resolveFileDatabasePath(url)) as never,
         }),
         type: "sqlite",
         transaction: false,
@@ -136,14 +165,15 @@ export function createTr33PlayAuth(options: Tr33PlayAuthOptions) {
 
     ensureAuthSchemaPromise = (async () => {
       const url = authDatabaseUrl();
-      const sql = readBetterAuthSchemaSql();
+      const sql = await readBetterAuthSchemaSql();
 
       if (url.startsWith("file:")) {
-        const db = new BetterSqlite3(resolveFileDatabasePath(url));
+        const db = createBetterSqlite3(resolveFileDatabasePath(url));
         try {
           for (const statement of splitSqlStatements(sql)) {
             try {
-              db.exec(statement);
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (db as any).exec(statement);
             } catch (err) {
               if (
                 !(err instanceof Error) ||
@@ -154,7 +184,8 @@ export function createTr33PlayAuth(options: Tr33PlayAuthOptions) {
             }
           }
         } finally {
-          db.close();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (db as any).close();
         }
         return;
       }

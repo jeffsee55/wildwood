@@ -1,8 +1,5 @@
+import { GIT_EMPTY_TREE_OID } from "@tr33/shared";
 import type { TreeEntries } from "tr33-store";
-
-/** Canonical git empty tree — skip re-uploading when creating new dirs. */
-const GIT_EMPTY_TREE_OID =
-  "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 export type ChangedFile = {
   path: string;

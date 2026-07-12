@@ -29,3 +29,6 @@ export const z = {
   collection,
   filter,
 };
+
+// Core re-exports that UI layers may need without pulling kit/ui.
+export { GIT_EMPTY_TREE_OID } from "@tr33/shared";

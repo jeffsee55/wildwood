@@ -9,11 +9,13 @@ import { cn } from "@/lib/utils";
 type Permission = "read" | "write";
 
 export type KitAuthConfig = {
+  /** Show auth/developer entries in the Kit menu. Defaults to auto. */
   enabled?: boolean;
   authBase?: string;
   callbackURL?: string;
   userEmail?: string | null;
   githubOAuthEnabled?: boolean;
+  /** Optimistically passed even when partially empty — library decides prod enforcement. */
   githubApp?: {
     appSlug?: string;
     name?: string;
@@ -23,6 +25,12 @@ export type KitAuthConfig = {
     contents?: Permission;
     pullRequests?: Permission;
   };
+  /**
+   * When true, the library enforces required auth fields and throws in prod.
+   * Defaults to `process.env.NODE_ENV === "production"` inside the library —
+   * the host does not need to set this; it just always passes whatever it has.
+   */
+  enforceInProduction?: boolean;
 };
 
 type Props = {

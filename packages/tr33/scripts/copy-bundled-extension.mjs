@@ -2,6 +2,7 @@ import { access, cp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+
 const tr33Root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const extensionRoot = path.join(tr33Root, "..", "extension");
 const dest = path.join(tr33Root, "bundled-extension");
@@ -63,3 +64,7 @@ export function getTr33DarkThemeBytes(): Uint8Array {
 console.info(
   "[tr33] copied tr33-vscode into bundled-extension/ (+ embedded extension.js + theme)",
 );
+
+// client-boundary is now a real entry in tsdown.config.ts — tsdown preserves
+// `'use client'` via unbundle when externalizing `next/*`. No manual JS emit
+// needed. If tsdown ever strips the directive, pin that version and report it.

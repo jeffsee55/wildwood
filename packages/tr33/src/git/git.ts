@@ -61,13 +61,20 @@ export class Git implements Gitable {
 
   async getTree(oid: string): Promise<TreeEntries | null> {
     const treeOid = String(oid);
+    // Cold treeStore cache first (Trees.persistTree writes here when putTree absent).
+    // This covers empty-tree OID and intermediate new dirs created by applyEntriesToTree
+    // before they are flushed via ensureTrees/batchPut.
+    const fromMem = this.trees.treeStore.get(treeOid) as TreeEntries | undefined;
+    if (fromMem !== undefined) return fromMem;
     const fromDb = await this.db.trees.get({ oid: treeOid });
     if (fromDb && Object.keys(fromDb).length > 0) {
+      this.trees.treeStore.set(treeOid, fromDb as TreeEntries);
       return fromDb;
     }
     const fromRemote = await this.remote.fetchTree({ oid: treeOid });
     if (fromRemote && Object.keys(fromRemote).length > 0) {
       await this.db.trees.batchPut([{ oid: treeOid, entries: fromRemote }]);
+      this.trees.treeStore.set(treeOid, fromRemote as TreeEntries);
       return fromRemote;
     }
     return null;
@@ -354,7 +361,10 @@ export class Git implements Gitable {
 
   async findMany(
     args: FindWorktreeEntriesArgs,
-    { retrying = false }: { retrying?: boolean } = {},
+    {
+      retrying = false,
+      didInit = false,
+    }: { retrying?: boolean; didInit?: boolean } = {},
   ): Promise<{
     collection: string;
     commitOid: string;
@@ -372,8 +382,29 @@ export class Git implements Gitable {
       })) as Worktree;
 
       if (!result && !retrying) {
-        await this.switch({ ref });
-        return this.findMany(args, { retrying: true });
+        try {
+          await this.switch({ ref });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "";
+          if (
+            msg.includes("No local path found") ||
+            msg.includes("Not a git repository")
+          ) {
+            // Production (Vercel): no local checkout expected. Surface clear message instead of cryptic git error.
+            const hasRemoteDb =
+              process.env.TR33_DOCS_DATABASE_URL ||
+              process.env.LIBSQL_URL ||
+              process.env.TURSO_DATABASE_URL;
+            throw new Error(
+              `Tr33 index missing for ref "${ref}" (version "${this.config.version}"). ` +
+                (hasRemoteDb
+                  ? `Database at ${hasRemoteDb.slice(0, 40)}… is empty — re-run \`next build\` so the local checkout is indexed into it.`
+                  : `No database URL configured and no local checkout found. In production, set TR33_DOCS_DATABASE_URL and build with a local git checkout; in dev, run from a git repo root or set TR33_DOCS_REPO_PATH.`),
+            );
+          }
+          throw e;
+        }
+        return this.findMany(args, { retrying: true, didInit });
       }
 
       if (!result) {
@@ -386,7 +417,7 @@ export class Git implements Gitable {
       if (result.rootTree && !retrying) {
         if (!result.versions?.includes(this.config.version)) {
           await this.switch({ ref });
-          return this.findMany(args, { retrying: true });
+          return this.findMany(args, { retrying: true, didInit });
         }
       }
 
@@ -405,9 +436,55 @@ export class Git implements Gitable {
         items,
       };
     } catch (e) {
-      if (!retrying && isMissingSchemaError(e)) {
+      if (!didInit && isMissingSchemaError(e)) {
         await this.db.init();
-        return this.findMany(args, { retrying: true });
+        // Allow one more schema-init retry, then normal switch fallthrough.
+        return this.findMany(args, { retrying: false, didInit: true });
+      }
+      throw e;
+    }
+  }
+
+  // First-principles: findFirst is findMany limit 1 with slug/path as real columns.
+  async findFirst(
+    args: FindWorktreeEntriesArgs,
+    {
+      retrying = false,
+      didInit = false,
+    }: { retrying?: boolean; didInit?: boolean } = {},
+  ): Promise<{
+    collection: string;
+    commitOid: string;
+    value: ReturnType<Config<ConfigInput>["buildEntry"]> | null;
+    org: string;
+    repo: string;
+    ref: string;
+    version: string;
+    name: string;
+    commit: string;
+  }> {
+    const ref = args.ref || this.config.ref;
+    try {
+      const inner = await this.findMany(
+        { ...args, limit: 1, ref } as FindWorktreeEntriesArgs,
+        { retrying, didInit },
+      );
+      const item = inner.items[0] ?? null;
+      return {
+        collection: args.collection,
+        commitOid: inner.commitOid,
+        value: item,
+        org: this.config.org,
+        repo: this.config.repo,
+        ref,
+        version: this.config.version,
+        name: args.collection,
+        commit: inner.commitOid,
+      };
+    } catch (e) {
+      if (!didInit && isMissingSchemaError(e)) {
+        await this.db.init();
+        return this.findFirst(args, { retrying: false, didInit: true });
       }
       throw e;
     }

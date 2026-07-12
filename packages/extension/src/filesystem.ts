@@ -15,6 +15,7 @@ import {
   notifyKitParentWorkspaceChanged,
 } from "./kit-parent";
 import { writeActiveRefToStorage } from "./host-bridge";
+import { generateBranchName } from "@tr33/shared";
 import { postAddWithProgress } from "./add-with-progress";
 import { postPatchWorktree, treesForPatch } from "./patch-worktree";
 import {
@@ -25,6 +26,7 @@ import {
 /** Distinct from VS Code's built-in `vscode-vfs` (Remote Repositories). */
 export const SCHEME = "tr33-vfs";
 
+export { generateBranchName };
 
 async function postSwitchBranch(
   apiUrl: string,
@@ -42,21 +44,6 @@ async function postSwitchBranch(
       `Failed to switch branch to ${ref}: ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`,
     );
   }
-}
-
-const BRANCH_CITIES = [
-  "jakarta", "istanbul", "cairo", "mumbai", "tokyo", "seoul", "lima",
-  "nairobi", "havana", "bogota", "tehran", "delhi", "dhaka", "hanoi",
-  "riyadh", "ankara", "kabul", "quito", "dakar", "lusaka", "maputo",
-  "tbilisi", "baku", "minsk", "tallinn", "riga", "vilnius", "oslo",
-  "reykjavik", "helsinki", "dublin", "lisbon", "prague", "vienna",
-  "budapest", "bucharest", "sofia", "tirana", "skopje", "belgrade",
-] as const;
-
-export function generateBranchName(): string {
-  const city = BRANCH_CITIES[Math.floor(Math.random() * BRANCH_CITIES.length)];
-  const suffix = Math.random().toString(36).slice(2, 6);
-  return `${city}-${suffix}`;
 }
 
 function uint8ToBase64(bytes: Uint8Array): string {

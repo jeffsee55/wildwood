@@ -15,9 +15,17 @@
     "preview": "vite preview"
   },
   "peerDependencies": {
-    "next": "^16.0.0"
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    }
   },
   "dependencies": {
+    "@tr33/shared": "workspace:*",
     "@base-ui/react": "^1.3.0",
     "@fontsource-variable/geist": "^5.2.8",
     "@fontsource-variable/geist-mono": "^5.2.7",

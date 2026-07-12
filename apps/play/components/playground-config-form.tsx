@@ -457,7 +457,7 @@ export function PlaygroundConfigForm({ githubSignedIn, initial }: Props) {
           {source === "local" && (
             <div className="sm:col-span-2">
               <label className={labelClass} htmlFor={`${baseId}-localPath`}>
-                Local git clone path
+                Local git clone path (optional)
               </label>
               <input
                 className={inputClass}
@@ -465,15 +465,13 @@ export function PlaygroundConfigForm({ githubSignedIn, initial }: Props) {
                 id={`${baseId}-localPath`}
                 key={`${effectiveInitial.localPath}-${source}`}
                 name="localPath"
-                placeholder='e.g. . or /path/to/checkout or ../../.. (from "next dev" cwd)'
+                placeholder="Empty = auto-detect from dev server cwd"
                 type="text"
               />
               <p className="mt-1 text-[11px] text-zinc-500">
-                tr33 runs git in this directory. Empty uses{" "}
-                <code className="text-zinc-600 dark:text-zinc-500">.</code>{" "}
-                (the folder where the Next dev server is running). Use a path
-                to your monorepo root that contains the <code>content/</code>{" "}
-                files your glob should match.
+                Leave empty for zero-config dev — tr33 auto-detects the git
+                root from the Next dev server cwd. Set only if your checkout
+                lives elsewhere.
               </p>
             </div>
           )}

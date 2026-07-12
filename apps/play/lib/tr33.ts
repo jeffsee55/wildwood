@@ -13,10 +13,6 @@ import {
   parsePlaygroundConfig,
 } from "./playground-config";
 import { playgroundDatabaseUrl } from "./playground-database-url";
-import {
-  assertUsableLocalGitRoot,
-  resolvePlaygroundLocalPath,
-} from "./resolve-playground-local-path";
 
 const libsqlClient = libsqlCreateClient({
   url: playgroundDatabaseUrl(),
@@ -39,6 +35,10 @@ function githubAppAuthConfig(): Tr33AuthConfig["github"] {
 
 /**
  * One schemaless collection, always named `page` — the playground controls org/repo/ref/match + md/json.
+ *
+ * Zero-config local: an empty `localPath` now means "auto-detect from cwd" in dev,
+ * because `tr33` core's `resolveLocalGitRoot` walks up from `process.cwd()` to `.git`.
+ * An explicit non-empty `localPath` (absolute or cwd-relative) still wins when set.
  */
 export function buildPlaygroundTr33(config: PlaygroundConfig): Tr33Client {
   const page = z.collection({
@@ -56,24 +56,20 @@ export function buildPlaygroundTr33(config: PlaygroundConfig): Tr33Client {
           version: "0",
           collections: { page },
         })
-      : (() => {
-          const localRoot = resolvePlaygroundLocalPath(config.localPath);
-          assertUsableLocalGitRoot(localRoot);
-          return defineConfig({
-            org: config.org,
-            repo: config.repo,
-            ref: config.ref,
-            localPath: localRoot,
-            version: "0",
-            collections: { page },
-          });
-        })();
+      : defineConfig({
+          org: config.org,
+          repo: config.repo,
+          ref: config.ref,
+          // Empty => auto-detect via core. Non-empty => explicit path (core handles relative-to-cwd normalization).
+          localPath: config.localPath?.trim() ? config.localPath.trim() : undefined,
+          version: "0",
+          collections: { page },
+        });
 
   return createClient({
     auth: {
       github: githubAppAuthConfig(),
       betterAuth: auth,
-      // Play is intentionally permissive while we iterate on auth policy.
       authorize: () => true,
     },
     config: tr33Config,

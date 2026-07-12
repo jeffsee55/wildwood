@@ -37,10 +37,12 @@ export type KitProps = {
    * Pinned VS Code web commit from the server (see {@link Tr33Kit}).
    */
   vscodeCommit?: string;
-  /**
-   * Active ref from the `tr33-active-ref` cookie (read on the server). Omitted in client-only hosts.
-   */
   activeRef?: string | null;
+  /**
+   * Always pass whatever you have — library decides prod vs dev behavior.
+   * In dev, missing fields are tolerated (install UI hidden). In prod, missing
+   * `githubApp.appSlug` will throw to surface broken config.
+   */
   auth?: KitAuthConfig;
 };
 

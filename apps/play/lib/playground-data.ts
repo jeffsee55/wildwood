@@ -1,5 +1,4 @@
 import { type PlaygroundConfig } from "./playground-config";
-import { getResolvedLocalPathForPlayground } from "./resolve-playground-local-path";
 import {
   playDebug,
   playFailureHeadline,
@@ -18,13 +17,11 @@ export async function getPlaygroundViewData(
   ref: string,
   config: PlaygroundConfig,
 ): Promise<object> {
-  const resolvedLocal = getResolvedLocalPathForPlayground(config);
   playDebug("viewData.start", {
     activeRef: ref,
     nextCwd: process.cwd(),
     nodeEnv: process.env.NODE_ENV,
     libsqlUrl: playgroundDatabaseUrl(),
-    resolvedLocalPath: resolvedLocal,
     config: {
       source: config.source,
       org: config.org,

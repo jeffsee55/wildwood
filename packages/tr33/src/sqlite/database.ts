@@ -21,11 +21,11 @@ const createDrizzle = (client: LibsqlClient) => {
   return drizzle({ client, schema, relations, logger: false });
 };
 
-function splitSqlStatements(sql: string): string[] {
-  return sql
-    .split(/;\s*(?:\n|$)/)
-    .map((statement) => statement.trim())
-    .filter((statement) => statement && !statement.startsWith("--"));
+function splitSqlStatements(raw: string): string[] {
+  return raw
+    .split(";")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !s.startsWith("--"));
 }
 
 function isIgnorableSchemaError(err: unknown): boolean {
@@ -131,24 +131,25 @@ export class LibsqlDatabase {
         });
     }
 
-    // Write entries (version-specific) - always write these
-    const entries = cache.entries;
-    if (entries.length > 0) {
+    // Entries are version-specific and now first-class on { slug, path }.
+    // No back-compat shims — DB was cleared first-principles per request.
+    const entriesRows = cache.entries;
+    if (entriesRows.length > 0) {
+      const rows = entriesRows.map(({ ref, path, variant, canonical, collection, oid, slug }) => ({
+        orgName: this.config.org,
+        repoName: this.config.repo,
+        ref,
+        version: this.config.version,
+        variant,
+        canonical,
+        path,
+        slug,
+        collection,
+        oid,
+      }));
       await this.drizzle
         .insert(this.schema.entries)
-        .values(
-          entries.map(({ ref, path, variant, canonical, collection, oid }) => ({
-            orgName: this.config.org,
-            repoName: this.config.repo,
-            ref,
-            version: this.config.version,
-            variant,
-            canonical,
-            path,
-            collection,
-            oid,
-          })),
-        )
+        .values(rows)
         .onConflictDoUpdate({
           target: [
             this.schema.entries.orgName,
@@ -160,6 +161,7 @@ export class LibsqlDatabase {
           ],
           set: {
             path: sql`excluded.path`,
+            slug: sql`excluded.slug`,
             collection: sql`excluded.collection`,
             oid: sql`excluded.oid`,
           },
@@ -565,6 +567,7 @@ export class LibsqlDatabase {
               variant: sql<string>`${args.variant}`.as("variant"),
               canonical: ns.canonical,
               path: ns.path,
+              slug: ns.slug,
               collection: ns.collection,
               oid: ns.oid,
             })

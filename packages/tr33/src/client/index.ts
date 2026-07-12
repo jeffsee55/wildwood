@@ -21,7 +21,13 @@ export const createClient = <C extends Config<ConfigInput>>(args: {
     );
   }
   const db = new LibsqlDatabase({ client: database, config });
-  const remote = config.localPath
+  // Prefer `resolvedLocalPath` (explicit `localPath` or auto-detected git root in dev)
+  // so that zero-config dev just works without the host wiring repo-root discovery.
+  const useNative =
+    typeof (config as { resolvedLocalPath?: string | undefined }).resolvedLocalPath === "string"
+      ? Boolean((config as { resolvedLocalPath?: string | undefined }).resolvedLocalPath)
+      : Boolean((config as { wantsLocal?: boolean }).wantsLocal ?? config.localPath);
+  const remote = useNative
     ? new NativeRemote({ auth, config })
     : new GitHubRemote({ auth, config });
   // const git = new Git({ config, remote, db });
@@ -33,6 +39,8 @@ export const createClient = <C extends Config<ConfigInput>>(args: {
     (collections as Record<string, unknown>)[collection.name] = {
       findMany: (args: Omit<FindWorktreeEntriesArgs, "collection">) =>
         git.findMany({ ...args, collection: collection.name }),
+      findFirst: (args: Omit<FindWorktreeEntriesArgs, "collection"> = {}) =>
+        git.findFirst({ ...(args as FindWorktreeEntriesArgs), collection: collection.name }),
     };
   }
   return {

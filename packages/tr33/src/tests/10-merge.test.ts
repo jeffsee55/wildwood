@@ -5,7 +5,7 @@ describe("merge", () => {
   let t: ReturnType<typeof createTestSetup>;
 
   beforeEach(async () => {
-    t = createTestSetup({ useMemoryDb: false });
+    t = createTestSetup({ useMemoryDb: true });
     await t.db.reset();
     await t.helper.resetRepo();
 

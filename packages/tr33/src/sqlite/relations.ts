@@ -37,6 +37,7 @@ export const relations = defineRelations(schema, (r) => {
           r.entries.canonical,
         ],
       }),
+      // Forward: entry's field points away. Row lives at entry.path.
       toConnections: r.many.connections({
         from: [
           r.entries.orgName,
@@ -51,18 +52,21 @@ export const relations = defineRelations(schema, (r) => {
           r.connections.path,
         ],
       }),
+      // Reverse: other entries point TO this entry. Row's `to` == this entry's canonical.
       fromConnections: r.many.connections({
         from: [
           r.entries.orgName,
           r.entries.repoName,
+          r.entries.ref,
           r.entries.version,
-          r.entries.path,
+          r.entries.canonical,
         ],
         to: [
           r.connections.orgName,
           r.connections.repoName,
+          r.connections.ref,
           r.connections.version,
-          r.connections.path,
+          r.connections.to,
         ],
       }),
       filters: r.many.filters({
@@ -83,6 +87,8 @@ export const relations = defineRelations(schema, (r) => {
       }),
     },
     connections: {
+      // Forward connection: this entry's field points TO another entry's canonical path.
+      // `to` is canonical (stripped of variant modifiers) so it matches entries.canonical.
       toEntry: r.one.entries({
         from: [
           r.connections.orgName,
@@ -99,6 +105,7 @@ export const relations = defineRelations(schema, (r) => {
           r.entries.canonical,
         ],
       }),
+      // Reverse connection: entries whose `to` points at this entry's path (via referencedAs join).
       fromEntry: r.one.entries({
         from: [
           r.connections.orgName,

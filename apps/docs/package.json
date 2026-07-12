@@ -12,10 +12,13 @@
   "dependencies": {
     "@babel/runtime": "^7.29.2",
     "@libsql/client": "^0.14.0",
+    "@tr33/kit": "workspace:*",
+    "@tr33/shared": "workspace:*",
     "next": "16.2.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "tr33": "workspace:*"
+    "tr33": "workspace:*",
+    "tr33-store": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.0",

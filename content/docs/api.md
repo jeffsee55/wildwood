@@ -1,349 +1,194 @@
 ---
-title: From Apr 3 Tr33 API Reference
-author: ../authors/heidi.md
-description: Learn how to use Tr33's API to configure, connect, and interact with your data collections. This reference covers the core functions, configuration options, and usage examples to help you integrate Tr33 into your projects efficiently.
+title: API reference
+author: ../authors/jeff.md
+description: The public surface you actually use while dogfooding docs — collections, findMany, refs, H3 handler, branch-preview helpers.
 ---
 
-# Tr33 API Reference
+# API reference
 
-This document provides a detailed reference for Tr33's public API.
+This page reflects the surface validated against this repo's own `content/` source. See `content/docs/intro.md` for the minimal setup.
 
-## Core Functions
+## `defineConfig`
 
-### `defineConfig`
-
-Creates a type-safe configuration for Tr33.
-
-```typescript
-function defineConfig<T extends ConfigInput>(config: T): T;
-```
-
-#### Parameters
-
-- `config`: Configuration object with the following properties:
-  - `org`: Organization name
-  - `repo`: Repository name
-  - `ref`: Git reference (branch, tag, or commit)
-  - `remote`: Path to the local repository
-  - `version`: Version string
-  - `orm`: Object containing collection definitions
-
-#### Returns
-
-The validated configuration object.
-
-### `createClient`
-
-Creates an Tr33 client instance.
-
-```typescript
-function createClient<T extends ConfigInput>(
-  config: T,
-  database: Client
-): OrmConfig<T["orm"]> & {
-  _: {
-    database: Database;
-    git: GitOperations;
-  };
-};
-```
-
-#### Parameters
-
-- `config`: Configuration object created with `defineConfig`
-- `database`: Database client instance
-
-#### Returns
-
-An Tr33 client with collection endpoints and Git operations.
-
-## Collection API
-
-### Collection Definition
-
-Collections are defined using Zod schemas:
-
-```typescript
-const collection = z.collection({
-  name: string,
-  schema: z.ZodObject,
-  match: string,
-  type: "markdown" | "json",
-});
-```
-
-#### Properties
-
-- `name`: Unique identifier for the collection
-- `schema`: Zod schema defining the content structure
-- `match`: Glob pattern for matching files
-- `type`: Content type ("markdown" or "json")
-
-### Collection Methods
-
-Each collection provides the following methods:
-
-#### `findFirst`
-
-Finds the first item matching the query.
-
-```typescript
-findFirst(args: {
-  where?: QueryConditions;
-  with?: WithConditions;
-}): Promise<Item | null>
-```
-
-#### `findMany`
-
-Finds all items matching the query.
-
-```typescript
-findMany(args: {
-  where?: QueryConditions;
-  with?: WithConditions;
-  limit?: number;
-  offset?: number;
-  orderBy?: OrderByConditions;
-}): Promise<{
-  items: Item[];
-  total: number;
-}>
-```
-
-## Query API
-
-### Query Conditions
-
-Query conditions support the following operators:
-
-```typescript
-type QueryOperator<T> = {
-  eq?: T; // Equal to
-  ne?: T; // Not equal to
-  gt?: T; // Greater than
-  gte?: T; // Greater than or equal to
-  lt?: T; // Less than
-  lte?: T; // Less than or equal to
-  in?: T[]; // In array
-  notIn?: T[]; // Not in array
-  like?: string; // Like pattern
-  ilike?: string; // Case-insensitive like
-  notLike?: string; // Not like pattern
-  notIlike?: string; // Case-insensitive not like
-  isNull?: true; // Is null
-  isNotNull?: true; // Is not null
-  arrayContains?: T[]; // Array contains all values
-  arrayContained?: T[]; // Array is contained in values
-  arrayOverlaps?: T[]; // Arrays have common elements
-  OR?: QueryOperator<T>[]; // OR conditions
-  AND?: QueryOperator<T>[]; // AND conditions
-  NOT?: QueryOperator<T>; // NOT condition
-};
-```
-
-### With Conditions
-
-The `with` parameter supports including related content:
-
-```typescript
-type WithConditions = {
-  [key: string]: boolean | WithConditions;
-};
-```
-
-### Order By Conditions
-
-```typescript
-type OrderByConditions = {
-  [key: string]: "asc" | "desc";
-};
-```
-
-## Git Operations
-
-The Git API is available through the `_.git` property:
-
-### `init`
-
-Initializes the Git repository.
-
-```typescript
-init(): Promise<void>
-```
-
-### `fetch`
-
-Fetches the latest changes from the remote.
-
-```typescript
-fetch(): Promise<void>
-```
-
-### `checkout`
-
-Checks out the specified reference.
-
-```typescript
-checkout(): Promise<void>
-```
-
-### `show`
-
-Shows the contents of a file.
-
-```typescript
-show(args: { path: string }): Promise<{
-  oid: string;
-  content: string;
-} | null>
-```
-
-### `writeBlob`
-
-Writes content to a blob.
-
-```typescript
-writeBlob(args: { content: string }): Promise<{
-  oid: string;
-}>
-```
-
-### `add`
-
-Adds a file to the index.
-
-```typescript
-add(args: { path: string; oid: string }): Promise<void>
-```
-
-## Types
-
-### `ConfigInput`
-
-```typescript
-type ConfigInput = {
+```ts
+function defineConfig(input: {
   org: string;
   repo: string;
   ref: string;
-  remote: string;
-  version: string;
-  orm: Record<string, Collection>;
-};
+  localPath?: string;   // when set, NativeRemote reads local checkout
+  version: string;      // bump when your filter/schema shape changes
+  collections: Record<string, Collection>
+  variants?: Record<string, VariantConfig>
+}): Config
 ```
 
-### `Collection`
+- `localPath` — point at this repo in dev / build prefetch. Omit on Vercel prod (deployed build reads only the LibSQL index).
+- `ref` — default ref for collection queries when not passed explicitly.
 
-```typescript
-type Collection = {
-  name: string;
-  schema: z.ZodObject;
-  match: string;
-  type: "markdown" | "json";
-};
-```
+## `z.collection`
 
-### `QueryConditions`
+```ts
+const docs = z.collection({
+  name: "docs",
+  match: "content/docs/**/*.md",
+  schema: z.markdown({
+    title: z.filter(z.string()),          // filterable
+    description: z.string().optional(),   // stored
+    author: z.lazy(() => z.connect(authors)).optional(),
+  }),
+});
 
-```typescript
-type QueryConditions = {
-  [key: string]: QueryOperator<unknown>;
-};
-```
-
-### `WithConditions`
-
-```typescript
-type WithConditions = {
-  [key: string]: boolean | WithConditions;
-};
-```
-
-### `OrderByConditions`
-
-```typescript
-type OrderByConditions = {
-  [key: string]: "asc" | "desc";
-};
-```
-
-## Error Handling
-
-Tr33 uses a Result type for error handling:
-
-```typescript
-type Result<T, E> = {
-  isOk(): boolean;
-  isErr(): boolean;
-  unwrap(): T;
-  unwrapErr(): E;
-};
-```
-
-Common error types:
-
-```typescript
-type Tr33Error = {
-  code: "NotFound" | "ValidationError" | "GitError";
-  message: string;
-};
-```
-
-## Examples
-
-### Basic Query
-
-```typescript
-const result = await tr33.post.findFirst({
-  where: {
-    title: { eq: "Hello World" },
-    publishedAt: { gt: "2023-01-01" },
-  },
-  with: {
-    author: true,
-  },
+// JSON collection counterpart:
+const nav = z.collection({
+  name: "nav",
+  match: "content/nav/**/*.json",
+  schema: z.json({
+    name: z.filter(z.string()),
+    label: z.string(),
+    children: z.array(z.string()),
+  }),
 });
 ```
 
-### Complex Query
+`z.filter(T)` marks a field as filterable in `findMany({ where })`. `connect(other)` declares a relation (resolved from that field's value; path or id depending on collection conventions).
 
-```typescript
-const result = await tr33.post.findMany({
-  where: {
-    OR: [
-      { title: { like: "Getting Started%" } },
-      { title: { like: "Tutorial%" } },
-    ],
-    tags: { arrayContains: ["typescript"] },
-  },
-  with: {
-    author: {
-      with: {
-        posts: true,
-      },
-    },
-  },
-  limit: 10,
-  offset: 0,
-  orderBy: {
-    publishedAt: "desc",
-  },
+## `createClient`
+
+```ts
+import { createClient } from "tr33";
+import { createClient as libsql } from "@libsql/client";
+
+const database = libsql({
+  url: process.env.TR33_DOCS_DATABASE_URL || "file:./tr33-docs.db",
+  authToken: process.env.TR33_DOCS_DATABASE_AUTH_TOKEN || "",
+});
+
+const tr33 = createClient({ config, database, auth });
+// tr33.docs.findMany(...)
+// tr33._.git, tr33._.db, tr33._.config
+```
+
+Auth is optional: pass `{ github, authorize }` only when you want to enforce GitHub App or allow-list rules on the shared API.
+
+## Collection queries
+
+```ts
+// All docs in the default (or passed) ref
+const all = await tr33.docs.findMany({});
+
+// Filtered, with author resolved
+const one = await tr33.docs.findMany({
+  where: { title: { eq: "Introduction" } },
+  with: { author: true },
 });
 ```
 
-### Git Operations
+`ref` override:
 
-```typescript
-// Initialize repository
-await tr33._.git.init();
-
-// Create new content
-const content = "# New Post\n\nThis is a new post.";
-const blob = await tr33._.git.writeBlob({ content });
-await tr33._.git.add({ path: "content/posts/new-post.md", oid: blob.oid });
-
-// View content
-const file = await tr33._.git.show({ path: "content/posts/example.md" });
+```ts
+const branchDocs = await tr33.docs.findMany({ ref: "feature/my-branch" });
 ```
 
-For more examples and use cases, check out the [Guides](./guides.md).
+`with` and nested `where` work on connected fields. `filters` and `connections` tables are materialized during `git.switch` (which `findMany`/`findFirst` fall through to automatically on a cold cache).
+
+## H3 handler — `handle` / `createHandler`
+
+```ts
+import { createHandler, handle } from "tr33/nextjs";
+
+const api = handle(client);           // (req: Request) => Promise<Response>
+const app = createHandler(client);    // H3 app if you want to mount sub-routers
+```
+
+Pure Fetch, no `next/*`. Host responsibility:
+
+- cookies (`tr33-active-ref`) set on `POST /git/create-branch` and `POST /git/switch-branch`
+- cleared on `POST …/tr33/preview`
+- `revalidateTag(tag)` after mutations so server components refresh
+
+Use in Next's catch-all app route:
+
+```ts
+// app/api/[...path]/route.ts
+export { GET, HEAD, OPTIONS, POST } from "./route-impl"
+```
+
+or in any Fetch/H3 runtime (Nitro, Cloudflare Workers via adapter, standalone server).
+
+## Branch preview helpers
+
+```ts
+import {
+  cookiesFromCookieHeader,
+  resolveActiveRef,
+  activeRefSetCookieHeader,
+  TR33_ACTIVE_REF_COOKIE,
+} from "tr33/nextjs";
+```
+
+- `cookiesFromCookieHeader(req.headers.get("cookie"))` — framework-free cookie jar for `resolveActiveRef`.
+- `resolveActiveRef({ tr33, cookies })` — `tr33-active-ref` cookie or `config.ref` fallback.
+- `activeRefSetCookieHeader(ref)` — `Set-Cookie` string the host should return.
+
+### Kit
+
+```tsx
+import { Toolbar } from "tr33/nextjs";
+
+<Toolbar
+  tr33={tr33}
+  activeRef={activeRef}   // from resolveActiveRef, or client.getActiveRef()
+  apiBase="/api"
+  theme="light"
+  auth={getDocsKitAuth()}
+/>
+```
+
+Kit reads no cookies itself; the host passes `activeRef` and controls the editor origin via `apiBase`. Kit's broadcast channels (`tr33-kit-host-ref`, etc.) live in `@tr33/shared` — used to keep the embedded VS Code iframe in sync with preview branch changes.
+
+## Editor routes (built into the handler)
+
+Mounted at `apiBase` — the docs app uses `/api`:
+
+- `GET /api/git/branches` — local refs ∪ remote refs (via `git.remote.listBranches()`)
+- `GET /api/git/editor-guards` — GitHub App install check + VS Code commit pin
+- `GET /api/git/editor-bootstrap` — verifies active ref is indexed, returns VS Code commit
+- `POST /api/git/switch-branch { ref }`
+- `POST /api/git/create-branch { name, baseRef | base }`
+- `POST /api/git/commit | discard | push | pull | merge` — gated by `authorize` when configured
+- `POST /api/vscode/cdn/…` — proxied VS Code web shell + static assets
+
+All routes are CORS + no-store safe; the handler adds `Access-Control-Allow-*` and removes its own `Set-Cookie` so the host's value is authoritative.
+
+## Vercel / build prefetch
+
+Client self-heals — no explicit ready-check needed. `findMany` / `findFirst` fall through to `git.switch` on a cold cache (missing tables → `db.init`, missing worktree → `switch` + `writeEntries`). In prod (Vercel, no checkout) a cold cache fails fast with a clear message; populate Turso during `next build` (which has the local checkout) so prod is DB-only.
+
+Env contract (`.env.example`):
+
+```sh
+TR33_GITHUB_ORG=jeffsee55
+TR33_GITHUB_REPO=tr33
+TR33_DOCS_REF=main            # or deployment SHA on Vercel
+
+TR33_DOCS_DATABASE_URL=       # LibSQL/Turso
+TR33_DOCS_DATABASE_AUTH_TOKEN=
+
+GITHUB_APP_ID=                # required for live edits against this repo
+GITHUB_PRIVATE_KEY=
+GITHUB_APP_INSTALLATION_ID=   # optional optimization
+GITHUB_APP_SLUG=              # install prompt URL
+```
+
+`TR33_DOCS_SOURCE=local` forces NativeRemote even when GITHUB_APP_* are set (useful in dev when gating GitHub).
+
+## Types
+
+```ts
+import type { Tr33Client } from "tr33";
+import type { KitAuthConfig } from "tr33/nextjs";
+```
+
+`KitAuthConfig` is `{ githubApp?: { appSlug?, name?, origin? } }` — controls the install section in Kit and the editor's origin header.
+
+For internals (`git.getTree`, worktree resolution) see `packages/tr33/src/git/git.ts`; for the query builder see `sqlite/query-builder.ts`. The public docs surface is intentionally narrower than what's in `types.ts`.

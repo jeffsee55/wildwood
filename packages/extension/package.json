@@ -269,6 +269,7 @@
     }
   },
   "dependencies": {
+    "@tr33/shared": "workspace:*",
     "tr33-store": "workspace:*",
     "tsdown": "^0.15.4"
   },

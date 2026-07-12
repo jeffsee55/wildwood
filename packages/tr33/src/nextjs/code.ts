@@ -1,4 +1,4 @@
-import { TR33_ACTIVE_REF_STORAGE_KEY } from "@/nextjs/active-ref-storage";
+import { TR33_ACTIVE_REF_STORAGE_KEY } from "@tr33/shared";
 import type { VscodeWebCdn } from "@/nextjs/vscode-web-cdn";
 import { vscodeCdnProxyAssetUrl } from "@/nextjs/vscode-web-cdn";
 

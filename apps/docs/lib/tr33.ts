@@ -1,125 +1,19 @@
-import {
-  createClient,
-  defineConfig,
-  type Tr33AuthConfig,
-  type Tr33Client,
-  z,
-} from "tr33";
 import { createClient as createLibsqlClient } from "@libsql/client";
+import { createClient, defineConfig, type Tr33AuthConfig, z } from "tr33";
 
-import { hasLocalDocsContent, resolveDocsRepoRoot } from "./docs-repo-root";
+// Docs app dogfoods this repo. Source is content/. No manual repo-root plumbing:
+// `tr33` auto-detects the git checkout from cwd in dev/build (via resolvedLocalPath).
 
-const database = createLibsqlClient({
-  url: process.env.TR33_DOCS_DATABASE_URL || "file:./tr33-docs.db",
-  authToken: process.env.TR33_DOCS_DATABASE_AUTH_TOKEN || "",
-});
+const ORG = process.env.TR33_GITHUB_ORG || "jeffsee55";
+const REPO = process.env.TR33_GITHUB_REPO || "tr33";
+const VERSION = "docs-0" as const;
+const REF =
+  process.env.TR33_DOCS_REF?.trim() ||
+  process.env.VERCEL_GIT_COMMIT_SHA?.trim() ||
+  "main";
 
-export const githubOrg = process.env.TR33_GITHUB_ORG || "jeffsee55";
-export const githubRepo = process.env.TR33_GITHUB_REPO || "tr33";
-
-const docsVersion = "docs-0";
-
-/** `next build` — prefetch index into LibSQL/Turso from the repo checkout. */
-export function isDocsPrefetchBuild(): boolean {
-  return process.env.NEXT_PHASE === "phase-production-build";
-}
-
-/**
- * Deployed production (Vercel SSR/API). No git — only reads a build-time index.
- * Dev (`next dev`) is not included.
- */
-export function isDocsDeployedRuntime(): boolean {
-  if (isDocsPrefetchBuild()) {
-    return false;
-  }
-  if (process.env.TR33_DOCS_SOURCE === "local") {
-    return false;
-  }
-  return process.env.NODE_ENV === "production";
-}
-
-function hasGitHubAppCredentials(): boolean {
-  return Boolean(
-    process.env.GITHUB_APP_ID?.trim() &&
-      process.env.GITHUB_PRIVATE_KEY?.trim(),
-  );
-}
-
-/** GitHub App remote for /api git routes (installation resolved per repo when id omitted). */
-export function wantsGithubRemote(): boolean {
-  if (isDocsDeployedRuntime()) {
-    if (process.env.TR33_DOCS_SOURCE === "local") {
-      return false;
-    }
-    return hasGitHubAppCredentials();
-  }
-  if (process.env.TR33_DOCS_SOURCE === "local") {
-    return false;
-  }
-  if (process.env.TR33_DOCS_SOURCE === "github") {
-    return Boolean(process.env.GITHUB_APP_ID && process.env.GITHUB_PRIVATE_KEY);
-  }
-  return Boolean(
-    process.env.GITHUB_APP_ID &&
-      process.env.GITHUB_PRIVATE_KEY &&
-      process.env.GITHUB_APP_INSTALLATION_ID?.trim(),
-  );
-}
-
-/** Local git checkout for dev and build prefetch only. */
-export function useLocalContentRoot(): boolean {
-  if (isDocsDeployedRuntime()) {
-    return false;
-  }
-  if (process.env.TR33_DOCS_SOURCE === "github") {
-    return false;
-  }
-  if (process.env.TR33_DOCS_SOURCE === "local") {
-    return true;
-  }
-  if (isDocsPrefetchBuild() || hasLocalDocsContent()) {
-    return true;
-  }
-  return (
-    process.env.NODE_ENV !== "production" &&
-    !process.env.GITHUB_APP_ID &&
-    !process.env.TR33_DOCS_USE_GITHUB
-  );
-}
-
-/**
- * Ref key stored in `_refs` — must match between build prefetch and production reads.
- * On Vercel, defaults to the deployment commit so local git does not need `main`.
- */
-export function resolveDocsIndexRef(): string {
-  const configured = process.env.TR33_DOCS_REF?.trim();
-  if (configured) {
-    return configured;
-  }
-  const vercelSha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
-  if (vercelSha) {
-    return vercelSha;
-  }
-  return "main";
-}
-
-function githubAppAuthConfig(): Tr33AuthConfig["github"] | undefined {
-  if (
-    !wantsGithubRemote() ||
-    !process.env.GITHUB_APP_ID ||
-    !process.env.GITHUB_PRIVATE_KEY
-  ) {
-    return undefined;
-  }
-  return {
-    type: "app",
-    app: {
-      appId: process.env.GITHUB_APP_ID,
-      privateKey: process.env.GITHUB_PRIVATE_KEY,
-      installationId: process.env.GITHUB_APP_INSTALLATION_ID,
-    },
-  };
-}
+// ── collections ──────────────────────────────────────────────────────
+// `docs` first so nav can lazily connect to it without TDZ.
 
 const authors = z.collection({
   name: "authors",
@@ -146,63 +40,58 @@ const nav = z.collection({
   schema: z.json({
     name: z.filter(z.string()),
     label: z.string(),
-    children: z.array(z.string()),
+    // Real relation: nav.children are docs. JSON is string[] paths on disk;
+    // the visitor canonicalizes to content/docs/<slug>.md and relation resolves.
+    children: z.array(z.lazy(() => z.connect(docs))),
   }),
 });
 
-const collections = { authors, docs, nav };
+export const collections = { authors, docs, nav } as const;
 
-function createDocsClient(): Tr33Client {
-  const local = useLocalContentRoot();
-  const indexRef = resolveDocsIndexRef();
-
-  const config = local
-    ? defineConfig({
-        org: githubOrg,
-        repo: githubRepo,
-        ref: indexRef,
-        localPath: resolveDocsRepoRoot(),
-        version: docsVersion,
-        collections,
-      })
-    : defineConfig({
-        org: githubOrg,
-        repo: githubRepo,
-        ref: indexRef,
-        version: docsVersion,
-        collections,
-      });
-
-  const githubAuth = githubAppAuthConfig();
-
-  return createClient({
-    auth: githubAuth
-      ? {
-          github: githubAuth,
-          authorize: () => true,
-        }
-      : undefined,
-    config,
-    database,
-  });
+function githubAuth(): Tr33AuthConfig["github"] | undefined {
+  const appId = process.env.GITHUB_APP_ID?.trim();
+  const privateKey = process.env.GITHUB_PRIVATE_KEY?.trim();
+  if (!appId || !privateKey) return undefined;
+  return {
+    type: "app",
+    app: {
+      appId,
+      privateKey,
+      installationId: process.env.GITHUB_APP_INSTALLATION_ID?.trim(),
+    },
+  };
 }
 
-let docsClient: Tr33Client | null = null;
+// ── client (top-level singleton) ─────────────────────────────────────
+// Why not memoized inside `tr33` package? `createClient` receives an already-
+// constructed LibSQL client; memoizing on outside-built objects would require
+// stable keying of (config, database instance, auth) and hide env edges that
+// differ per process (Vercel build vs runtime, TR33_DOCS_DATABASE_URL switch).
+// Simpler: the docs app owns the one singleton. Next reuses the module across
+// requests; cold-cache self-heals via findMany -> switch -> index.
+//
+// Intentionally exported as a value, not a getDocsTr33() getter — callers just
+// `import { tr33 } from "@/lib/tr33"` with no ceremony.
 
-export function getDocsTr33(): Tr33Client {
-  if (!docsClient) {
-    docsClient = createDocsClient();
-  }
-  return docsClient;
-}
+const config = defineConfig({
+  org: ORG,
+  repo: REPO,
+  ref: REF,
+  version: VERSION,
+  collections,
+});
 
-export function githubInstallHint(): string {
-  return (
-    `Install the GitHub App on https://github.com/${githubOrg}/${githubRepo} ` +
-    "(or set GITHUB_APP_INSTALLATION_ID)."
-  );
-}
+const gh = githubAuth();
 
-export function docsIndexVersion(): string {
-  return docsVersion;
-}
+const database = createLibsqlClient({
+  url: process.env.TR33_DOCS_DATABASE_URL || "file:./tr33-docs.db",
+  authToken: process.env.TR33_DOCS_DATABASE_AUTH_TOKEN || "",
+});
+
+export const tr33 = createClient({
+  auth: gh ? { github: gh, authorize: () => true } : undefined,
+  config,
+  database,
+});
+
+export type Tr33Client = typeof tr33;

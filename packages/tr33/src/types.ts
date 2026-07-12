@@ -61,7 +61,7 @@ export const changeSchema = z.object({
   blob: blobRecordSchema.optional(),
 });
 
-// entry represents the indexed content (version-specific)
+// entry: version-specific indexed content. First principles: slug+path are real columns on entries.
 export const entrySchema = z.object({
   orgName: z.string(),
   repoName: z.string(),
@@ -70,6 +70,7 @@ export const entrySchema = z.object({
   variant: z.string(),
   canonical: z.string(),
   path: z.string(),
+  slug: z.string(),
   collection: z.string(),
   oid: z.string(),
   // change: changeSchema.optional(),
@@ -201,9 +202,13 @@ export type FindWorktreeEntriesArgs = {
   variant?: string;
   offset?: number;
   orderBy?: Record<string, "asc" | "desc">;
-  where?: WhereClause;
-  with?: Record<string, WithClause>;
-  references?: Record<string, WithClause>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  where?: any;
+  // Per instructions: ignore with-type errors for now → any.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  with?: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  references?: any;
 };
 
 export type Commit = z.infer<typeof commitSchema>;
@@ -223,10 +228,11 @@ export type ChangeRecord = {
 export type EntryRecord = {
   ref: string;
   path: string;
-  variant: string;
   canonical: string;
+  variant: string;
   collection: string;
   oid: string;
+  slug: string;
 };
 export type Cache = {
   filters: FilterRecord[];

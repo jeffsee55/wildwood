@@ -23,7 +23,7 @@ const docs = z.collection({
   }),
 });
 
-export function createTestSetup({ useMemoryDb }: { useMemoryDb: boolean }) {
+export function createTestSetup({ useMemoryDb = true }: { useMemoryDb?: boolean }) {
   const libsqlClient = libsqlCreateClient({
     url: useMemoryDb ? ":memory:" : url,
   });

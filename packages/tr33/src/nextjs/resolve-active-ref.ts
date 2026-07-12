@@ -1,58 +1,56 @@
-import { TR33_ACTIVE_REF_COOKIE } from "./preview-cookies";
-
 /**
- * Minimal client shape for active-ref resolution. Any `createClient()` instance satisfies this.
- */
-export type Tr33ForActiveRef = {
-  _: { config: { ref: string } };
-};
-
-/**
- * Minimal shape of `cookies()` from `next/headers` (sync read after await).
- */
-export type Tr33RequestCookies = {
-  get(name: string): { value: string } | undefined;
-};
-
-/**
- * Parses the raw HTTP `Cookie` header into {@link Tr33RequestCookies} so {@link resolveActiveRef}
- * can be used from H3 / `Request` handlers (no Next.js `cookies()`).
- */
-export function cookiesFromCookieHeader(
-  cookieHeader: string | null | undefined,
-): Tr33RequestCookies {
-  return {
-    get(name: string): { value: string } | undefined {
-      if (cookieHeader == null || cookieHeader === "") return undefined;
-      const parts = cookieHeader.split(";").map((p) => p.trimStart());
-      const prefix = `${name}=`;
-      for (const part of parts) {
-        if (part.startsWith(prefix)) {
-          const raw = part.slice(prefix.length);
-          try {
-            return { value: decodeURIComponent(raw) };
-          } catch {
-            return { value: raw };
-          }
-        }
-      }
-      return undefined;
-    },
-  };
-}
-
-/**
- * Resolves the active git ref from the **`tr33-active-ref`** cookie, falling back to **`configRef`**
- * when the cookie is absent or empty. The cookie is set when switching branches via the Tr33 git API
- * and cleared when exiting branch preview (`POST …/tr33/preview`).
+ * Compatibility re-export of the new branch-aware resolver.
  *
- * This does **not** use Next.js [Draft Mode](https://nextjs.org/docs/app/api-reference/functions/draft-mode);
- * the ref cookie alone is the source of truth for “previewing” a non-default branch.
+ * New code should import from `tr33/nextjs/branch`:
+ *
+ *   import { resolveBranch, TR33_BRANCH_COOKIE, TR33_CACHE_TAG } from "tr33/nextjs/branch"
+ *
+ * This file stays around so existing `tr33/nextjs/resolve-active-ref`
+ * imports keep working.
+ */
+
+export {
+  ACTIVE_REF_MAX_AGE_SEC,
+  TR33_ACTIVE_REF_COOKIE,
+  TR33_BRANCH_COOKIE,
+  TR33_BRANCH_COOKIE_FALLBACKS,
+  TR33_CACHE_TAG,
+  TR33_SYNC_HOST_ACTIVE_REF_HEADER,
+  activeRefSetCookieHeader,
+  allBranchCookieNames,
+  branchCookieOptions,
+  clearBranchCookieHeader,
+  cookiesFromCookieHeader,
+  resolveBranch,
+  type Tr33ForBranch,
+  type Tr33RequestCookies,
+} from "./branch";
+
+import { TR33_BRANCH_COOKIE, TR33_BRANCH_COOKIE_FALLBACKS, type Tr33ForBranch, type Tr33RequestCookies } from "./branch";
+import { resolveBranch as resolveBranchImpl } from "./branch";
+
+// ---- compat aliases ------------------------------------------------------
+
+export type Tr33ForActiveRef = Tr33ForBranch;
+
+/**
+ * Legacy alias for `resolveBranch`. Still works — reads the canonical
+ * `x-tr33-branch` cookie plus historic fallbacks (`x-content-branch`,
+ * `tr33-active-ref`), then the configured ref.
  */
 export function resolveActiveRef(args: {
-  tr33: Tr33ForActiveRef;
+  tr33: Tr33ForBranch;
   cookies: Tr33RequestCookies;
+  cookieName?: string;
 }): string {
-  const trimmed = args.cookies.get(TR33_ACTIVE_REF_COOKIE)?.value?.trim();
-  return trimmed ? trimmed : args.tr33._.config.ref;
+  return resolveBranchImpl({
+    tr33: args.tr33,
+    cookies: args.cookies,
+    cookieName: args.cookieName,
+    fallbackCookieNames: TR33_BRANCH_COOKIE_FALLBACKS,
+  });
 }
+
+/** @deprecated use `TR33_BRANCH_COOKIE` */
+export const LEGACY_TR33_ACTIVE_REF_COOKIE = TR33_BRANCH_COOKIE;
+

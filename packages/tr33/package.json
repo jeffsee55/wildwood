@@ -6,7 +6,14 @@
   "exports": {
     ".": "./dist/index.mjs",
     "./nextjs": "./dist/nextjs/index.mjs",
+    "./nextjs/branch": "./dist/nextjs/branch.mjs",
+    "./nextjs/handler": "./dist/nextjs/handler.mjs",
+    "./nextjs/kit": "./dist/nextjs/kit.mjs",
+    "./nextjs/play-auth": "./dist/nextjs/play-auth.mjs",
+    "./nextjs/resolve-active-ref": "./dist/nextjs/resolve-active-ref.mjs",
+    "./nextjs/route": "./dist/nextjs/route.mjs",
     "./react": "./dist/react/index.mjs",
+    "./react/markdown": "./dist/react/markdown.mjs",
     "./package.json": "./package.json"
   },
   "files": [
@@ -14,8 +21,8 @@
     "bundled-extension"
   ],
   "scripts": {
-    "build": "pnpm run build:deps && node scripts/copy-bundled-extension.mjs && tsdown",
-    "build:deps": "pnpm --filter tr33-store run build && pnpm --filter @tr33/kit run build && pnpm --filter @tr33/ui run build",
+    "build": "pnpm --filter @tr33/shared run build 2>/dev/null || true && pnpm --filter tr33-store run build && tsdown && node scripts/copy-bundled-extension.mjs",
+    "build:deps": "pnpm --filter tr33-store run build",
     "dev": "tsdown --watch",
     "lib:dev": "tsdown --watch",
     "watch:deps": "tsdown --watch",
@@ -31,9 +38,12 @@
     "test:watch": "vitest"
   },
   "peerDependencies": {
-    "next": "^16.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "next": "^16.0.0"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@turbo/gen": "^1.12.4",
@@ -59,32 +69,19 @@
     "vitest": "4.0.18"
   },
   "dependencies": {
-    "@electric-sql/pglite": "^0.2.13",
     "@libsql/client": "^0.14.0",
     "@libsql/kysely-libsql": "^0.4.1",
     "@octokit/auth-app": "^8.2.0",
     "@octokit/graphql": "^9.0.3",
     "@octokit/rest": "21.0.2",
-    "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/instrumentation": "^0.208.0",
-    "@opentelemetry/sdk-node": "^0.208.0",
     "@tr33/kit": "workspace:*",
-    "@tr33/ui": "workspace:*",
-    "@trpc/client": "11.0.0-rc.648",
-    "@trpc/server": "11.0.0-rc.648",
+    "@tr33/shared": "workspace:*",
     "@types/diff3": "^0.0.2",
-    "@uiw/react-json-view": "2.0.0-alpha.41",
-    "better-auth": "^1.6.11",
-    "better-sqlite3": "^12.10.0",
-    "blessed": "^0.1.81",
-    "blessed-contrib": "^4.11.0",
     "buffer": "6.0.3",
-    "crypto-hash": "^3.1.0",
     "diff3": "^0.0.4",
     "drizzle-kit": "catalog:",
     "drizzle-orm": "catalog:",
     "h3": "2.0.0-beta.5",
-    "isomorphic-git": "^1.27.1",
     "js-yaml": "^4.1.0",
     "kysely": "^0.28.17",
     "mdast-util-compact": "^5.0.0",
@@ -99,13 +96,13 @@
     "minimatch": "^10.0.1",
     "neverthrow": "catalog:",
     "node-diff3": "^3.2.0",
-    "react": "19.0.0-rc-5c56b873-20241107",
-    "react-dom": "19.0.0-rc-5c56b873-20241107",
     "shasum": "^1.0.2",
     "tr33-store": "workspace:*",
-    "tr33-vscode": "workspace:*",
     "unist-util-visit": "^5.0.0",
     "zod": "4.1.1"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^12.10.0"
   },
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",

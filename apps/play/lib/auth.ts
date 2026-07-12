@@ -1,4 +1,4 @@
-import { createTr33PlayAuth } from "tr33/nextjs";
+import { createTr33PlayAuth } from "tr33/nextjs/play-auth";
 import { headers } from "next/headers";
 
 import { playgroundDatabaseUrl } from "./playground-database-url";

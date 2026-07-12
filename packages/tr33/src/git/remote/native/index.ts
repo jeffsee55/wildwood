@@ -6,11 +6,9 @@ import {
   type PushResult,
   Remote,
 } from "@/git/remote";
-
 import {
-  _runGitCommand,
-  _runGitCommand2,
-  _runGitCommandBuffer,
+  runGit,
+  runGitBuffer,
 } from "@/git/remote/native/run-git-command";
 import { type Commit, commitSchema } from "@/types";
 
@@ -27,15 +25,12 @@ function gitErrorSummary(message: string): string {
 }
 
 export class NativeRemote extends Remote {
-  /** Cached: whether `remote.origin.url` is set (undefined = not yet checked). */
   private _hasOriginRemote: boolean | undefined;
 
   private async hasOriginRemote(): Promise<boolean> {
-    if (this._hasOriginRemote !== undefined) {
-      return this._hasOriginRemote;
-    }
+    if (this._hasOriginRemote !== undefined) return this._hasOriginRemote;
     const result = await this.executeCommand({
-      command: "config --get remote.origin.url",
+      args: ["config", "--get", "remote.origin.url"],
     });
     this._hasOriginRemote = result.isOk() && result.value.trim().length > 0;
     return this._hasOriginRemote;
@@ -44,118 +39,83 @@ export class NativeRemote extends Remote {
   async listBranches(): Promise<string[]> {
     const [localResult, remoteResult] = await Promise.all([
       this.executeCommand({
-        command: "branch --format='%(refname:short)'",
+        args: ["branch", "--format=%(refname:short)"],
       }),
       this.executeCommand({
-        command: "branch -r --format='%(refname:short)'",
+        args: ["branch", "-r", "--format=%(refname:short)"],
       }),
     ]);
-    if (localResult.isErr()) {
+    if (localResult.isErr())
       throw new Error(`Failed to list local branches: ${localResult.error}`);
-    }
-    if (remoteResult.isErr()) {
+    if (remoteResult.isErr())
       throw new Error(`Failed to list remote branches: ${remoteResult.error}`);
-    }
     const normalize = (value: string) =>
       value
         .split("\n")
-        .map((branch) => branch.trim())
+        .map((b) => b.trim())
         .filter(Boolean)
-        .map((branch) => branch.replace(/^origin\//, ""))
-        .filter((branch) => branch !== "HEAD");
+        .map((b) => b.replace(/^origin\//, ""))
+        .filter((b) => b !== "HEAD");
     return [
-      ...new Set([
-        ...normalize(localResult.value),
-        ...normalize(remoteResult.value),
-      ]),
+      ...new Set([...normalize(localResult.value), ...normalize(remoteResult.value)]),
     ];
   }
 
   async fetchBlobs(args: { oids: string[] }) {
-    if (args.oids.length === 0) {
-      return [];
-    }
-
+    if (args.oids.length === 0) return [];
     const uniqueOids = [...new Set(args.oids)];
-
     const result = await this.executeCommandBuffer({
-      command: "cat-file --batch",
-      stdinInput: uniqueOids.join("\n"),
+      args: ["cat-file", "--batch"],
+      input: uniqueOids.join("\n"),
     });
-    if (result.isErr()) {
-      throw new Error(`Failed to get blobs: ${result.error}`);
-    }
+    if (result.isErr()) throw new Error(`Failed to get blobs: ${result.error}`);
 
     const blobs: { oid: string; content: string }[] = [];
     const output = result.value;
     let pos = 0;
-
     while (pos < output.length) {
       const headerEnd = output.indexOf(0x0a, pos);
       if (headerEnd === -1) break;
-
       const headerLine = output.slice(pos, headerEnd).toString("utf-8");
       if (!headerLine.trim()) {
         pos = headerEnd + 1;
         continue;
       }
-
       const parts = headerLine.split(" ");
       const oid = parts[0];
       const type = parts[1];
       const size = Number.parseInt(parts[2] || "0");
-
       if (type === "missing") {
         pos = headerEnd + 1;
         continue;
       }
-
       if (type !== "blob") {
-        const contentStart = headerEnd + 1;
-        pos = contentStart + size + 1;
+        pos = headerEnd + 1 + size + 1;
         continue;
       }
-
       const contentStart = headerEnd + 1;
       const contentBuffer = output.slice(contentStart, contentStart + size);
-      const content = contentBuffer.toString("utf-8");
-
-      blobs.push({ oid, content });
+      blobs.push({ oid: oid!, content: contentBuffer.toString("utf-8") });
       pos = contentStart + size + 1;
     }
-
     return blobs;
   }
 
   async fetchBlobRaw(args: { oid: string }): Promise<Buffer | null> {
     const result = await this.executeCommandBuffer({
-      command: `cat-file blob ${args.oid}`,
+      args: ["cat-file", "blob", args.oid],
     });
     if (result.isErr()) return null;
-    return result.value;
+    return result.value as Buffer;
   }
 
   async fetchCommit(args: { ref: string } | { oid: string }): Promise<Commit> {
-    let commitOid: string;
-    if ("ref" in args) {
-      commitOid = await this.resolveRefToOid(args.ref);
-    } else {
-      commitOid = args.oid;
-    }
-    const result2 = await this.executeCommand({
-      command: `cat-file commit ${commitOid}`,
-    });
-    if (result2.isErr()) {
-      throw new Error(`Failed to get commit: ${result2.error}`);
-    }
-    return this.parseRawCommitObject(commitOid, result2.value);
+    const commitOid = "ref" in args ? await this.resolveRefToOid(args.ref) : args.oid;
+    const result = await this.executeCommand({ args: ["cat-file", "commit", commitOid] });
+    if (result.isErr()) throw new Error(`Failed to get commit: ${result.error}`);
+    return this.parseRawCommitObject(commitOid, result.value);
   }
 
-  /**
-   * `git branch -r` lists `origin/foo` which we often show as `foo`. Plain
-   * `git rev-parse foo` fails without a local branch; remote-tracking refs
-   * resolve as `origin/...` or `refs/remotes/origin/...` when `origin` exists.
-   */
   private async resolveRefToOid(ref: string): Promise<string> {
     const candidates: string[] = [ref];
     if (!ref.startsWith("refs/remotes/")) {
@@ -165,9 +125,7 @@ export class NativeRemote extends Remote {
           ? ref.slice("refs/heads/".length)
           : ref;
       if ((await this.hasOriginRemote()) && tail.length > 0) {
-        if (!ref.startsWith("origin/")) {
-          candidates.push(`origin/${tail}`);
-        }
+        if (!ref.startsWith("origin/")) candidates.push(`origin/${tail}`);
         candidates.push(`refs/remotes/origin/${tail}`);
       }
     }
@@ -176,25 +134,17 @@ export class NativeRemote extends Remote {
     for (const candidate of candidates) {
       if (tried.has(candidate)) continue;
       tried.add(candidate);
-      const result = await this.executeCommand({
-        command: `rev-parse ${candidate}`,
-      });
-      if (result.isOk()) {
-        return result.value.trim();
-      }
+      const result = await this.executeCommand({ args: ["rev-parse", candidate] });
+      if (result.isOk()) return result.value.trim();
       lastErr = String(result.error);
     }
     for (const fallback of ["HEAD", process.env.VERCEL_GIT_COMMIT_SHA].filter(
-      (value): value is string => Boolean(value?.trim()),
+      (v): v is string => Boolean(v?.trim()),
     )) {
       if (tried.has(fallback)) continue;
       tried.add(fallback);
-      const result = await this.executeCommand({
-        command: `rev-parse ${fallback}`,
-      });
-      if (result.isOk()) {
-        return result.value.trim();
-      }
+      const result = await this.executeCommand({ args: ["rev-parse", fallback] });
+      if (result.isOk()) return result.value.trim();
       lastErr = String(result.error);
     }
     const hasOrigin = await this.hasOriginRemote();
@@ -202,18 +152,12 @@ export class NativeRemote extends Remote {
     const guidance = hasOrigin
       ? "Run `git fetch` if the branch exists on the remote, or create/checkout the branch locally. If your default branch has another name (for example `master`), set `ref` in your Tr33 config to match."
       : "There is no `remote.origin`. Create a local branch named for this ref, or set `ref` in your Tr33 config to a branch that exists (`git branch` lists local branches).";
-    throw new Error(
-      `Cannot resolve git ref "${ref}" to a commit (${summary}). ${guidance}`,
-    );
+    throw new Error(`Cannot resolve git ref "${ref}" to a commit (${summary}). ${guidance}`);
   }
 
   async fetchTree({ oid }: { oid: string }) {
-    const result = await this.executeCommand({
-      command: `ls-tree ${oid}`,
-    });
-    if (result.isErr()) {
-      return null;
-    }
+    const result = await this.executeCommand({ args: ["ls-tree", oid] });
+    if (result.isErr()) return null;
     const entries = this.parseRawTreeObject(result.value);
     return entries.reduce(
       (acc, entry) => {
@@ -224,66 +168,74 @@ export class NativeRemote extends Remote {
     );
   }
 
-  private async executeCommand(args: { command: string; stdinInput?: string }) {
-    const gitPath = this.getPathToGit(this.config.localPath || process.cwd());
-    if (!gitPath) {
-      throw new Error("No local path found");
-    }
-    const cwd =
-      gitPath.endsWith(".git") || gitPath.endsWith(".git/")
-        ? dirname(gitPath.replace(/\/$/, ""))
-        : gitPath;
-    return await _runGitCommand({
-      command: args.command,
-      cwd,
-      stdinInput: args.stdinInput,
-    });
+  // ---- internals ----------------------------------------------------------
+
+  private cwd(): string {
+    const raw =
+      (this.config as { resolvedLocalPath?: string | undefined }).resolvedLocalPath ??
+      this.config.localPath ??
+      process.cwd();
+    // Allow explicit relative paths (e.g. `localPath: "."` from old cookies/tests).
+    // Config's `resolvedLocalPath` is already normalized, but raw `localPath` might not be.
+    const start = raw.trim() === "" ? process.cwd() : raw;
+    const abs =
+      raw === "." || raw.trim() === ""
+        ? process.cwd()
+        : (() => {
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const { isAbsolute, resolve } = require("node:path") as typeof import("node:path");
+              return isAbsolute(start) ? start : resolve(process.cwd(), start);
+            } catch {
+              return start;
+            }
+          })();
+    const gitPath = this.getPathToGit(abs);
+    if (!gitPath) throw new Error("No local path found");
+    return gitPath.endsWith(".git") || gitPath.endsWith(".git/")
+      ? dirname(gitPath.replace(/\/$/, ""))
+      : gitPath;
   }
 
-  private isAbsolutePath(path: string): boolean {
-    return path.startsWith("/");
+  private async executeCommand(args: { args: string[]; input?: string }) {
+    return runGit({ cwd: this.cwd(), args: args.args, input: args.input });
+  }
+
+  private async executeCommandBuffer(args: {
+    args: string[];
+    input?: string;
+  }) {
+    return runGitBuffer({ cwd: this.cwd(), args: args.args, input: args.input });
   }
 
   private getPathToGit(path: string): string | null {
-    if (path === ".") {
-      return this.getPathToGit(process.cwd());
-    }
-    const gitPath = join(path, ".git/");
-    if (fs.existsSync(gitPath)) {
-      return gitPath;
-    }
-    const parentPath = dirname(path);
-    if (parentPath === path) {
-      return null;
-    }
-    return this.getPathToGit(parentPath);
+    if (path === ".") return this.getPathToGit(process.cwd());
+    const gp = join(path, ".git/");
+    if (fs.existsSync(gp)) return gp;
+    const parent = dirname(path);
+    if (parent === path) return null;
+    return this.getPathToGit(parent);
   }
 
   private parseRawCommitObject(oid: string, rawCommitObject: string) {
     const lines = rawCommitObject.split("\n");
     const messageStartIndex = lines.findIndex((line) => line === "") + 1;
-
     let actualMessageStart = messageStartIndex;
     while (
       actualMessageStart < lines.length &&
-      lines[actualMessageStart].startsWith("gpgsig")
+      lines[actualMessageStart]!.startsWith("gpgsig")
     ) {
       actualMessageStart++;
       while (
         actualMessageStart < lines.length &&
-        lines[actualMessageStart].startsWith(" ")
-      ) {
+        lines[actualMessageStart]!.startsWith(" ")
+      )
         actualMessageStart++;
-      }
-      if (
-        actualMessageStart < lines.length &&
-        lines[actualMessageStart] === ""
-      ) {
+      if (actualMessageStart < lines.length && lines[actualMessageStart] === "") {
         actualMessageStart++;
         break;
       }
     }
-
     let treeOid = "";
     let parent: string | null = null;
     let secondParent: string | null = null;
@@ -295,37 +247,30 @@ export class NativeRemote extends Remote {
     let committerEmail = "";
     let committerTimestamp = "";
     let committerTimezoneOffset = 0;
-
     for (const line of lines) {
-      if (line.startsWith("tree ")) {
-        treeOid = line.substring(5);
-      } else if (line.startsWith("parent ")) {
-        if (!parent) {
-          parent = line.substring(7);
-        } else if (!secondParent) {
-          secondParent = line.substring(7);
-        }
+      if (line.startsWith("tree ")) treeOid = line.substring(5);
+      else if (line.startsWith("parent ")) {
+        if (!parent) parent = line.substring(7);
+        else if (!secondParent) secondParent = line.substring(7);
       } else if (line.startsWith("author ")) {
-        const match = line.match(/author (.+) <(.+)> (\d+) ([+-]\d{4})/);
-        if (match) {
-          authorName = match[1];
-          authorEmail = match[2];
-          authorTimestamp = match[3];
-          authorTimezoneOffset = this.parseGitTimezone(match[4]);
+        const m = line.match(/author (.+) <(.+)> (\d+) ([+-]\d{4})/);
+        if (m) {
+          authorName = m[1]!;
+          authorEmail = m[2]!;
+          authorTimestamp = m[3]!;
+          authorTimezoneOffset = this.parseGitTimezone(m[4]!);
         }
       } else if (line.startsWith("committer ")) {
-        const match = line.match(/committer (.+) <(.+)> (\d+) ([+-]\d{4})/);
-        if (match) {
-          committerName = match[1];
-          committerEmail = match[2];
-          committerTimestamp = match[3];
-          committerTimezoneOffset = this.parseGitTimezone(match[4]);
+        const m = line.match(/committer (.+) <(.+)> (\d+) ([+-]\d{4})/);
+        if (m) {
+          committerName = m[1]!;
+          committerEmail = m[2]!;
+          committerTimestamp = m[3]!;
+          committerTimezoneOffset = this.parseGitTimezone(m[4]!);
         }
       }
     }
-
     const message = lines.slice(actualMessageStart).join("\n");
-
     return commitSchema.parse({
       oid,
       message,
@@ -347,93 +292,51 @@ export class NativeRemote extends Remote {
     });
   }
 
-  private parseGitTimezone(gitTimezone: string): number {
-    const sign = gitTimezone[0] === "+" ? -1 : 1;
-    const hours = Number.parseInt(gitTimezone.slice(1, 3));
-    const minutes = Number.parseInt(gitTimezone.slice(3, 5));
-    return sign * (hours * 60 + minutes);
+  private parseGitTimezone(tz: string): number {
+    const sign = tz[0] === "+" ? -1 : 1;
+    const h = Number.parseInt(tz.slice(1, 3));
+    const m = Number.parseInt(tz.slice(3, 5));
+    return sign * (h * 60 + m);
   }
 
   private parseRawTreeObject(rawTreeObject: string) {
-    const treesEntriesToPut: {
-      oid: string;
-      path: string;
-      type: "tree" | "blob";
-    }[] = [];
-    const lines = rawTreeObject.split("\n");
-    for (const line of lines.filter((line) => line.trim() !== "")) {
+    const out: { oid: string; path: string; type: "tree" | "blob" }[] = [];
+    for (const line of rawTreeObject.split("\n").filter((l) => l.trim() !== "")) {
       const [, type, oidAndPath] = line.split(" ");
-      const [entryOid, name] = oidAndPath.split("\t");
-      treesEntriesToPut.push({
-        oid: entryOid,
-        type: type === "tree" ? "tree" : "blob",
-        path: name,
-      });
+      const [entryOid, name] = oidAndPath!.split("\t");
+      out.push({ oid: entryOid!, type: type === "tree" ? "tree" : "blob", path: name! });
     }
-    return treesEntriesToPut;
+    return out;
   }
 
-  private async executeCommandBuffer(args: {
-    command: string;
-    stdinInput?: string;
-  }) {
-    const gitPath = this.getPathToGit(this.config.localPath || process.cwd());
-    if (!gitPath) {
-      throw new Error("No local path found");
-    }
-    const cwd =
-      gitPath.endsWith(".git") || gitPath.endsWith(".git/")
-        ? dirname(gitPath.replace(/\/$/, ""))
-        : gitPath;
-    return await _runGitCommandBuffer({
-      command: args.command,
-      cwd,
-      stdinInput: args.stdinInput,
-    });
-  }
-
+  // Unsupported remote ops -> keep abstract but explicit errors
   async createBlob(args: { content: Uint8Array }): Promise<{ oid: string }> {
-    const gitPath = this.getPathToGit(this.config.localPath || process.cwd());
-    if (!gitPath) throw new Error("No local path found");
-    const cwd =
-      gitPath.endsWith(".git") || gitPath.endsWith(".git/")
-        ? dirname(gitPath.replace(/\/$/, ""))
-        : gitPath;
-    const oid = await _runGitCommand2({
-      command: "hash-object -w --stdin",
+    const cwd = this.cwd();
+    const res = await runGitBuffer({
       cwd,
-      stdinInput: Buffer.from(args.content),
+      args: ["hash-object", "-w", "--stdin"],
+      input: args.content,
     });
-    return { oid: oid.trim() };
+    if (res.isErr()) throw new Error(`hash-object failed: ${res.error.message}`);
+    return { oid: res.value.toString("utf-8").trim() };
   }
 
-  async push(_args: Parameters<Remote["push"]>[0]): Promise<PushResult> {
+  async push(): Promise<PushResult> {
     throw new Error("push not implemented for NativeRemote");
   }
-
-  async createPr(_args: Parameters<Remote["createPr"]>[0]): Promise<PrResult> {
+  async createPr(): Promise<PrResult> {
     throw new Error("createPr not implemented for NativeRemote");
   }
-
-  async updatePr(_args: Parameters<Remote["updatePr"]>[0]): Promise<PrResult> {
+  async updatePr(): Promise<PrResult> {
     throw new Error("updatePr not implemented for NativeRemote");
   }
-
-  async findPr(
-    _args: Parameters<Remote["findPr"]>[0],
-  ): Promise<PrResult | null> {
-    throw new Error("findPr not implemented for NativeRemote");
+  async findPr(): Promise<PrResult | null> {
+    return null;
   }
-
-  async mergePr(
-    _args: Parameters<Remote["mergePr"]>[0],
-  ): Promise<MergePrResult> {
-    throw new Error("mergePr not implemented for NativeRemote");
-  }
-
-  async createPrComment(
-    _args: Parameters<Remote["createPrComment"]>[0],
-  ): Promise<void> {
+  async createPrComment(): Promise<void> {
     throw new Error("createPrComment not implemented for NativeRemote");
+  }
+  async mergePr(): Promise<MergePrResult> {
+    throw new Error("mergePr not implemented for NativeRemote");
   }
 }

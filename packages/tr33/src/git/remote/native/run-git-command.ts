@@ -1,143 +1,129 @@
-import { exec, spawn } from "node:child_process";
-import { promisify } from "node:util";
-import { err, ok } from "neverthrow";
+import { spawn } from "node:child_process";
+import { err, ok, type Result } from "neverthrow";
 
-// Convert exec to return a Promise instead of using callbacks
-const execPromise = promisify(exec);
+export type GitRunOptions = {
+  cwd: string;
+  /** Args without the leading `git`. e.g. ["rev-parse","HEAD"] */
+  args: string[];
+  /** Stdin payload — string for text commands, Buffer for binary. */
+  input?: string | Uint8Array | Buffer;
+  /** Max buffered stdout/stderr before aborting (bytes). */
+  maxBuffer?: number;
+};
+
+function toError(e: unknown): Error {
+  if (e instanceof Error) return e;
+  return new Error(String(e));
+}
+
+/**
+ * Single, shell-free git runner. No shell interpolation, no `command.split(" ")`.
+ *
+ * Returns `Result<string,Error>` for text commands and `Result<Buffer,Error>` for binary.
+ * Caller decides which variant to need via return type.
+ */
+export async function runGit(
+  opts: GitRunOptions,
+): Promise<Result<string, Error>> {
+  const res = await runGitBuffer(opts);
+  if (res.isErr()) return err(res.error);
+  return ok(res.value.toString("utf-8"));
+}
+
+export async function runGitBuffer(
+  opts: GitRunOptions,
+): Promise<Result<Buffer, Error>> {
+  const { cwd, args, input, maxBuffer = 50 * 1024 * 1024 } = opts;
+  return new Promise((resolve) => {
+    const cp = spawn("git", args, {
+      cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: process.env,
+    });
+
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let stderr = "";
+    let settled = false;
+    const finish = (r: Result<Buffer, Error>) => {
+      if (settled) return;
+      settled = true;
+      resolve(r);
+    };
+
+    cp.stdout.on("data", (d: Buffer) => {
+      total += d.length;
+      if (total > maxBuffer) {
+        cp.kill();
+        finish(
+          err(new Error(`git ${args[0]} exceeded maxBuffer ${maxBuffer}`)),
+        );
+        return;
+      }
+      chunks.push(d);
+    });
+    cp.stderr.on("data", (d: Buffer) => {
+      stderr += d.toString("utf-8");
+    });
+    cp.on("error", (e) => finish(err(toError(e))));
+    cp.on("close", (code) => {
+      if (code === 0) {
+        finish(ok(Buffer.concat(chunks)));
+      } else {
+        finish(
+          err(
+            new Error(
+              stderr.trim() ||
+                `git ${args.join(" ")} failed with code ${code}`,
+            ),
+          ),
+        );
+      }
+    });
+
+    if (input !== undefined) {
+      // biome-ignore lint/suspicious/noExplicitAny: BufferSource overload
+      cp.stdin.write(input as any);
+    }
+    cp.stdin.end();
+  });
+}
+
+export type StdoutStringResult = Result<string, Error>;
+export type StdoutBufferResult = Result<Buffer, Error>;
+
+// --- Back-compat shims to be removed once call sites migrate -----------------
+// Kept only so incremental refactor doesn't block on every file.
+// TODO: delete.
+
+export const _runGitCommand = (args: {
+  command: string;
+  cwd: string;
+  stdinInput?: string;
+  env?: string;
+}) => runGit({ cwd: args.cwd, args: args.command.split(" "), input: args.stdinInput });
 
 export const _runGitCommand2 = async (args: {
   command: string;
   cwd: string;
-  stdinInput?: Buffer; // Use Buffer for binary data
+  stdinInput?: Buffer;
 }) => {
-  const cwd = args.cwd;
-
-  try {
-    // Prepare the environment variables if necessary
-    const envOptions = {};
-
-    // Split the command into an array of arguments
-    const gitCommandParts = args.command.split(" ");
-
-    // Spawn the git process
-    const gitProcess = spawn("git", gitCommandParts, {
-      cwd,
-      ...envOptions,
-      stdio: args.stdinInput
-        ? ["pipe", "pipe", "pipe"]
-        : ["ignore", "pipe", "pipe"], // Set up stdin to allow piping binary data if needed
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    // Capture stdout and stderr
-    gitProcess.stdout?.on("data", (data) => {
-      stdout += data.toString();
-    });
-
-    gitProcess.stderr?.on("data", (data) => {
-      stderr += data.toString();
-    });
-
-    // If we have stdin input, write the binary content
-    if (args.stdinInput) {
-      gitProcess.stdin?.write(args.stdinInput);
-      gitProcess.stdin?.end();
-    }
-
-    // Wait for the process to finish
-    return new Promise<string>((resolve, reject) => {
-      gitProcess.on("close", (code) => {
-        if (code === 0) {
-          resolve(stdout.trim());
-        } else {
-          reject(new Error(`Git command failed with code ${code}: ${stderr}`));
-        }
-      });
-    });
-  } catch (error) {
-    throw new Error(`Error executing git command: ${(error as Error).message}`);
-  }
+  const r = await runGitBuffer({
+    cwd: args.cwd,
+    args: args.command.split(" "),
+    input: args.stdinInput,
+  });
+  if (r.isErr()) throw r.error;
+  return r.value.toString("utf-8").trim();
 };
 
-// Utility function to execute git commands
-export const _runGitCommand = async (args: {
-  command: string;
-  cwd: string;
-  stdinInput?: string; // Optional input for stdin, needed for commands like 'mktree'
-  env?: string;
-}) => {
-  try {
-    const cwd = args.cwd;
-    // Execute the git command
-    const envShim = args.env ? ` ${args.env} ` : " ";
-    const shellCommand = args.stdinInput
-      ? `printf '${args.stdinInput}' |${envShim}git ${args.command}` // Don't trim - preserve exact content for correct hashing
-      : `${envShim}git ${args.command}`;
-
-    const { stdout } = await execPromise(shellCommand, {
-      cwd,
-      maxBuffer: 1024 * 1024 * 50, // Increase the buffer size to 50MB for large repositories
-    });
-
-    // Return the output
-    return ok(stdout);
-  } catch (e) {
-    return err(e);
-  }
-};
-
-/**
- * Run git command and return output as Buffer (for binary-safe parsing)
- */
-export const _runGitCommandBuffer = async (args: {
+export const _runGitCommandBuffer = (args: {
   command: string;
   cwd: string;
   stdinInput?: string;
-}) => {
-  try {
-    const cwd = args.cwd;
-    const gitCommandParts = args.command.split(" ");
-
-    return new Promise<ReturnType<typeof ok<Buffer>>>((resolve, reject) => {
-      const gitProcess = spawn("git", gitCommandParts, {
-        cwd,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-
-      const chunks: Buffer[] = [];
-      let stderr = "";
-
-      gitProcess.stdout?.on("data", (data: Buffer) => {
-        chunks.push(data);
-      });
-
-      gitProcess.stderr?.on("data", (data: Buffer) => {
-        stderr += data.toString();
-      });
-
-      // Write stdin input if provided
-      if (args.stdinInput) {
-        gitProcess.stdin?.write(args.stdinInput);
-        gitProcess.stdin?.end();
-      } else {
-        gitProcess.stdin?.end();
-      }
-
-      gitProcess.on("close", (code) => {
-        if (code === 0) {
-          resolve(ok(Buffer.concat(chunks)));
-        } else {
-          reject(new Error(`Git command failed with code ${code}: ${stderr}`));
-        }
-      });
-
-      gitProcess.on("error", (error) => {
-        reject(error);
-      });
-    });
-  } catch (e) {
-    return err(e);
-  }
-};
+}) =>
+  runGitBuffer({
+    cwd: args.cwd,
+    args: args.command.split(" "),
+    input: args.stdinInput,
+  });

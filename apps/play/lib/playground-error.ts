@@ -1,7 +1,6 @@
 import { inspect } from "node:util";
 
 import type { PlaygroundConfig } from "./playground-config";
-import { getResolvedLocalPathForPlayground } from "./resolve-playground-local-path";
 import { playFailureHeadline } from "./playground-log";
 
 export type PlaygroundErrorContext = {
@@ -150,13 +149,12 @@ export function logAndFormatPlaygroundError(
   ctx: PlaygroundErrorContext,
 ): string {
   const c = ctx.config;
-  const resolvedLocal = getResolvedLocalPathForPlayground(c);
   const localPathLine =
     c.source === "local"
       ? [
-          `localPath (raw from cookie): ${c.localPath === "" || c.localPath == null ? "(empty — auto-detect from process.cwd)" : c.localPath}`,
-          `localPath (resolved to git root): ${resolvedLocal ?? "(n/a — not local)"}`,
+          `localPath (raw from cookie): ${c.localPath === "" || c.localPath == null ? "(empty — auto-detect from process.cwd via tr33 core)" : c.localPath}`,
           `next process.cwd(): ${process.cwd()}`,
+          `resolved git root is now picked by core's resolveLocalGitRoot(process.cwd()).`,
         ].join("\n")
       : "localPath: (not used; GitHub remote)";
 
@@ -170,7 +168,6 @@ export function logAndFormatPlaygroundError(
     formDefaultRef: c.ref,
     nextCwd: process.cwd(),
     localPathRaw: c.source === "local" ? c.localPath : null,
-    resolvedLocalPath: resolvedLocal,
     match: c.match,
     contentType: c.contentType,
     thrown: errorShapeForLog(err),

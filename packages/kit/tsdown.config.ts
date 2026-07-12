@@ -32,5 +32,10 @@ export default defineConfig({
   dts: { build: true },
   exports: true,
   plugins: [tailwindPlugin()],
-  deps: { alwaysBundle: [/sonner.*\.css/] },
+  deps: {
+    // Bundle `@tr33/shared` (pure JS / ~3KB) so consumers don't need `transpilePackages`.
+    alwaysBundle: [/@tr33\/shared/, /sonner.*\.css/],
+    // Keep React + Next external to guarantee single React copy (fixes useRef-of-null).
+    neverBundle: ["react", "react-dom", "react/jsx-runtime", "next", "next/navigation", "next/link"],
+  },
 });

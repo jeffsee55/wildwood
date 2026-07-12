@@ -1,106 +1,78 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Toolbar } from "tr33/nextjs";
+import { Markdown } from "tr33/react/markdown";
+import { tr33 } from "@/lib/tr33";
+import { docHrefFromUrl } from "@/lib/content";
+import type { DocPage } from "@/lib/content";
 
-import {
-  getDocBySlug,
-  getDocsIndex,
-  Markdown,
-  slugFromDocPath,
-} from "@/lib/content";
-import { getDocsKitAuth } from "@/lib/docs-kit-auth";
-import { getDocsTr33 } from "@/lib/tr33";
+type PageProps = { params: Promise<{ slug: string }> };
 
-type PageProps = {
-  params: Promise<{ slug: string }>;
-};
-
+// Static params = all docs. No nav required — content defines existence.
 export async function generateStaticParams() {
-  const { docs } = await getDocsIndex();
-  return docs.map((doc) => ({ slug: slugFromDocPath(doc._meta.path) }));
+  const res = (await tr33.docs.findMany({})) as unknown as { items: DocPage[] };
+  return res.items.map((d) => ({ slug: d.slug }));
 }
 
-export async function generateMetadata({
-  params,
-}: PageProps): Promise<Metadata> {
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
-  const doc = await getDocBySlug(slug);
-  if (!doc) {
-    return {
-      title: "Not found | Tr33 Docs",
-    };
-  }
-
-  return {
-    title: `${doc.title} | Tr33 Docs`,
-    description: doc.description,
-  };
+  const res = (await tr33.docs.findFirst({
+    where: { slug },
+  })) as unknown as { value: DocPage | null };
+  if (!res.value) return { title: "Not found | Tr33 Docs" };
+  return { title: `${res.value.title} | Tr33 Docs`, description: res.value.description };
 }
 
 export default async function DocsPage({ params }: PageProps) {
   const { slug } = await params;
-  const [{ docs, nav }, doc] = await Promise.all([
-    getDocsIndex(),
-    getDocBySlug(slug),
-  ]);
-  if (!doc) {
-    notFound();
-  }
+  const res = (await tr33.docs.findFirst({
+    where: { slug },
+  })) as unknown as { value: DocPage | null };
+  const doc = res.value;
+  if (!doc) notFound();
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-6xl gap-10 px-6 py-10">
-      <aside className="hidden w-64 shrink-0 border-r border-[color:var(--border)] pr-8 lg:block">
-        <Link href="/" className="text-lg font-semibold tracking-tight">
-          Tr33 Docs
-        </Link>
-        <p className="mt-3 text-sm text-[color:var(--muted)]">
-          {nav?.label ?? "Documentation"}
+    <article className="min-w-0 flex-1 rounded-3xl border border-[color:var(--border)] bg-white p-8 shadow-sm">
+      <div className="mb-8 border-b border-[color:var(--border)] pb-8">
+        <p className="text-sm font-medium uppercase tracking-[0.2em] text-[color:var(--muted)]">
+          {doc.author?.name ? `By ${doc.author.name}` : "Documentation"}
         </p>
-        <nav className="mt-6 space-y-2">
-          {docs.map((item) => {
-            const itemSlug = slugFromDocPath(item._meta.path);
-            const active = itemSlug === slug;
-            return (
-              <Link
-                key={item._meta.path}
-                href={`/docs/${itemSlug}`}
-                className={`block rounded-xl px-3 py-2 text-sm ${
-                  active
-                    ? "bg-[#171412] text-white"
-                    : "text-[color:var(--muted)] hover:bg-white hover:text-foreground"
-                }`}
-              >
-                {item.title}
-              </Link>
-            );
-          })}
-        </nav>
-      </aside>
+        <h1 className="mt-4 text-5xl font-semibold tracking-tight">{doc.title}</h1>
+        {doc.description ? (
+          <p className="mt-5 max-w-3xl text-lg leading-8 text-[color:var(--muted)]">{doc.description}</p>
+        ) : null}
+      </div>
 
-      <article className="min-w-0 flex-1 rounded-3xl border border-[color:var(--border)] bg-white p-8 shadow-sm">
-        <div className="mb-8 border-b border-[color:var(--border)] pb-8">
-          <p className="text-sm font-medium uppercase tracking-[0.2em] text-[color:var(--muted)]">
-            {doc.author?.name ? `By ${doc.author.name}` : "Documentation"}
-          </p>
-          <h1 className="mt-4 text-5xl font-semibold tracking-tight">
-            {doc.title}
-          </h1>
-          {doc.description ? (
-            <p className="mt-5 max-w-3xl text-lg leading-8 text-[color:var(--muted)]">
-              {doc.description}
-            </p>
-          ) : null}
-        </div>
-        <Markdown root={doc.body} />
-      </article>
-
-      <Toolbar
-        tr33={getDocsTr33()}
-        apiBase="/api"
-        theme="light"
-        auth={getDocsKitAuth()}
+      <Markdown
+        root={doc.body}
+        getLinkHref={docHrefFromUrl}
+        components={{
+          a: ({ href, children, ...rest }) => (
+            <Link
+              href={href ?? "#"}
+              className="font-medium text-foreground underline decoration-black/20 underline-offset-4 hover:decoration-black"
+              {...rest}
+            >
+              {children}
+            </Link>
+          ),
+        }}
+        classNames={{
+          h1: "mt-0 text-4xl font-semibold tracking-tight",
+          h2: "mt-12 text-2xl font-semibold tracking-tight",
+          h3: "mt-8 text-xl font-semibold tracking-tight",
+          h4: "mt-6 text-lg font-semibold tracking-tight",
+          p: "mt-5 leading-7 text-[color:var(--muted)]",
+          ul: "mt-5 list-disc space-y-2 pl-6 leading-7 text-[color:var(--muted)]",
+          ol: "mt-5 list-decimal space-y-2 pl-6 leading-7 text-[color:var(--muted)]",
+          code: "mt-5 overflow-x-auto rounded-2xl border border-[color:var(--border)] bg-[#171412] p-4 text-sm text-white",
+          blockquote: "mt-6 rounded-2xl border border-[color:var(--border)] bg-white p-5 text-[color:var(--muted)]",
+          leafDirective: "mt-6 rounded-2xl border border-[color:var(--border)] bg-white p-5 text-[color:var(--muted)]",
+          containerDirective:
+            "mt-6 rounded-2xl border border-[color:var(--border)] bg-white p-5 text-[color:var(--muted)]",
+          thematicBreak: "my-10 border-[color:var(--border)]",
+        }}
       />
-    </main>
+    </article>
   );
 }

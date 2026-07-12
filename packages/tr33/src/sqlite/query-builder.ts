@@ -310,15 +310,145 @@ export const toDrizzleWhereClause = whereClauseSchema.transform(
   },
 );
 
-/**
- * Build a worktree query for findFirst operations.
- * Now queries through entries -> changes -> blob
- */
+// ── helpers ───────────────────────────────────────────────────────────────
+
+type WithObject = {
+  where?: Record<string, unknown>;
+  limit?: number;
+  offset?: number;
+  orderBy?: Record<string, "asc" | "desc">;
+  with?: Record<string, WithClauseInput>;
+  references?: Record<string, WithClauseInput>;
+};
+type WithClauseInput = boolean | WithObject;
+
+// Drizzle relational wants a relation name (`toConnections`, `fromConnections`).
+// We collect per-field specs and collapse them into a single spec that OR's fields
+// so `with: { author: true, tags: true }` doesn't last-wins.
+type ToSpec = {
+  field: string;
+  where?: unknown;
+  limit?: number;
+  offset?: number;
+  orderBy?: Record<string, "asc" | "desc">;
+  nestedWith?: Record<string, unknown>;
+};
+type FromSpec = {
+  referencedAs: string;
+  entryWhere?: unknown;
+  limit?: number;
+  offset?: number;
+  nestedWith?: Record<string, unknown>;
+};
+
+function buildNestedWith(
+  clause: Record<string, WithClauseInput>,
+  recurseWith: (c: Record<string, WithClauseInput>) => Record<string, unknown>,
+  recurseRefs: (
+    r: Record<string, WithClauseInput>,
+  ) => Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  // Nested `with` is itself a map of field->input; recurse into it via the main transforms.
+  const w =
+    Object.keys(clause).length === 0 ? undefined : recurseWith(clause);
+  const r =
+    Object.keys(clause).length === 0 ? undefined : recurseRefs(clause);
+  const merged: Record<string, unknown> = { ...(w ?? {}) };
+  if (r) Object.assign(merged, r);
+  return merged;
+}
+
+function blobOnly(): Record<string, unknown> {
+  return { blob: { columns: { content: true } } };
+}
+
+function toConnsSpecToDrizzle(specs: ToSpec[]): Record<string, unknown> {
+  if (specs.length === 0) return {};
+  const mkEntryWith = (s: ToSpec | undefined) => {
+    const nw = s?.nestedWith ?? blobOnly();
+    return {
+      where: s?.where,
+      limit: s?.limit,
+      offset: s?.offset,
+      with: nw,
+    };
+  };
+
+  // Array connections store field as `children.0`, `children.1`, etc.
+  // First-class fix: when user asks with:{ children:true }, match exact OR prefix.
+  // We use OR of eq + like to cover both single and array connections.
+  const fieldClause = (field: string) => ({
+    OR: [{ field: { eq: field } }, { field: { like: `${field}.%` } }, { field: { like: `${field}[%` } }],
+  });
+
+  if (specs.length === 1) {
+    const only = specs[0]!;
+    // Connection ordering is stable by key (children.0, children.1, ...). User's orderBy is for toEntry ordering.
+    // Pass user orderBy through to the toEntry with.
+    return {
+      where: fieldClause(only.field),
+      with: {
+        toEntry: mkEntryWith(only),
+      },
+      ...(only.limit !== undefined ? { limit: only.limit } : {}),
+      ...(only.offset !== undefined ? { offset: only.offset } : {}),
+      orderBy: { key: "asc" } as unknown as Record<string, unknown>,
+    };
+  }
+
+  return {
+    where: {
+      OR: specs.flatMap((s) => [
+        { field: { eq: s.field } },
+        { field: { like: `${s.field}.%` } },
+        { field: { like: `${s.field}[%` } },
+      ]),
+    },
+    with: {
+      toEntry: {
+        with: blobOnly(),
+      },
+    },
+    orderBy: { key: "asc" },
+  };
+}
+
+function fromConnsSpecToDrizzle(
+  specs: FromSpec[],
+): Record<string, unknown> {
+  if (specs.length === 0) return {};
+  const mkWith = (s: FromSpec | undefined) => s?.nestedWith ?? blobOnly();
+  if (specs.length === 1) {
+    const only = specs[0]!;
+    const where = only.entryWhere
+      ? {
+          AND: [
+            { referencedAs: { eq: only.referencedAs } },
+            { fromEntry: only.entryWhere },
+          ],
+        }
+      : { referencedAs: { eq: only.referencedAs } };
+    return {
+      where,
+      limit: only.limit,
+      offset: only.offset,
+      with: { fromEntry: { with: mkWith(only) } },
+    };
+  }
+  return {
+    where: { OR: specs.map((s) => ({ referencedAs: { eq: s.referencedAs } })) },
+    with: { fromEntry: { with: blobOnly() } },
+    orderBy: { key: "asc" },
+  };
+}
+
+// ── main ─────────────────────────────────────────────────────────────────
+
 export function buildWorktreeQuery(
   args: FindWorktreeEntriesArgs,
   config: Config<ConfigInput>,
 ) {
-  // Build conditions for entries (version-specific; worktree is not versioned)
+  // 1) entry-level conditions (version, collection, variant, path + delegated filters)
   const namespaceConditions: unknown[] = [
     { version: { eq: config.version } },
     {
@@ -328,55 +458,52 @@ export function buildWorktreeQuery(
   ];
 
   if (args.where) {
-    const { __path, path, ...rest } = args.where as Record<string, unknown> & {
-      __path?: string | Record<string, unknown>;
+    const {
+      path: pathCond,
+      slug: slugCond,
+      ...rest
+    } = args.where as Record<string, unknown> & {
       path?: string | Record<string, unknown>;
+      slug?: string | Record<string, unknown>;
     };
 
-    // Path filter: support both __path (internal) and path (client API)
-    const pathCondition = __path ?? path;
-    if (pathCondition !== undefined) {
-      namespaceConditions.push({ path: pathCondition });
+    // First principles: slug and path are real columns on entries.
+    // path = repo-relative file path (e.g. "content/docs/intro.md")
+    // slug = derived from collection match/basePath (e.g. "intro")
+    if (pathCond !== undefined) {
+      namespaceConditions.push({ path: pathCond });
+    }
+    if (slugCond !== undefined) {
+      namespaceConditions.push({ slug: slugCond });
     }
 
-    // Process remaining where conditions if any exist
     if (Object.keys(rest).length > 0) {
       const whereConditions = toDrizzleWhereClause.parse(rest);
-      const addVersionToCondition = (
-        condition: DrizzleWhereClause,
-        variant?: string | undefined,
+
+      const addVersion = (
+        cond: DrizzleWhereClause,
       ): DrizzleWhereClause => {
-        if ("AND" in condition) {
-          return {
-            AND: condition.AND.map((c) => addVersionToCondition(c, variant)),
-          };
+        if ("AND" in cond) {
+          return { AND: cond.AND.map(addVersion) };
         }
-        if ("OR" in condition) {
-          return {
-            OR: condition.OR.map((c) => addVersionToCondition(c, variant)),
-          };
+        if ("OR" in cond) {
+          return { OR: cond.OR.map(addVersion) };
         }
-        if ("filters" in condition) {
+        if ("filters" in cond) {
           return {
             filters: {
-              ...condition.filters,
+              ...cond.filters,
               version: config.version,
-              // variant: variant,
             },
           };
         }
-        // Connection filter (toConnections) - return as-is
-        return condition;
+        return cond; // toConnections blob — preserve as-is
       };
 
       if (Array.isArray(whereConditions)) {
-        namespaceConditions.push(
-          ...whereConditions.map((c) => addVersionToCondition(c, args.variant)),
-        );
+        for (const c of whereConditions) namespaceConditions.push(addVersion(c));
       } else {
-        namespaceConditions.push(
-          addVersionToCondition(whereConditions, args.variant),
-        );
+        namespaceConditions.push(addVersion(whereConditions));
       }
     }
   }
@@ -384,320 +511,174 @@ export function buildWorktreeQuery(
   const query =
     namespaceConditions.length > 0 ? { AND: namespaceConditions } : undefined;
 
-  // Forward declare transformReferences so transformWith can call it
+  // 2) with / references — transform recursively, merging multiple fields.
+
+  // Forward declarations (need mutual recursion).
+  let transformWith: (
+    clause?: Record<string, WithClauseInput>,
+  ) => Record<string, unknown>;
   let transformReferences: (
-    referencesClause?: Record<
-      string,
-      | boolean
-      | {
-          where?: Record<string, unknown>;
-          limit?: number;
-          offset?: number;
-          with?: Record<string, unknown>;
-          references?: Record<string, unknown>;
-        }
-    >,
+    clause?: Record<string, WithClauseInput>,
   ) => Record<string, unknown> | undefined;
 
-  const transformWith = (
-    withClause?: Record<
-      string,
-      | boolean
-      | {
-          where?: Record<string, unknown>;
-          limit?: number;
-          offset?: number;
-          with?: Record<string, unknown>;
-          references?: Record<string, unknown>;
-        }
-    >,
+  transformWith = (
+    clause?: Record<string, WithClauseInput>,
   ): Record<string, unknown> => {
-    if (!withClause) {
-      // Default: include blob and all toConnections with their toEntry
+    if (!clause) {
+      // Default when no `with` — caller wants all connections + blob.
       return {
-        blob: {
-          columns: {
-            content: true,
-          },
-        },
+        blob: { columns: { content: true } },
         toConnections: {
-          with: {
-            toEntry: {
-              with: {
-                blob: {
-                  columns: {
-                    content: true,
-                  },
-                },
-              },
-            },
-          },
+          with: { toEntry: { with: blobOnly() } },
         },
       };
     }
 
-    const result: Record<string, unknown> = {
-      blob: {
-        columns: {
-          content: true,
-        },
-      },
-      // Always include toConnections by default so connections are populated
-      toConnections: {
-        with: {
-          toEntry: {
-            with: {
-              blob: {
-                columns: {
-                  content: true,
-                },
-              },
-            },
-          },
-        },
-      },
-    };
+    const toSpecs: ToSpec[] = [];
+    const fromSpecs: FromSpec[] = [];
+    const passthrough: Record<string, unknown> = {};
 
-    for (const [key, value] of Object.entries(withClause)) {
-      // Special keys that should be passed through (can override defaults)
+    for (const [key, value] of Object.entries(clause)) {
       if (key === "filters" || key === "change") {
-        result[key] = value;
+        passthrough[key] = value;
         continue;
       }
 
-      // Field name for connection
       if (value === true) {
-        // Simple connection: { author: true }
-        result.toConnections = {
-          where: {
-            field: { eq: key },
-          },
-          with: {
-            toEntry: {
-              with: {
-                blob: {
-                  columns: {
-                    content: true,
-                  },
-                },
-                // change: {
-                // 	with: {
-                // 		blob: true,
-                // 	},
-                // },
-              },
-            },
-          },
-        };
-      } else if (typeof value === "object" && value !== null) {
-        // Nested connection: { author: { where: { ... }, limit, offset, with: { ... }, references: { ... } } }
-        const nestedWith =
-          "with" in value
-            ? transformWith(
-                value.with as Record<
-                  string,
-                  | boolean
-                  | {
-                      where?: Record<string, unknown>;
-                      limit?: number;
-                      offset?: number;
-                      with?: Record<string, unknown>;
-                      references?: Record<string, unknown>;
-                    }
-                >,
-              )
-            : {
-                change: {
-                  with: {
-                    blob: true,
-                  },
-                },
-              };
+        toSpecs.push({ field: key, nestedWith: blobOnly() });
+        continue;
+      }
 
-        // Handle nested references within with clause
-        const nestedReferences =
-          "references" in value
-            ? transformReferences(
-                value.references as Record<
-                  string,
-                  | boolean
-                  | {
-                      where?: Record<string, unknown>;
-                      limit?: number;
-                      offset?: number;
-                      with?: Record<string, unknown>;
-                      references?: Record<string, unknown>;
-                    }
-                >,
-              )
-            : undefined;
+      if (typeof value === "object" && value !== null) {
+        const obj = value as WithObject;
+        const entryWhere =
+          obj.where ? toDrizzleWhereClause.parse(obj.where as WhereClause) : undefined;
 
-        // Merge nestedWith and nestedReferences
-        const mergedNested = {
-          ...nestedWith,
-          ...nestedReferences,
+        // Nested `with` / `references` inside this connection request.
+        const nestedWith = obj.with ? transformWith(obj.with as Record<string, WithClauseInput>) : undefined;
+        const nestedRefs = obj.references ? transformReferences(obj.references as Record<string, WithClauseInput>) : undefined;
+        // Merge nested with+refs into a single `with` map for the toEntry/fromEntry relation.
+        const mergedNested: Record<string, unknown> = {
+          ...(nestedWith ?? {}),
+          ...(nestedRefs ?? {}),
         };
 
-        // Handle where clause for filtering the connected entry
-        const whereClause =
-          "where" in value && value.where
-            ? toDrizzleWhereClause.parse(value.where)
-            : undefined;
-
-        // Handle limit and offset
-        const limit = "limit" in value ? value.limit : undefined;
-        const offset = "offset" in value ? value.offset : undefined;
-
-        result.toConnections = {
-          where: {
-            field: { eq: key },
-          },
-          with: {
-            toEntry: {
-              where: whereClause,
-              limit,
-              offset,
-              with: mergedNested,
-            },
-          },
-        };
+        toSpecs.push({
+          field: key,
+          where: entryWhere,
+          limit: obj.limit,
+          offset: obj.offset,
+          orderBy: obj.orderBy as Record<string, "asc" | "desc"> | undefined,
+          nestedWith: Object.keys(mergedNested).length > 0 ? mergedNested : blobOnly(),
+        });
       }
     }
 
-    return result;
+    const built: Record<string, unknown> = {
+      blob: { columns: { content: true } },
+      ...passthrough,
+    };
+    if (toSpecs.length > 0) {
+      built.toConnections = toConnsSpecToDrizzle(toSpecs);
+    } else {
+      // No explicit toConnections — still include blob + default toConnections from base if caller
+      // used passthrough keys without a with field, etc. Preserve previous behavior:
+      built.toConnections = {
+        with: { toEntry: { with: blobOnly() } },
+      };
+    }
+    if (fromSpecs.length > 0) {
+      built.fromConnections = fromConnsSpecToDrizzle(fromSpecs);
+    }
+    return built;
   };
 
-  // Transform references clause (uses fromConnections and referencedAs field)
   transformReferences = (
-    referencesClause?: Record<
-      string,
-      | boolean
-      | {
-          where?: Record<string, unknown>;
-          limit?: number;
-          offset?: number;
-          with?: Record<string, unknown>;
-          references?: Record<string, unknown>;
-        }
-    >,
+    clause?: Record<string, WithClauseInput>,
   ): Record<string, unknown> | undefined => {
-    if (!referencesClause) return undefined;
+    if (!clause) return undefined;
 
-    const result: Record<string, unknown> = {};
+    const fromSpecs: FromSpec[] = [];
 
-    for (const [key, value] of Object.entries(referencesClause)) {
-      // Field name for reverse connection (uses referencedAs)
+    for (const [key, value] of Object.entries(clause)) {
       if (value === true) {
-        // Simple reverse connection: { docsAuthored: true }
-        result.fromConnections = {
-          where: {
-            referencedAs: { eq: key },
-          },
-          with: {
-            fromEntry: {
-              with: {
-                blob: {
-                  columns: {
-                    content: true,
-                  },
-                },
-              },
-            },
-          },
+        fromSpecs.push({ referencedAs: key, nestedWith: blobOnly() });
+        continue;
+      }
+      if (typeof value === "object" && value !== null) {
+        const obj = value as WithObject;
+        const entryWhere =
+          obj.where ? toDrizzleWhereClause.parse(obj.where as WhereClause) : undefined;
+
+        const nestedWith = obj.with ? transformWith(obj.with as Record<string, WithClauseInput>) : undefined;
+        const nestedRefs = obj.references ? transformReferences(obj.references as Record<string, WithClauseInput>) : undefined;
+        const mergedNested: Record<string, unknown> = {
+          ...(nestedWith ?? {}),
+          ...(nestedRefs ?? {}),
         };
-      } else if (typeof value === "object" && value !== null) {
-        // Nested reverse connection: { docsAuthored: { where: { ... }, limit, offset, with: { ... }, references: { ... } } }
-        const nestedWith =
-          "with" in value
-            ? transformWith(
-                value.with as Record<
-                  string,
-                  | boolean
-                  | {
-                      where?: Record<string, unknown>;
-                      limit?: number;
-                      offset?: number;
-                      with?: Record<string, unknown>;
-                      references?: Record<string, unknown>;
-                    }
-                >,
-              )
-            : {
-                blob: {
-                  columns: {
-                    content: true,
-                  },
-                },
-              };
-
-        // Handle nested references within references clause
-        const nestedReferences =
-          "references" in value
-            ? transformReferences(
-                value.references as Record<
-                  string,
-                  | boolean
-                  | {
-                      where?: Record<string, unknown>;
-                      limit?: number;
-                      offset?: number;
-                      with?: Record<string, unknown>;
-                      references?: Record<string, unknown>;
-                    }
-                >,
-              )
-            : undefined;
-
-        // Merge nestedWith and nestedReferences
-        const mergedNested = {
-          ...nestedWith,
-          ...nestedReferences,
-        };
-
-        // Handle where clause for filtering the referenced entries
-        const whereClause =
-          "where" in value && value.where
-            ? toDrizzleWhereClause.parse(value.where)
-            : undefined;
-
-        // Handle limit and offset
-        const limit = "limit" in value ? value.limit : undefined;
-        const offset = "offset" in value ? value.offset : undefined;
-
-        // Build the where clause for fromConnections:
-        // - Always filter by referencedAs
-        // - If there's a where clause, apply it via fromEntry
-        //   at the connection level so limit/offset apply AFTER filtering
-        const connectionWhere = whereClause
-          ? {
-              AND: [{ referencedAs: { eq: key } }, { fromEntry: whereClause }],
-            }
-          : { referencedAs: { eq: key } };
-
-        result.fromConnections = {
-          where: connectionWhere,
-          limit,
-          offset,
-          with: {
-            fromEntry: {
-              with: mergedNested,
-            },
-          },
-        };
+        fromSpecs.push({
+          referencedAs: key,
+          entryWhere,
+          limit: obj.limit,
+          offset: obj.offset,
+          nestedWith: Object.keys(mergedNested).length > 0 ? mergedNested : blobOnly(),
+        });
       }
     }
 
-    return Object.keys(result).length > 0 ? result : undefined;
+    if (fromSpecs.length === 0) return undefined;
+    return { fromConnections: fromConnsSpecToDrizzle(fromSpecs) };
   };
 
   const withClause = transformWith(args.with);
   const referencesClause = transformReferences(args.references);
 
-  // Merge withClause and referencesClause
-  const finalWithClause = {
-    ...withClause,
-    ...referencesClause,
+  // Merge `with` and `references` contributions. Both may touch toConnections/fromConnections.
+  // When both provide a given relation, OR their wheres and shallow-merge their `with` shape.
+  const mergeConns = (
+    a: Record<string, unknown> | undefined,
+    b: Record<string, unknown> | undefined,
+    connKey: "toConnections" | "fromConnections",
+  ): unknown => {
+    const ca = (a as Record<string, unknown> | undefined)?.[connKey] as
+      | Record<string, unknown>
+      | undefined;
+    const cb = (b as Record<string, unknown> | undefined)?.[connKey] as
+      | Record<string, unknown>
+      | undefined;
+    if (!ca) return cb;
+    if (!cb) return ca;
+
+    const wa = (ca as Record<string, unknown>).where as Record<string, unknown> | undefined;
+    const wb = (cb as Record<string, unknown>).where as Record<string, unknown> | undefined;
+    const mergedWhere = wa && wb ? { OR: [wa, wb] } : (wa ?? wb);
+    const withA = ((ca as Record<string, unknown>).with as Record<string, unknown>) ?? {};
+    const withB = ((cb as Record<string, unknown>).with as Record<string, unknown>) ?? {};
+    return {
+      where: mergedWhere,
+      with: { ...withA, ...withB },
+      orderBy: (ca as Record<string, unknown>).orderBy ?? (cb as Record<string, unknown>).orderBy,
+      limit: (cb as Record<string, unknown>).limit ?? (ca as Record<string, unknown>).limit,
+      offset: (cb as Record<string, unknown>).offset ?? (ca as Record<string, unknown>).offset,
+    };
   };
+
+  const finalWithClause: Record<string, unknown> = {
+    ...withClause,
+    ...(referencesClause ?? {}),
+  };
+  const mergedTo = mergeConns(
+    withClause as Record<string, unknown>,
+    (referencesClause as Record<string, unknown> | undefined),
+    "toConnections",
+  );
+  const mergedFrom = mergeConns(
+    withClause as Record<string, unknown>,
+    (referencesClause as Record<string, unknown> | undefined),
+    "fromConnections",
+  );
+  if (mergedTo) finalWithClause.toConnections = mergedTo;
+  if (mergedFrom) finalWithClause.fromConnections = mergedFrom;
 
   return {
     query,

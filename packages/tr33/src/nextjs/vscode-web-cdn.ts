@@ -1,4 +1,4 @@
-import { withVscodeEmbedCors } from "@/nextjs/vscode-embed-csp";
+import { withVscodeEmbedCors } from "./vscode-embed-csp";
 
 export type VscodeWebCdn = {
   commit: string;
