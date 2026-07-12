@@ -80,6 +80,7 @@
     "@octokit/auth-app": "^8.2.0",
     "@octokit/graphql": "^9.0.3",
     "@octokit/rest": "21.0.2",
+    "@uiw/react-json-view": "^2.0.0-alpha.34",
     "wildwood-kit": "workspace:*",
     "wildwood-shared": "workspace:*",
     "@types/diff3": "^0.0.2",

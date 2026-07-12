@@ -28,7 +28,24 @@ export default defineConfig([
     // `wildwood-store` and `wildwood-shared` are pure ESM/JS — always bundle for
     // consumers. Do NOT bundle `wildwood-kit` — it has `'use client'` and must
     // stay a true peer so the consumer's bundler sees its directives.
-    noExternal: ["wildwood-store", "wildwood-shared"],
+    //
+    // IMPORTANT: `wildwood-ui` is NOT bundled here — `wildwood/react/index.tsx`
+    // no longer re-exports it. The previous re-export emitted
+    //   [UNRESOLVED_IMPORT] Could not resolve 'wildwood-ui'
+    // which caused Turbopack NFT to treat the handler -> route chain as
+    // "unexpected file" and fail builds. If ui primitives are needed, import
+    // them directly from `wildwood-ui` (peer) or `wildwood/nextjs/kit`.
+    //
+    // `@uiw/react-json-view` is a real dependency used by `WildwoodJsonView`.
+    // It IS bundled into `wildwood/react` so a bare `wildwood` install does not
+    // require the consumer to install uiw.
+    noExternal: [
+      "wildwood-store",
+      "wildwood-shared",
+      "@uiw/react-json-view",
+      "@uiw/react-json-view/dark",
+      "@uiw/react-json-view/light",
+    ],
     external: [
       "next/headers",
       "next/cache",
