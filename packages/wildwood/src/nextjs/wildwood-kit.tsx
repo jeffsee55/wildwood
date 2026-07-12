@@ -30,12 +30,26 @@ export type WildwoodKitHostClient = WildwoodForActiveRef;
 
 function resolveKitAuthFromEnv(): KitAuthConfig | undefined {
   const appSlug = process.env.GITHUB_APP_SLUG?.trim();
-  if (!appSlug) return undefined;
+  const appId = process.env.GITHUB_APP_ID?.trim();
+  const privateKey = process.env.GITHUB_PRIVATE_KEY?.trim();
+  const configured = !!(appId && privateKey);
+
+  if (!appSlug && !configured) {
+    // Return explicit unconfigured marker so client can always offer setup link.
+    // Host merging keeps this visible even when they pass auth without slug.
+    return {
+      githubApp: {
+        configured: false as const,
+        name: process.env.GITHUB_APP_NAME?.trim() || "Wildwood",
+        origin: process.env.NEXT_PUBLIC_ORIGIN?.trim() || undefined,
+      },
+    };
+  }
+
   return {
     githubApp: {
       appSlug,
-      // Host can override `name` via `auth` prop; keep a sensible default here
-      // so most hosts don't need to pass `auth` at all.
+      configured: configured || !!appSlug,
       name: process.env.GITHUB_APP_NAME?.trim() || "Wildwood",
       origin: process.env.NEXT_PUBLIC_ORIGIN?.trim() || undefined,
     },
@@ -49,13 +63,21 @@ function mergeKitAuth(
   if (!base && !override) return undefined;
   if (!base) return override;
   if (!override) return base;
+  const mergedGitHubApp =
+    base.githubApp || override.githubApp
+      ? {
+          ...base.githubApp,
+          ...override.githubApp,
+          // If override has explicit configured, keep it, but server truth wins when present in base
+          configured:
+            (override.githubApp?.configured as boolean | undefined) ??
+            (base.githubApp?.configured as boolean | undefined),
+        }
+      : undefined;
   return {
     ...base,
     ...override,
-    githubApp:
-      base.githubApp || override.githubApp
-        ? { ...base.githubApp, ...override.githubApp }
-        : undefined,
+    githubApp: mergedGitHubApp,
   };
 }
 

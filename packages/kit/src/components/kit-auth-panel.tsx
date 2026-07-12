@@ -23,6 +23,12 @@ export type KitAuthConfig = {
     contents?: Permission;
     pullRequests?: Permission;
     webhookUrl?: string;
+    /**
+     * When true, host has GITHUB_APP_ID/PRIVATE_KEY. When false/undefined,
+     * UI will prominently offer "Set up GitHub App" flow.
+     * If omitted, inferred from presence of appSlug — missing slug == not configured.
+     */
+    configured?: boolean;
   };
   enforceInProduction?: boolean;
 };

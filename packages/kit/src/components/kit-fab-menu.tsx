@@ -98,6 +98,10 @@ function authEnabled(auth: KitAuthConfig | undefined): boolean {
   if (auth.enabled != null) return auth.enabled;
 
   // Dev: tolerant — show if we have anything, hide if completely empty.
+  // Exception: always show when GitHub App is NOT configured, so setup is reachable.
+  const isUnconfigured = githubAppIsUnconfigured(auth);
+  if (isUnconfigured && !enforce) return true;
+
   const hasAny =
     !!auth.githubApp?.appSlug?.trim() ||
     !!auth.githubApp?.name?.trim() ||
@@ -106,18 +110,31 @@ function authEnabled(auth: KitAuthConfig | undefined): boolean {
   if (!enforce) return hasAny;
 
   // Prod: require at least appSlug to consider configured.
-  // Host has already passed optimistically; if caller forgets enforce flag,
-  // we enforce in prod by default.
   const ok = !!auth.githubApp?.appSlug?.trim();
   if (!ok && enforce) {
-    // Surface immediately — matches ask: if NODE_ENV=production, must have auth.
-    // Throwing here means layout's `<Toolbar auth={...}>` blows up build/runtime
-    // with a clear message rather than silently running unauthed in prod.
     throw new Error(
       "[wildwood] Kit auth: GITHUB_APP_SLUG missing. Set GITHUB_APP_SLUG (and GITHUB_APP_ID) in production — hosts should always pass { githubApp: { appSlug, name } }.",
     );
   }
   return ok;
+}
+
+function githubAppIsUnconfigured(auth: KitAuthConfig | undefined): boolean {
+  if (!auth?.githubApp) return true;
+  if (auth.githubApp.configured === false) return true;
+  if (auth.githubApp.configured === true) return false;
+  // Infer: no appSlug means not configured — missing env.
+  return !auth.githubApp.appSlug?.trim();
+}
+
+function shouldShowDevSetup(auth: KitAuthConfig | undefined): boolean {
+  // Developer menu should be visible:
+  // - always in dev (tolerant), so you can create an app
+  // - in prod only if you already have a slug (so prod users can still re-create)
+  // Caller already gates overall auth menu via authEnabled; this is for sub-menu.
+  // For unconfigured case we force it visible even if authEnabled would otherwise hide.
+  if (!auth) return !isProd(); // fresh project, no auth at all — offer setup
+  return true;
 }
 
 type EditorOpenState =
@@ -835,6 +852,26 @@ export function KitFabMenu({
                   Exit preview (live / cached)
                 </DropdownMenuItem>
               ) : null}
+              {/* ── GitHub App setup: always surface when unconfigured ── */}
+              {githubAppIsUnconfigured(auth) ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                      Set up GitHub App
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent
+                      side="left"
+                      align="end"
+                      sideOffset={8}
+                      className="w-auto max-w-[min(100vw-2rem,26rem)] p-0"
+                      container={portalContainer ?? undefined}
+                    >
+                      <KitAuthPanel auth={auth ?? {}} mode="dev-setup" />
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                </>
+              ) : null}
               {authEnabled(auth) ? (
                 <>
                   <DropdownMenuSeparator />
@@ -852,22 +889,28 @@ export function KitFabMenu({
                       <KitAuthPanel auth={auth} mode="session" />
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger className="text-xs">
-                      Developer
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent
-                      side="left"
-                      align="end"
-                      sideOffset={8}
-                      className="w-auto max-w-[min(100vw-2rem,26rem)] p-0"
-                      container={portalContainer ?? undefined}
-                    >
-                      <KitAuthPanel auth={auth} mode="dev-setup" />
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
+                  {shouldShowDevSetup(auth) ? (
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger className="text-xs">
+                        Developer
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent
+                        side="left"
+                        align="end"
+                        sideOffset={8}
+                        className="w-auto max-w-[min(100vw-2rem,26rem)] p-0"
+                        container={portalContainer ?? undefined}
+                      >
+                        <KitAuthPanel auth={auth} mode="dev-setup" />
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  ) : null}
                 </>
-              ) : null}
+              ) : !githubAppIsUnconfigured(auth) ? null : (
+                // Already handled unconfigured case above; this branch is when auth is falsy but we
+                // already forced the setup item. Still offer Auth if session exists? Hide.
+                <>{/* setup item already rendered above */}</>
+              )}
               <DropdownMenuItem onClick={() => {}}>Share</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -922,30 +965,63 @@ export function KitFabMenu({
                   {editorBlockingState.kind === "needs-setup" ? (
                     <>
                       <div className="space-y-2">
-                        <p className="text-sm font-medium">
-                          GitHub App not configured
-                        </p>
+                        <p className="text-sm font-medium">GitHub App not configured</p>
+                        <p className="text-xs text-muted-foreground">{editorBlockingState.message}</p>
                         <p className="text-xs text-muted-foreground">
-                          {editorBlockingState.message}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Set{" "}
-                          <code className="font-mono">GITHUB_APP_ID</code>,{" "}
-                          <code className="font-mono">GITHUB_PRIVATE_KEY</code>,
-                          and{" "}
-                          <code className="font-mono">GITHUB_APP_SLUG</code> on
-                          Vercel, then redeploy. The editor cannot save until
-                          then.
+                          Create an app in one click, then Vercel → Project → Settings → Environment Variables → paste
+                          the values from the callback page, redeploy. Or locally via <code className="font-mono">.env.local</code>.
                         </p>
                       </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => setEditorOpen(false)}
-                      >
-                        Close
-                      </Button>
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              const origin = window.location.origin;
+                              const res = await fetch("/api/wildwood/github/app-manifest/start", {
+                                method: "POST",
+                                credentials: "include",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  name: auth?.githubApp?.name || "Wildwood Dev",
+                                  origin,
+                                  redirectPath: "/api/wildwood/github/app-manifest/callback",
+                                }),
+                              });
+                              if (!res.ok) throw new Error(await res.text());
+                              const data = (await res.json()) as { action: string; manifest: unknown; state: string };
+                              const form = document.createElement("form");
+                              form.method = "POST";
+                              form.action = data.action;
+                              form.target = "_self";
+                              const mf = document.createElement("input");
+                              mf.type = "hidden";
+                              mf.name = "manifest";
+                              mf.value = JSON.stringify(data.manifest);
+                              form.appendChild(mf);
+                              const st = document.createElement("input");
+                              st.type = "hidden";
+                              st.name = "state";
+                              st.value = data.state;
+                              form.appendChild(st);
+                              document.body.appendChild(form);
+                              form.submit();
+                            } catch (e) {
+                              setGitError(e instanceof Error ? e.message : String(e));
+                            }
+                          }}
+                        >
+                          Set up GitHub App
+                        </Button>
+                        <Button type="button" size="sm" variant="secondary" onClick={() => setEditorOpen(false)}>
+                          Close
+                        </Button>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        After creation you&apos;ll see <code>Vercel CLI</code> snippets and <code>.env.local</code> at{" "}
+                        <code>/api/wildwood/github/app-manifest/callback</code>.
+                      </p>
                     </>
                   ) : editorBlockingState.kind === "needs-install" ? (
                     <>
