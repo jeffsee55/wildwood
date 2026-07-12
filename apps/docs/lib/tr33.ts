@@ -6,7 +6,7 @@ import { createClient, defineConfig, type Tr33AuthConfig, z } from "tr33";
 
 const ORG = process.env.TR33_GITHUB_ORG || "jeffsee55";
 const REPO = process.env.TR33_GITHUB_REPO || "tr33";
-const VERSION = "docs-0" as const;
+const VERSION = "docs-1" as const;
 const REF =
   process.env.TR33_DOCS_REF?.trim() ||
   process.env.VERCEL_GIT_COMMIT_SHA?.trim() ||
