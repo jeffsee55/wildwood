@@ -2,6 +2,7 @@
   "name": "index",
   "label": "Manual",
   "children": [
+    "../docs/manifesto.md",
     "../docs/intro.md",
     "../docs/configuration.md",
     "../docs/schemas.md",
