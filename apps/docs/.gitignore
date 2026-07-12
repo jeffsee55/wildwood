@@ -1,3 +1,4 @@
 .vercel
+wildwood-docs.db
 tr33-docs.db
 .env.local

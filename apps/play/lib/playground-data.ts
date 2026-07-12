@@ -5,7 +5,7 @@ import {
   playInfo,
 } from "./playground-log";
 import { playgroundDatabaseUrl } from "./playground-database-url";
-import { buildPlaygroundWildwood } from "./tr33";
+import { buildPlaygroundWildwood } from "./wildwood";
 
 /**
  * Fetches the `page` collection for the playground. Not wrapped in `"use cache"` or
@@ -33,9 +33,9 @@ export async function getPlaygroundViewData(
     },
   });
 
-  let tr33;
+  let wildwood;
   try {
-    tr33 = buildPlaygroundWildwood(config);
+    wildwood = buildPlaygroundWildwood(config);
   } catch (err) {
     playFailureHeadline("buildPlaygroundWildwood", err, {
       org: config.org,
@@ -51,15 +51,15 @@ export async function getPlaygroundViewData(
   playDebug("viewData.findMany.before", { ref });
   let result;
   try {
-    result = await tr33.page.findMany({ ref });
+    result = await wildwood.page.findMany({ ref });
   } catch (err) {
-    playFailureHeadline("tr33.page.findMany", err, {
+    playFailureHeadline("wildwood.page.findMany", err, {
       ref,
       org: config.org,
       repo: config.repo,
     });
     throw new Error(
-      `findMany failed for ref "${ref}" (worktree not ready, DB, or git). See server stderr for "FAILED at tr33.page.findMany".`,
+      `findMany failed for ref "${ref}" (worktree not ready, DB, or git). See server stderr for "FAILED at wildwood.page.findMany".`,
       { cause: err },
     );
   }
@@ -81,11 +81,11 @@ export async function getPlaygroundViewData(
   }
 
   try {
-    return tr33._.logger.print(result, false) as object;
+    return wildwood._.logger.print(result, false) as object;
   } catch (err) {
-    playFailureHeadline("tr33._.logger.print", err, { itemCount: n });
+    playFailureHeadline("wildwood._.logger.print", err, { itemCount: n });
     throw new Error(
-      "Failed to build JSON preview (logger.print / markdown transform). See server stderr for FAILED at tr33._.logger.print.",
+      "Failed to build JSON preview (logger.print / markdown transform). See server stderr for FAILED at wildwood._.logger.print.",
       { cause: err },
     );
   }

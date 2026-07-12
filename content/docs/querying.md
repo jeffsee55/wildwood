@@ -11,12 +11,12 @@ Once collections are configured, queries go through the client returned by `crea
 ## Client shape
 
 ```ts
-const tr33 = createClient({ config, database, auth });
+const wildwood = createClient({ config, database, auth });
 
 // One property per collection, named from collection name:
-tr33.authors
-tr33.docs
-tr33.nav
+wildwood.authors
+wildwood.docs
+wildwood.nav
 
 // Internal:
 wildwood._.config
@@ -28,14 +28,14 @@ tr33._.logger
 Each collection has two entry points (both async):
 
 ```ts
-tr33.docs.findMany(args?: {
+wildwood.docs.findMany(args?: {
   where?: Filters; with?: With; references?: References;
   limit?: number; offset?: number;
   orderBy?: Record<string, "asc"|"desc">;
   variant?: string; ref?: string;
 }): Promise<{ collection, commitOid, items: Entry[] }>
 
-tr33.docs.findFirst(args?: {
+wildwood.docs.findFirst(args?: {
   where?: Filters; with?: With; references?: References;
   ref?: string;
 }): Promise<{ org, repo, ref, version, name, commit, collection, value: Entry }>
@@ -99,7 +99,7 @@ const res = await wildwood.docs.findFirst({
 // via FindTypes + UnwrapCodec + OrmConfig
 
 // Nested:
-const nav = await tr33.nav.findMany({ with: { children: { with: { author: true } } } });
+const nav = await wildwood.nav.findMany({ with: { children: { with: { author: true } } } });
 // nav.items enumerate, each child has optional author via inference
 ```
 
@@ -116,7 +116,7 @@ Arrays: `with: { children: true }` resolves each entry in the array. The result 
 
 `FindTypes` walks the normalized collection schemas (after unwrapping lazy/optional/array/pipe/union/intersection/codec layers) to collect `{ type:"filter", path }` and `{ type:"connection", value, path, referencedAs? }` entries. Collections are mapped via `OrmConfig<Mapped>` (keyed by `Colls[K]["name"]`). `ConnArgs` / `WithShape` / `ResType` thread the `with` object through the output:
 
-- `InferRes` preserves additionals from `@tr33/additions` if present.
+- `InferRes` preserves additionals from `@wildwood/additions` if present.
 - `EntrySystemFields` (`_meta`, `_collection`, `slug`, `path`) are always appended.
 - Reverse references are layered in `ReverseRes`.
 
@@ -139,7 +139,7 @@ const authors = z.collection({
 docs.schema.author = z.connect(authors, { referencedAs: "written" });
 
 // query reverse
-const author = await tr33.authors.findFirst({
+const author = await wildwood.authors.findFirst({
   where: { slug: "jeff" },
   references: { written: true },
 });
@@ -147,7 +147,7 @@ const author = await tr33.authors.findFirst({
 // author.value.written[0].title — available via ReverseRes
 
 // Nested with on reverse:
-await tr33.authors.findFirst({
+await wildwood.authors.findFirst({
   references: { written: { with: { author: true } } },
 });
 ```

@@ -6,13 +6,13 @@ description: "The public surface — collections, client, queries, routes, Kit, 
 
 # API reference
 
-All public types come from "wildwood", `tr33/nextjs/*`, and `@wildwood/shared` (for constants). Imports below are accurate to the codebase at this repo.
+All public types come from "wildwood", `tr33/nextjs/*`, and `wildwood-shared` (for constants). Imports below are accurate to the codebase at this repo.
 
 ## Top-level (`tr33`)
 
 ```ts
 import { createClient, defineConfig, z } from "wildwood";
-import type { Tr33Client, Tr33AuthConfig, Tr33AuthAction, Tr33AuthorizeContext } from "wildwood";
+import type { WildwoodClient, WildwoodAuthConfig, WildwoodAuthAction, WildwoodAuthorizeContext } from "wildwood";
 ```
 
 - `defineConfig(input)` → `Config<Colls>` (generic-captures `Colls` literally for inference).
@@ -41,7 +41,7 @@ z.filter<T extends ZodType>(type: T): ZodCustom<T["_output"], { __internalFilter
 // marks field as queryable — writes Filter row; usable in where.
 
 z.connect<C extends CollectionParams, RA?>(collection: C, { referencedAs?: RA }?)
-// runtime marker with __tr33Connection = collection.name, referencedAs
+// runtime marker with __wildwoodConnection = collection.name, referencedAs
 // types as custom with UnresolvedConnectionOutput and resolved connection meta schema
 
 z.variant<T extends ZodType>(schema: T): Union<Record<string,T>, T> with registry description "variant"
@@ -56,19 +56,19 @@ import { createClient } from "wildwood";
 import { createClient as libsql } from "@libsql/client";
 
 const database = libsql({ url, authToken });
-const tr33 = createClient({ config, database, auth? });
+const wildwood = createClient({ config, database, auth? });
 ```
 
-- `tr33.[name].findMany(args?)` → `{ collection, commitOid, items: (Inferred & EntrySystemFields & ReverseRes)[] }`
-- `tr33.[name].findFirst(args?)` → `{ org, repo, ref, version, name, commit, collection, value: ... }` (throws on missing).
+- `wildwood.[name].findMany(args?)` → `{ collection, commitOid, items: (Inferred & EntrySystemFields & ReverseRes)[] }`
+- `wildwood.[name].findFirst(args?)` → `{ org, repo, ref, version, name, commit, collection, value: ... }` (throws on missing).
 - `args`: `{ where?, with?, references?, limit?, offset?, orderBy?, variant?, ref? }` where `with` is `ConnArgs<CM,FM,Name>` typed per collection and nested.
 - `wildwood._.config`, `.auth?`, `.git`, `.db`, `.logger`.
 
-`Tr33Client` is structural — `Record<string, any>` with `_` namespace for internal (tag `NoExplicitAny` bypassed for collection shape).
+`WildwoodClient` is structural — `Record<string, any>` with `_` namespace for internal (tag `NoExplicitAny` bypassed for collection shape).
 
 ## Types (query layer)
 
-`packages/tr33/src/client/types.ts`:
+`packages/wildwood/src/client/types.ts`:
 
 - `FindTypes<T>` — walks Zod object/array/lazy/optional/nullable/default/pipe/union/intersection/custom wrappers to collect filter+connection markers from unwrapped inner type (`UnwrapCodec` unwraps `ZodCodec`/`ZodPipe`/def out recursively).
 - `OptionsForColl<T>` = `FindTypes<UnwrapCodec<CollSchema<T>> & ZodType>` — the set of filter/connection entries for a collection.
@@ -109,19 +109,19 @@ class Config<Colls extends AnyCollections> {
 ## Auth (`client/auth.ts`)
 
 ```ts
-type Tr33AuthConfig = {
+type WildwoodAuthConfig = {
   github?: Tr33GitHubAuth;    // {type:"app",app:{appId,privateKey,installationId?}} | {type:"token",token} | {type:"default"}
   betterAuth?: Tr33BetterAuthLike; // { api:{ getSession(args:{headers:Headers}) } }
-  getUser?: (req: Request)=>Promise<Tr33AuthUser|null>;
-  authorize?: (ctx: Tr33AuthorizeContext) => boolean|void|Response|Promise<...>;
+  getUser?: (req: Request)=>Promise<WildwoodAuthUser|null>;
+  authorize?: (ctx: WildwoodAuthorizeContext) => boolean|void|Response|Promise<...>;
 };
 
-type Tr33AuthUser = { id?, email?, name?, image?: string|null };
-type Tr33AuthAction = { type:"git.switchRef",ref } | { type:"git.createBranch",name,baseRef? } | { type:"git.add",ref,paths } | { type:"git.patchWorktree",ref,paths } | { type:"git.commit",ref,message } | { type:"git.discard",ref } | { type:"git.push",ref } | { type:"git.pull",ref } | { type:"git.merge",ref,message? } | { type:"git.createPr",ref,title?,body? };
-type Tr33AuthorizeContext = { action: Tr33AuthAction; config: Config; request: Request; user: Tr33AuthUser|null };
+type WildwoodAuthUser = { id?, email?, name?, image?: string|null };
+type WildwoodAuthAction = { type:"git.switchRef",ref } | { type:"git.createBranch",name,baseRef? } | { type:"git.add",ref,paths } | { type:"git.patchWorktree",ref,paths } | { type:"git.commit",ref,message } | { type:"git.discard",ref } | { type:"git.push",ref } | { type:"git.pull",ref } | { type:"git.merge",ref,message? } | { type:"git.createPr",ref,title?,body? };
+type WildwoodAuthorizeContext = { action: WildwoodAuthAction; config: Config; request: Request; user: WildwoodAuthUser|null };
 ```
 
-- `getUser` wins over `betterAuth`; `userFromUnknownSession(session)` extracts `Tr33AuthUser` from `{ user?:... }`.
+- `getUser` wins over `betterAuth`; `userFromUnknownSession(session)` extracts `WildwoodAuthUser` from `{ user?:... }`.
 
 ## Git (`git/git.ts`)
 
@@ -155,7 +155,7 @@ class Git implements Gitable {
 
 ```ts
 abstract class Remote {
-  constructor({ auth?: Tr33AuthConfig, config: Config })
+  constructor({ auth?: WildwoodAuthConfig, config: Config })
   abstract listBranches(): Promise<string[]>
   abstract fetchCommit(args:{ref?}|{oid?}): Promise<Commit>
   abstract fetchBlobs({oids}): Promise<{oid,content}[]>
@@ -178,7 +178,7 @@ class GitHubRemote extends Remote // GitHub API (GraphQL for trees/commits, REST
 ```ts
 // pure fetch
 import { handle, createHandler } from "wildwood"nextjs/handler";
-const api = handle(tr33);             // (req:Request)=>Promise<Response>
+const api = handle(wildwood);             // (req:Request)=>Promise<Response>
 const app = createHandler(tr33);      // H3 app (mount /api sub-routers internally)
 ```
 
@@ -186,12 +186,12 @@ Handler mounts `/git`, `/vscode`, `/github` sub-routers. CORS applied per reques
 
 ```ts
 // Next.js wrapper
-import { createTr33Route, TR33_BRANCH_COOKIE, TR33_CACHE_TAG } from "wildwood"nextjs/route";
+import { createWildwoodRoute, WILDWOOD_BRANCH_COOKIE, WILDWOOD_CACHE_TAG } from "wildwood"nextjs/route";
 export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } =
-  createTr33Route(() => tr33, { revalidateTagName?, branchCookieName?, legacyCookieNames?, mutationRe?, revalidateTagStore? });
+  createWildwoodRoute(() => wildwood, { revalidateTagName?, branchCookieName?, legacyCookieNames?, mutationRe?, revalidateTagStore? });
 ```
 
-`TR33_BRANCH_COOKIE`, `TR33_BRANCH_COOKIE_FALLBACKS`, `TR33_ACTIVE_REF_COOKIE`, `TR33_ACTIVE_REF_STORAGE_KEY`, `TR33_CACHE_TAG`, `ACTIVE_REF_MAX_AGE_SEC`, `TR33_SYNC_HOST_ACTIVE_REF_HEADER` re-exported from `@wildwood/shared` via `tr33/nextjs/branch` and `tr33/nextjs/index.ts`. Route factory `handles()` details in [Branching](./branching.md) and [Editor routes](./editor-routes.md).
+`WILDWOOD_BRANCH_COOKIE`, `WILDWOOD_BRANCH_COOKIE_FALLBACKS`, `WILDWOOD_ACTIVE_REF_COOKIE`, `WILDWOOD_ACTIVE_REF_STORAGE_KEY`, `WILDWOOD_CACHE_TAG`, `ACTIVE_REF_MAX_AGE_SEC`, `WILDWOOD_SYNC_HOST_ACTIVE_REF_HEADER` re-exported from `wildwood-shared` via `wildwood/nextjs/branch` and `tr33/nextjs/index.ts`. Route factory `handles()` details in [Branching](./branching.md) and [Editor routes](./editor-routes.md).
 
 ```
 Standalone draft route:
@@ -214,11 +214,11 @@ import {
   clearBranchCookieHeader,
   branchCookieOptions,
   allBranchCookieNames,
-  TR33_BRANCH_COOKIE,
-  TR33_BRANCH_COOKIE_FALLBACKS,
-  TR33_ACTIVE_REF_COOKIE,        // legacy alias = "tr33-active-ref"
-  TR33_ACTIVE_REF_STORAGE_KEY,   // "tr33.activeRef"
-  TR33_CACHE_TAG,                 // "tr33"
+  WILDWOOD_BRANCH_COOKIE,
+  WILDWOOD_BRANCH_COOKIE_FALLBACKS,
+  WILDWOOD_ACTIVE_REF_COOKIE,        // legacy alias = "tr33-active-ref"
+  WILDWOOD_ACTIVE_REF_STORAGE_KEY,   // "tr33.activeRef"
+  WILDWOOD_CACHE_TAG,                 // "tr33"
 } from "wildwood"nextjs/branch";
 
 type Tr33RequestCookies = { get(name:string): { value:string }|undefined };
@@ -241,25 +241,25 @@ async function getBranch(
 ## Kit
 
 ```ts
-import { Tr33Kit, Toolbar, type ToolbarProps, type Tr33KitProps, type KitAuthConfig } from "wildwood"nextjs/kit";
+import { WildwoodKit, Toolbar, type ToolbarProps, type WildwoodKitProps, type KitAuthConfig } from "wildwood"nextjs/kit";
 ```
 
-- `ToolbarProps` = `Tr33KitProps & { fallback?: ReactNode }`.
-- `Tr33KitProps = { tr33: Tr33KitHostClient (_:config.ref read), apiBase?:string (default "/api"), theme?:Theme(default "system"), auth?:KitAuthConfig, activeRef?:string|null, cookieName?:string, vscodeCommit?:string }`. `Tr33KitHostClient` structural `Tr33ForActiveRef`.
+- `ToolbarProps` = `WildwoodKitProps & { fallback?: ReactNode }`.
+- `WildwoodKitProps = { tr33: WildwoodKitHostClient (_:config.ref read), apiBase?:string (default "/api"), theme?:Theme(default "system"), auth?:KitAuthConfig, activeRef?:string|null, cookieName?:string, vscodeCommit?:string }`. `WildwoodKitHostClient` structural `WildwoodForActiveRef`.
 - `KitAuthConfig` (UI only) public bits: `{ enabled?, enforceInProduction?, userEmail?, githubOAuthEnabled?, githubApp?:{ appSlug?, name?, origin? } }`. `Toolbar` without `auth` derives from `GITHUB_APP_SLUG` / `GITHUB_APP_NAME`. Private signing stays in `createClient({auth:{github}})`. Auth merge in Server Component shallow + `githubApp` merge.
 - `Theme = "light"|"dark"|"system"`, `ResolvedTheme = "light"|"dark"` exposed from `ThemeProvider` (`@wildwood/kit` package doc). Kit listens to `matchMedia("(prefers-color-scheme: dark)")`, writes `.dark` on shadow container/documentElement, sets `colorScheme`, `data-kit-theme`, disable transitions.
 - FAB, auth panel, editor open sequence, branch channels constants — see [Kit](./kit.md).
 
-## Shared (`@wildwood/shared`)
+## Shared (`wildwood-shared`)
 
 Re-exported via `tr33/nextjs/index.ts` legacy compat too, but source is `packages/shared`:
 
 ```ts
-TR33_BRANCH_COOKIE = "x-tr33-branch"
-TR33_BRANCH_COOKIE_FALLBACKS = ["x-content-branch","tr33-active-ref"]
-TR33_ACTIVE_REF_COOKIE = "tr33-active-ref"   // legacy alias same string as one fallback (kept for compat)
-TR33_ACTIVE_REF_STORAGE_KEY = "tr33.activeRef"
-TR33_CACHE_TAG = "tr33"
+WILDWOOD_BRANCH_COOKIE = "x-tr33-branch"
+WILDWOOD_BRANCH_COOKIE_FALLBACKS = ["x-content-branch","tr33-active-ref"]
+WILDWOOD_ACTIVE_REF_COOKIE = "tr33-active-ref"   // legacy alias same string as one fallback (kept for compat)
+WILDWOOD_ACTIVE_REF_STORAGE_KEY = "tr33.activeRef"
+WILDWOOD_CACHE_TAG = "tr33"
 ACTIVE_REF_MAX_AGE_SEC = 604800 (7d)
 GIT_EMPTY_TREE_OID = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 BRANCH_CITIES: const array of cities
@@ -268,7 +268,7 @@ activeRefSetCookieHeader(ref, cookieName?): string   // encodes ref, Path=/; Htt
 clearBranchCookieHeader(cookieName?): string
 allBranchCookieNames(): string[]
 branchCookieOptions(ref, cookieName?): { name,value,path,httpOnly,sameSite,maxAge }
-Kit channels: TR33_KIT_HOST_REF_CHANNEL="tr33-kit-host-ref", TR33_EXTENSION_TO_HOST_REF_CHANNEL, TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL, TR33_KIT_CLOSE_MESSAGE, TR33_KIT_BRANCH_CHANGED_MESSAGE, TR33_KIT_WORKSPACE_CHANGED_MESSAGE
+Kit channels: WILDWOOD_KIT_HOST_REF_CHANNEL="tr33-kit-host-ref", WILDWOOD_EXTENSION_TO_HOST_REF_CHANNEL, WILDWOOD_EXTENSION_WORKSPACE_CHANGED_CHANNEL, WILDWOOD_KIT_CLOSE_MESSAGE, WILDWOOD_KIT_BRANCH_CHANGED_MESSAGE, WILDWOOD_KIT_WORKSPACE_CHANGED_MESSAGE
 ```
 
 ## Markdown render

@@ -434,9 +434,9 @@ export function PlaygroundConfigForm({ githubSignedIn, initial }: Props) {
             <p className="sm:col-span-2 text-[11px] text-zinc-500">
               The path above must be the git worktree. Org/repo must match how
               this DB was first indexed (e.g. repo{" "}
-              <code className="text-zinc-600 dark:text-zinc-500">tr33-mono</code>{" "}
+              <code className="text-zinc-600 dark:text-zinc-500">wildwood-mono</code>{" "}
               if you started from defaults); changing to{" "}
-              <code className="text-zinc-600 dark:text-zinc-500">tr33</code>{" "}
+              <code className="text-zinc-600 dark:text-zinc-500">wildwood</code>{" "}
               alone does not “rename” stored blobs and can cause empty previews.
             </p>
           )}
@@ -469,7 +469,7 @@ export function PlaygroundConfigForm({ githubSignedIn, initial }: Props) {
                 type="text"
               />
               <p className="mt-1 text-[11px] text-zinc-500">
-                Leave empty for zero-config dev — tr33 auto-detects the git
+                Leave empty for zero-config dev — Wildwood auto-detects the git
                 root from the Next dev server cwd. Set only if your checkout
                 lives elsewhere.
               </p>

@@ -1,6 +1,6 @@
 import type { TreeEntries } from "./types";
 
-const DB_NAME = "tr33-git-cache";
+const DB_NAME = "wildwood-git-cache";
 const DB_VERSION = 1;
 const TREES_STORE = "trees";
 const BLOBS_STORE = "blobs";

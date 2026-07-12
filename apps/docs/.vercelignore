@@ -1,4 +1,5 @@
 .next
+.wildwood-cache
 .tr33-cache
 *.db
 node_modules

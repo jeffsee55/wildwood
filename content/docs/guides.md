@@ -6,7 +6,7 @@ description: "Patterns used in this docs app for collections, reads, mounting th
 
 # Guides
 
-This page collects the patterns actually used in `apps/docs` for `jeffsee55/tr33`. Copy them directly — the code compiles against this repo's `tr33` package.
+This page collects the patterns actually used in `apps/docs` for `jeffsee55/wildwood`. Copy them directly — the code compiles against this repo's `wildwood` package.
 
 ## 1. Collections
 
@@ -46,12 +46,12 @@ export const collections = { authors, docs, nav } as const;
 
 export const config = defineConfig({
   org: "jeffsee55",
-  repo: "tr33",
+  repo: "wildwood",
   ref: "main",
   version: "docs-0",
   collections,
 });
-// localPath omitted — tr33 auto-detects git checkout from cwd in dev/build.
+// localPath omitted — Wildwood auto-detects git checkout from cwd in dev/build.
 // In production, GitHub remote or already-populated Turso DB is used.
 ```
 
@@ -64,7 +64,7 @@ Layout owns nav. Pages own docs. No orphan-append or empty `notFound()` masking.
 ```tsx
 // apps/docs/app/layout.tsx
 import { wildwood } from "@/lib/wildwood";
-const navRes = await tr33.nav.findMany({ with: { children: true } });
+const navRes = await wildwood.nav.findMany({ with: { children: true } });
 const nav = navRes.items[0] ?? null;
 const docs = (nav?.children ?? []) as Array<{ _meta:{path:string}; slug:string; title:string }>;
 ```
@@ -93,24 +93,24 @@ No generic find types are exposed via a `Doc` interface file; everything inferre
 
 ```ts
 // apps/docs/app/api/[...path]/route.ts
-import { createTr33Route } from "wildwood"nextjs/route";
+import { createWildwoodRoute } from "wildwood"nextjs/route";
 import { wildwood } from "@/lib/wildwood";
 
-export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createTr33Route(
-  () => tr33,
+export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createWildwoodRoute(
+  () => wildwood,
   { revalidateTagName: "docs-content" },
 );
 ```
 
-That is the full wiring. `createTr33Route` is Next-specific and lazy-initializes the underlying H3 handler which mounts `/git`, `/vscode`, `/github`. Around it, the factory adds:
+That is the full wiring. `createWildwoodRoute` is Next-specific and lazy-initializes the underlying H3 handler which mounts `/git`, `/vscode`, `/github`. Around it, the factory adds:
 
-- `GET/POST /api/tr33/draft?branch=<ref>` and `?disable=1` (and legacy `/api/draft` alias) → `draftMode().enable()/disable()` + canonical branch cookie.
-- `GET/POST /api/tr33/preview` and legacy `/preview/exit` → clears cookies + disables draft.
+- `GET/POST /api/wildwood/draft?branch=<ref>` and `?disable=1` (and legacy `/api/draft` alias) → `draftMode().enable()/disable()` + canonical branch cookie.
+- `GET/POST /api/wildwood/preview` and legacy `/preview/exit` → clears cookies + disables draft.
 - On `/git/create-branch` and `/git/switch-branch` responses, sets canonical branch cookie `x-tr33-branch` (decodes from returned `{ref}` or request `name` on create) and merges upstream `Set-Cookie` headers removed/replaced.
 - On mutations (`commit | discard | merge | pull | create-branch | switch-branch`, customizable via `mutationRe`) calls `revalidateTag(tagName, store)` so `"use cache"` boundaries refresh.
 - No `revalidateTag` on draft enter/exit — draft is per-user bypass (`__prerender_bypass`), purging would invalidate everyone else.
 
-If you manage cookies elsewhere (middleware, custom path), you can avoid `createTr33Route` and use `tr33/nextjs/handler` (`handle`) directly, plus own `cookies` + `revalidateTag` yourself.
+If you manage cookies elsewhere (middleware, custom path), you can avoid `createWildwoodRoute` and use `wildwood/nextjs/handler` (`handle`) directly, plus own `cookies` + `revalidateTag` yourself.
 
 ### Client singleton
 
@@ -121,11 +121,11 @@ import { createClient as libsql } from "@libsql/client";
 import { createClient } from "wildwood";
 
 const database = libsql({
-  url: process.env.TR33_DOCS_DATABASE_URL || "file:./tr33-docs.db",
-  authToken: process.env.TR33_DOCS_DATABASE_AUTH_TOKEN || "",
+  url: process.env.WILDWOOD_DOCS_DATABASE_URL || "file:./tr33-docs.db",
+  authToken: process.env.WILDWOOD_DOCS_DATABASE_AUTH_TOKEN || "",
 });
 // auth optional — only when GitHub App or allow-list needed
-export const tr33 = createClient({ config, database, auth? });
+export const wildwood = createClient({ config, database, auth? });
 ```
 
 No `getDocsTr33()` getter needed. Core factory stays pure — app owns the one singleton; Next reuses the module across requests. `createClient` self-heals via `findMany → switch → index` on cold cache.
@@ -142,14 +142,14 @@ export function DocsLayout({ children }) {
     <html>
       <body>
         {children}
-        <Toolbar tr33={tr33} apiBase="/api" />
+        <Toolbar wildwood={tr33} apiBase="/api" />
       </body>
     </html>
   );
 }
 ```
 
-- With no `activeRef` / cookie logic in the host: `Toolbar`'s Server Component wrapper `Tr33Kit` now auto-resolves the active ref via `getBranch(tr33)` (internally `await cookies()` from `next/headers`). Passing `activeRef` still works for custom cookie name override. No `cookies()` in layout.
+- With no `activeRef` / cookie logic in the host: `Toolbar`'s Server Component wrapper `WildwoodKit` now auto-resolves the active ref via `getBranch(wildwood)` (internally `await cookies()` from `next/headers`). Passing `activeRef` still works for custom cookie name override. No `cookies()` in layout.
 - `theme` defaults to `"system"`. Remove `theme="light"` to respect `prefers-color-scheme`. If you pass `theme="light"` explicitly, Kit locks light ignoring system.
 - Preview flow:
 
@@ -162,10 +162,10 @@ or
 // Client soft-refresh via startTransition+router.refresh() coalesced 800ms (Set-Cookie commit race guard).
 
 // Exit Preview button inside Kit
-// POST /api/tr33/preview → route factory clears cookie server-side → refresh
+// POST /api/wildwood/preview → route factory clears cookie server-side → refresh
 ```
 
-- Toolbar's BroadcastChannel sync + localStorage `tr33.activeRef` are handled by Kit internally to keep extension host iframe in sync.
+- Toolbar's BroadcastChannel sync + localStorage `wildwood.activeRef` are handled by Kit internally to keep extension host iframe in sync.
 
 ### Auth interior
 
@@ -187,7 +187,7 @@ const feature = await wildwood.docs.findMany({ ref: "feature/rewrite" });
 `auth.authorize` in `createClient({ auth: { github, authorize } })` is called by the git-service router. Return `true` to allow, `false` or a custom `Response` to block.
 
 ```ts
-const tr33 = createClient({
+const wildwood = createClient({
   config, database,
   auth: {
     github: { type:"app", app:{ appId, privateKey } },
@@ -236,16 +236,16 @@ const { items } = await wildwood.docs.findMany({});
 return items.map((d)=>({ slug: d.slug }));
 
 // Sidebar sorting — fully ordered by nav.children, not slug lexicographic
-const navRes = await tr33.nav.findMany({ with:{children:true} });
+const navRes = await wildwood.nav.findMany({ with:{children:true} });
 const docs = navRes.items[0]?.children ?? [];
 ```
 
 ### Deploying
 
-- Use `TR33_DOCS_DATABASE_URL=libsql://...` Turso on Vercel (or `file:` relative only in preview/dev).
+- Use `WILDWOOD_DOCS_DATABASE_URL=libsql://...` Turso on Vercel (or `file:` relative only in preview/dev).
 - In build, `.git` present → `NativeRemote` indexes to that Turso (build prefetch).
 - Runtime on Vercel has no `.git` → reads only Turso. Cold miss fails fast with actionable message vs cryptic `Missing schema`.
-- `.env.example` in repo root lists full contract: `TR33_GITHUB_ORG/REPO`, `TR33_DOCS_REF`(or `VERCEL_GIT_COMMIT_SHA`), `TR33_DOCS_DATABASE_{URL,AUTH_TOKEN}`, `GITHUB_APP_*`, `TR33_DOCS_SOURCE` override.
+- `.env.example` in repo root lists full contract: `WILDWOOD_GITHUB_ORG/REPO`, `WILDWOOD_DOCS_REF`(or `VERCEL_GIT_COMMIT_SHA`), `TR33_DOCS_DATABASE_{URL,AUTH_TOKEN}`, `GITHUB_APP_*`, `WILDWOOD_DOCS_SOURCE` override.
 
 ## 6. Common failures
 

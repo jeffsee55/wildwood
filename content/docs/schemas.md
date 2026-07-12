@@ -76,7 +76,7 @@ Runtime: `z.codec(z.string(), z.object(shape))`. `decode` calls `JSON.parse`. Er
 z.filter(z.string())
 ```
 
-Marks a field as filterable. Runtime it is `T.pipe(z.custom(val=>val,{params:{__tr33Filter:true}}))` typed so it exposes `{ __internalFilter: T }` for `FindTypes` inference. `zodVisitor` walks the parsed value; when its schema carries `__tr33Filter`, it calls `onFilter` which writes a row to the `filters` table (`ref, path, field, value`). `where: { title: { eq: "…" } }` then filters on that table.
+Marks a field as filterable. Runtime it is `T.pipe(z.custom(val=>val,{params:{__wildwoodFilter:true}}))` typed so it exposes `{ __internalFilter: T }` for `FindTypes` inference. `zodVisitor` walks the parsed value; when its schema carries `__wildwoodFilter`, it calls `onFilter` which writes a row to the `filters` table (`ref, path, field, value`). `where: { title: { eq: "…" } }` then filters on that table.
 
 `z.filter` inside `z.array`, `z.optional`, `z.lazy`, `z.pipe`, etc is discovered by the visitor unwrapping those wrappers.
 
@@ -88,7 +88,7 @@ z.connect(authors, { referencedAs: "authors" })
 z.lazy(() => z.connect(authors)).optional()
 ```
 
-Declares a relation to another collection. Runtime it is `z.custom(()=>true,{params:{__tr33Connection,name,referencedAs?}})`. The output type carries `{_collection, _meta:{resolved:false;value:string}} & (referencedAs?). The input is always the frontmatter string (relative path to the target), not an id.
+Declares a relation to another collection. Runtime it is `z.custom(()=>true,{params:{__wildwoodConnection,name,referencedAs?}})`. The output type carries `{_collection, _meta:{resolved:false;value:string}} & (referencedAs?). The input is always the frontmatter string (relative path to the target), not an id.
 
 Indexing: when the visitor encounters a connection marker, it records the raw string. Later `config.index` canonicalizes:
 

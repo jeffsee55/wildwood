@@ -11,8 +11,8 @@
  *
  *   // app/blog/page.tsx
  *   import { cacheTag, cacheLife } from "next/cache"
- *   import { WILDWOOD_CACHE_TAG } from "tr33/nextjs/branch"
- *   import { Markdown } from "tr33/react/markdown"
+ *   import { WILDWOOD_CACHE_TAG } from "wildwood/nextjs/branch"
+ *   import { Markdown } from "wildwood/react/markdown"
  *   import Link from "next/link"
  *
  *   async function BlogList() {
@@ -20,7 +20,7 @@
  *     cacheLife("hours")
  *     cacheTag(WILDWOOD_CACHE_TAG)
  *
- *     const docs = await tr33.docs.findMany({})
+ *     const docs = await wildwood.docs.findMany({})
  *     return <ul>{docs.items.map(d => <li key={d._meta.path}>{d.title}</li>)}</ul>
  *   }
  *
@@ -44,7 +44,7 @@
  *   `x-wildwood-branch` (or `x-content-branch` for compat), Next automatically
  *   bypasses `"use cache"`. Disabling draft via `draftMode().disable()` +
  *   deleting the branch cookie resumes caching. `createWildwoodRoute` in
- *   `tr33/nextjs/route` handles `revalidateTag(WILDWOOD_CACHE_TAG)` for you.
+ *   `wildwood/nextjs/route` handles `revalidateTag(WILDWOOD_CACHE_TAG)` for you.
  */
 
 import type { Root, RootContent, Heading } from "mdast";

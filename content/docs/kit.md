@@ -1,7 +1,7 @@
 ---
 title: Kit (toolbar and editor)
 author: ../authors/jeff.md
-description: "The floating editor surface — Tr33Kit, Toolbar, ThemeProvider, branch sync, and the VS Code embedded shell."
+description: "The floating editor surface — WildwoodKit, Toolbar, ThemeProvider, branch sync, and the VS Code embedded shell."
 ---
 
 # Kit (toolbar and editor)
@@ -11,11 +11,11 @@ Kit is the floating UI your app mounts once — at the bottom of the page or nea
 ## Import paths
 
 ```ts
-import { Tr33Kit, Toolbar } from "wildwood"nextjs/kit";
-import type { KitAuthConfig, ToolbarProps, Tr33KitProps } from "wildwood"nextjs/kit";
+import { WildwoodKit, Toolbar } from "wildwood"nextjs/kit";
+import type { KitAuthConfig, ToolbarProps, WildwoodKitProps } from "wildwood"nextjs/kit";
 ```
 
-`Tr33Kit` and `Toolbar` are Server Components. They resolve cookies and VS Code CDN commit on the server, then render `ClientKitBoundary` (a `use client` + `dynamic(..., { ssr:false })` wrapper) whose ref/portal/shadow DOM avoids the `Cannot read useRef of null` RSC pre-resolution crash.
+`WildwoodKit` and `Toolbar` are Server Components. They resolve cookies and VS Code CDN commit on the server, then render `ClientKitBoundary` (a `use client` + `dynamic(..., { ssr:false })` wrapper) whose ref/portal/shadow DOM avoids the `Cannot read useRef of null` RSC pre-resolution crash.
 
 `@wildwood/kit` is the underlying client package — shadcn/ui + Vite library. You never import it directly unless you're building your own host frame.
 
@@ -29,42 +29,42 @@ import { Toolbar } from "wildwood"nextjs/kit";
 import { wildwood } from "@/lib/wildwood";
 
 export default async function Layout({ children }) {
-  const nav = await tr33.nav.findMany({ with: { children: true } });
+  const nav = await wildwood.nav.findMany({ with: { children: true } });
   // ...
   return (
     <html>
       <body>
         {children}
-        <Toolbar tr33={tr33} apiBase="/api" />
+        <Toolbar wildwood={tr33} apiBase="/api" />
       </body>
     </html>
   );
 }
 ```
 
-- `tr33` — any `createClient` instance (`Tr33KitHostClient = Tr33ForActiveRef`, structural). Only `_.config.ref` is read for default display.
+- `tr33` — any `createClient` instance (`WildwoodKitHostClient = WildwoodForActiveRef`, structural). Only `_.config.ref` is read for default display.
 - `apiBase` — defaults to `/api`. Mount point for the H3 handler's `/api` boundary (where `/git/*` etc live).
-- `activeRef` — optional. When omitted (common case), `Tr33Kit` Server Component calls `getBranch(tr33)` which awaits `next/headers` → `cookies()` internally and falls back to `config.ref`. Passing `activeRef` still works for custom cookie names or tests.
+- `activeRef` — optional. When omitted (common case), `WildwoodKit` Server Component calls `getBranch(wildwood)` which awaits `next/headers` → `cookies()` internally and falls back to `config.ref`. Passing `activeRef` still works for custom cookie names or tests.
 - `theme` — `"light" | "dark" | "system"` (default `system`). Follows `prefers-color-scheme` via `ThemeProvider`'s `matchMedia("(prefers-color-scheme: dark)")` listener. Syncs `colorScheme`, `data-kit-theme`, shadow host class, and `disableTransitionOnChange` temporarily while flipping. Pass `theme="light"` only if your docs are locked light.
 - `auth` — **optional**. When omitted, Server Component derives it from `process.env.GITHUB_APP_SLUG` + `GITHUB_APP_NAME`. Those are public bits (install link / manifest UI only — never signing material). `GITHUB_APP_ID` + `GITHUB_PRIVATE_KEY` stay in `createClient({ auth: { github } })`. `auth` override controls `name`, `origin`, `enabled`, OAuth/session. Auth merging is shallow + `githubApp` merge.
 - `cookieName` — override cookie name forwarded to `getBranch` when `activeRef` is auto-resolved.
-- `vscodeCommit` — pin VS Code web commit SHA. When omitted, `Tr33Kit` Server Component calls `resolveVscodeWebCdn()` to fetch the pinned commit (cacheable). You only need this for air-gapped builds.
+- `vscodeCommit` — pin VS Code web commit SHA. When omitted, `WildwoodKit` Server Component calls `resolveVscodeWebCdn()` to fetch the pinned commit (cacheable). You only need this for air-gapped builds.
 - `fallback` — optional fallback node while Next suspense holds the parent stream. Ignored once Kit hydration starts; default is a 3rem circular placeholder border (`#e4e4e7` / `#fafafa`).
 
 Minimal `(no cookies() call in the host)` is the whole point:
 
 ```ts
-<Toolbar tr33={tr33} />
+<Toolbar wildwood={tr33} />
 ```
 
 (plus no manual `activeRef` because that prop is now optional; `apiBase` defaults too.)
 
 ### Why Toolbar is self-sufficient
 
-`Tr33Kit` is async Server Component. In its guts:
+`WildwoodKit` is async Server Component. In its guts:
 
 ```ts
-async function Tr33Kit({ tr33, apiBase, theme, auth: authProp, activeRef: activeRefProp, cookieName, vscodeCommit }) {
+async function WildwoodKit({ tr33, apiBase, theme, auth: authProp, activeRef: activeRefProp, cookieName, vscodeCommit }) {
   const shouldAutoResolve = activeRefProp == null;
   const [commit, resolvedRef] = await Promise.all([
     vscodeCommit ? commit : resolveVscodeWebCdn().then(c=>c.commit),
@@ -80,17 +80,17 @@ async function Tr33Kit({ tr33, apiBase, theme, auth: authProp, activeRef: active
 
 `ClientKitBoundary` is `'use client'` and does `dynamic(()=>import("@wildwood/kit"), { ssr:false })` internally. So no portalled DOM touches RSC SSR.
 
-## Tr33Kit (lower-level)
+## WildwoodKit (lower-level)
 
-`Toolbar` is just `Tr33Kit`:
+`Toolbar` is just `WildwoodKit`:
 
 ```ts
 export function Toolbar({ fallback: _, ...kitProps }: ToolbarProps) {
-  return <Tr33Kit {...kitProps} />;
+  return <WildwoodKit {...kitProps} />;
 }
 ```
 
-Use `Tr33Kit` directly when you need to pass `fallback` or customize the server pointer boundaries.
+Use `WildwoodKit` directly when you need to pass `fallback` or customize the server pointer boundaries.
 
 ## ThemeProvider
 
@@ -108,18 +108,18 @@ Your app's `html` should also have `suppressHydrationWarning` when color-scheme 
 
 Kit, the extension host (if running VS Code extension in desktop), and the docs page need to stay in sync when a branch changes:
 
-- `@wildwood/shared` constants:
+- `wildwood-shared` constants:
 
 ```ts
-TR33_KIT_HOST_REF_CHANNEL = "tr33-kit-host-ref"                    // Kit page → host
-TR33_EXTENSION_TO_HOST_REF_CHANNEL = "tr33-extension-to-host"       // extension → Kit page
-TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL = "tr33-extension-workspace-changed"
-TR33_KIT_CLOSE_MESSAGE = "tr33-kit-close-editor"
-TR33_KIT_BRANCH_CHANGED_MESSAGE = "tr33-kit-branch-changed"
-TR33_KIT_WORKSPACE_CHANGED_MESSAGE = "tr33-kit-workspace-changed"
+WILDWOOD_KIT_HOST_REF_CHANNEL = "tr33-kit-host-ref"                    // Kit page → host
+WILDWOOD_EXTENSION_TO_HOST_REF_CHANNEL = "tr33-extension-to-host"       // extension → Kit page
+WILDWOOD_EXTENSION_WORKSPACE_CHANGED_CHANNEL = "tr33-extension-workspace-changed"
+WILDWOOD_KIT_CLOSE_MESSAGE = "tr33-kit-close-editor"
+WILDWOOD_KIT_BRANCH_CHANGED_MESSAGE = "tr33-kit-branch-changed"
+WILDWOOD_KIT_WORKSPACE_CHANGED_MESSAGE = "tr33-kit-workspace-changed"
 ```
 
-Kit posts/ref changes via `BroadcastChannel(TR33_KIT_HOST_REF_CHANNEL)` and listens on the extension-bound channels. `persistActiveRefToStorage(displayRef)` mirrors the display ref into `localStorage` under `TR33_ACTIVE_REF_STORAGE_KEY` (`tr33.activeRef`) for the embedded editor `MessageEvent` validation (guard: origin, iframe root check, is not `MessagePort`/`ServiceWorker`).
+Kit posts/ref changes via `BroadcastChannel(WILDWOOD_KIT_HOST_REF_CHANNEL)` and listens on the extension-bound channels. `persistActiveRefToStorage(displayRef)` mirrors the display ref into `localStorage` under `WILDWOOD_ACTIVE_REF_STORAGE_KEY` (`wildwood.activeRef`) for the embedded editor `MessageEvent` validation (guard: origin, iframe root check, is not `MessagePort`/`ServiceWorker`).
 
 Extension's `kit-parent` iframe root message validation: `messageOriginatedInVsCodeIframe(iframeRoot, source)` — avoids ambient postMessage hijacks.
 

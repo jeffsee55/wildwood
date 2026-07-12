@@ -2,7 +2,7 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Monorepo
 
-From the repository root, run the web stack (Next + `tr33` / kit / extension watchers + Drizzle Studio for this app’s DB):
+From the repository root, run the web stack (Next + `wildwood` / kit / extension watchers + Drizzle Studio for this app’s DB):
 
 ```bash
 pnpm dev:web

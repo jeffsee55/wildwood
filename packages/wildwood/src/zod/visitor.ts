@@ -112,12 +112,14 @@ export const zodVisitor = (args: ZodVisitorArgs): unknown => {
       return value;
     }
     case "custom": {
-      if (def.params?.__tr33Filter) {
+      if (def.params?.__wildwoodFilter || def.params?.__tr33Filter) {
         if (typeof value === "string") {
           onFilter({ value, field, key, schema });
         }
       }
-      if (def.params?.__tr33Connection) {
+      if (def.params?.__wildwoodConnection || def.params?.__tr33Connection) {
+        const connName =
+          def.params?.__wildwoodConnection ?? def.params?.__tr33Connection;
         const result = onConnection({
           value: value as string,
           field,
@@ -126,8 +128,12 @@ export const zodVisitor = (args: ZodVisitorArgs): unknown => {
           position: undefined,
           referencedAs: def.params?.referencedAs,
           collection: z
-            .object({ __tr33Connection: z.string() })
-            .decode(def.params).__tr33Connection,
+            .object({
+              __wildwoodConnection: z.string().optional(),
+              __tr33Connection: z.string().optional(),
+            })
+            .transform((p) => p.__wildwoodConnection ?? p.__tr33Connection!)
+            .decode(def.params),
         });
         // Return the result if provided, otherwise return original value
         return result !== undefined ? result : value;
@@ -191,7 +197,10 @@ export const zodVisitor = (args: ZodVisitorArgs): unknown => {
       // names to the path as a discriminant
       if (option?._zod.def.type === "custom") {
         // @ts-expect-error - we know this is a collection
-        field.push(option._zod.def?.params?.__tr33Connection);
+        field.push(
+          option._zod.def?.params?.__wildwoodConnection ??
+            option._zod.def?.params?.__tr33Connection,
+        );
       }
       if (option) {
         return zodVisitor({

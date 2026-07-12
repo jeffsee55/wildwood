@@ -39,7 +39,8 @@ export const connect = <
     },
     {
       params: {
-        __tr33Connection: collection.name,
+        __wildwoodConnection: collection.name,
+        __tr33Connection: collection.name, // legacy compat
         referencedAs: options?.referencedAs,
       },
     },
@@ -126,7 +127,7 @@ export const collection = <
 
 export const filter = <T extends z.ZodType>(type: T) => {
   return type.pipe(
-    z.custom((val) => val, { params: { __tr33Filter: true } }),
+    z.custom((val) => val, { params: { __wildwoodFilter: true, __tr33Filter: true } }),
   ) as unknown as z.ZodCustom<T["_output"], { __internalFilter: T["_output"] }>;
 };
 
