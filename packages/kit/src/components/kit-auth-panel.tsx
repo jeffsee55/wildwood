@@ -9,13 +9,11 @@ import { cn } from "@/lib/utils";
 type Permission = "read" | "write";
 
 export type KitAuthConfig = {
-  /** Show auth/developer entries in the Kit menu. Defaults to auto. */
   enabled?: boolean;
   authBase?: string;
   callbackURL?: string;
   userEmail?: string | null;
   githubOAuthEnabled?: boolean;
-  /** Optimistically passed even when partially empty — library decides prod enforcement. */
   githubApp?: {
     appSlug?: string;
     name?: string;
@@ -24,18 +22,13 @@ export type KitAuthConfig = {
     oauthCallbackPath?: string;
     contents?: Permission;
     pullRequests?: Permission;
+    webhookUrl?: string;
   };
-  /**
-   * When true, the library enforces required auth fields and throws in prod.
-   * Defaults to `process.env.NODE_ENV === "production"` inside the library —
-   * the host does not need to set this; it just always passes whatever it has.
-   */
   enforceInProduction?: boolean;
 };
 
 type Props = {
   auth: KitAuthConfig;
-  /** When `"dev-setup"`, only the GitHub App manifest UI (local testing). Default: session sign-in/out. */
   mode?: "session" | "dev-setup";
 };
 
@@ -52,68 +45,42 @@ function normalizeAuthBase(authBase: string | undefined): string {
   return base.startsWith("/") ? base : `/${base}`;
 }
 
-function manifestState(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return Math.random().toString(36).slice(2);
-}
-
 export function KitAuthPanel({ auth, mode = "session" }: Props) {
   const authBase = normalizeAuthBase(auth.authBase);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [name, setName] = React.useState(
-    auth.githubApp?.name || "Wildwood Play Dev",
-  );
-  const [origin, setOrigin] = React.useState(
-    auth.githubApp?.origin || "",
-  );
-  const [contents, setContents] = React.useState<Permission>(
-    auth.githubApp?.contents || "write",
-  );
-  const [pullRequests, setPullRequests] = React.useState<Permission>(
-    auth.githubApp?.pullRequests || "write",
-  );
+  const [creating, setCreating] = React.useState(false);
+  const [name, setName] = React.useState(auth.githubApp?.name || "Wildwood Play Dev");
+  const [origin, setOrigin] = React.useState(auth.githubApp?.origin || "");
+  const [contents, setContents] = React.useState<Permission>(auth.githubApp?.contents || "write");
+  const [pullRequests, setPullRequests] = React.useState<Permission>(auth.githubApp?.pullRequests || "write");
 
-  const manifestRedirectPath =
-    auth.githubApp?.manifestRedirectPath || "/github-app-manifest";
-  const oauthCallbackPath =
-    auth.githubApp?.oauthCallbackPath || `${authBase}/callback/github`;
+  const manifestRedirectPath = auth.githubApp?.manifestRedirectPath || "/api/wildwood/github/app-manifest/callback";
+  const oauthCallbackPath = auth.githubApp?.oauthCallbackPath || `${authBase}/callback/github`;
   const callbackURL = auth.callbackURL || "/";
   const installUrl = auth.githubApp?.appSlug
     ? `https://github.com/apps/${auth.githubApp.appSlug}/installations/new`
     : null;
 
   React.useEffect(() => {
-    if (auth.githubApp?.origin || origin) {
-      return;
-    }
+    if (auth.githubApp?.origin || origin) return;
     setOrigin(window.location.origin);
   }, [auth.githubApp?.origin, origin]);
 
-  const manifest = React.useMemo(
+  const manifestPreview = React.useMemo(
     () => ({
       name,
-      url: origin,
-      redirect_url: `${origin}${manifestRedirectPath}`,
-      callback_urls: [`${origin}${oauthCallbackPath}`],
+      url: origin || "(auto: window.location.origin)",
+      redirect_url: `${origin || "https://example.com"}${manifestRedirectPath}`,
+      callback_urls: [`${origin || "https://example.com"}${oauthCallbackPath}`],
+      hook_attributes: auth.githubApp?.webhookUrl
+        ? { url: auth.githubApp.webhookUrl, active: true }
+        : { url: `${origin || "https://example.com"}/api/wildwood/github/webhook`, active: true },
       public: false,
-      default_permissions: {
-        contents,
-        pull_requests: pullRequests,
-        metadata: "read",
-      },
-      default_events: [],
+      default_permissions: { contents, pull_requests: pullRequests, metadata: "read" },
+      default_events: ["pull_request", "push"],
     }),
-    [
-      contents,
-      manifestRedirectPath,
-      name,
-      oauthCallbackPath,
-      origin,
-      pullRequests,
-    ],
+    [contents, manifestRedirectPath, name, oauthCallbackPath, origin, pullRequests, auth.githubApp?.webhookUrl],
   );
 
   const signInWithGitHub = React.useCallback(async () => {
@@ -130,17 +97,9 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
           scopes: ["repo", "read:user", "user:email"],
         }),
       });
-      const result = (await response.json().catch(() => null)) as {
-        url?: string;
-        redirect?: boolean;
-        message?: string;
-      } | null;
-      if (!response.ok) {
-        throw new Error(result?.message || response.statusText);
-      }
-      if (result?.url) {
-        window.location.href = result.url;
-      }
+      const result = (await response.json().catch(() => null)) as { url?: string; redirect?: boolean; message?: string } | null;
+      if (!response.ok) throw new Error(result?.message || response.statusText);
+      if (result?.url) window.location.href = result.url;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -152,13 +111,8 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(`${authBase}/sign-out`, {
-        method: "POST",
-        credentials: "include",
-      });
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
+      const response = await fetch(`${authBase}/sign-out`, { method: "POST", credentials: "include" });
+      if (!response.ok) throw new Error(await response.text());
       window.location.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -167,39 +121,66 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
     }
   }, [authBase]);
 
-  const createGitHubApp = React.useCallback(() => {
-    const action = new URL("https://github.com/settings/apps/new");
-    action.searchParams.set("state", manifestState());
+  // ── New GitHub App creation flow — no popup DOM hack ──────────────
+  // 1. POST /api/wildwood/github/app-manifest/start with desired manifest fields.
+  //    Server sets __wildwood_github_app_state HttpOnly cookie and returns { action, manifest, state }.
+  // 2. Build a POST form to GitHub with manifest=<json>&state=<state> and submit.
+  // GitHub then shows review UI and redirects to redirect_url?code=...&state=...
+  const createGitHubApp = React.useCallback(async () => {
+    setCreating(true);
+    setError(null);
+    try {
+      const startRes = await fetch("/api/wildwood/github/app-manifest/start", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          origin: origin || undefined,
+          redirectPath: manifestRedirectPath,
+          oauthCallbackPath,
+          contents,
+          pullRequests,
+          webhookUrl: auth.githubApp?.webhookUrl,
+        }),
+      });
+      if (!startRes.ok) {
+        const t = await startRes.text().catch(() => startRes.statusText);
+        throw new Error(`Failed to start manifest flow (${startRes.status}): ${t.slice(0, 500)}`);
+      }
+      const startData = (await startRes.json()) as {
+        action: string;
+        manifest: unknown;
+        state: string;
+      };
 
-    const popup = window.open("about:blank", "_blank");
-    if (!popup) {
-      setError("Your browser blocked the GitHub App setup popup.");
-      return;
+      // Submit to GitHub via a programmatic form POST — stable across browsers, no about:blank hack.
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = startData.action;
+      // Open in same tab preserves state cookie best (redirect goes back to our origin).
+      form.target = "_self";
+
+      const mf = document.createElement("input");
+      mf.type = "hidden";
+      mf.name = "manifest";
+      mf.value = JSON.stringify(startData.manifest);
+      form.appendChild(mf);
+
+      const st = document.createElement("input");
+      st.type = "hidden";
+      st.name = "state";
+      st.value = startData.state;
+      form.appendChild(st);
+
+      document.body.appendChild(form);
+      form.submit();
+      // Navigation will leave page — no need to clean up.
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setCreating(false);
     }
-
-    popup.document.title = "Opening GitHub App setup...";
-    const message = popup.document.createElement("p");
-    message.textContent = "Opening GitHub App setup...";
-    popup.document.body.append(message);
-
-    const form = popup.document.createElement("form");
-    form.action = action.toString();
-    form.method = "post";
-
-    const input = popup.document.createElement("input");
-    input.type = "hidden";
-    input.name = "manifest";
-    input.value = JSON.stringify(manifest);
-    form.append(input);
-
-    const submit = popup.document.createElement("button");
-    submit.type = "submit";
-    submit.textContent = "Continue to GitHub";
-    form.append(submit);
-
-    popup.document.body.append(form);
-    form.submit();
-  }, [manifest]);
+  }, [auth.githubApp?.webhookUrl, contents, manifestRedirectPath, name, oauthCallbackPath, origin, pullRequests]);
 
   const sessionSection = (
     <div className="rounded-md border border-border bg-background/60 p-2">
@@ -209,29 +190,15 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
       </p>
       <div className="mt-2 flex flex-wrap gap-2">
         {auth.githubOAuthEnabled ? (
-          <Button
-            className="h-8 text-xs"
-            disabled={busy}
-            onClick={signInWithGitHub}
-            type="button"
-            variant="secondary"
-          >
+          <Button className="h-8 text-xs" disabled={busy} onClick={signInWithGitHub} type="button" variant="secondary">
             {busy ? <Loader2 className="size-3 animate-spin" /> : null}
             Continue with GitHub
           </Button>
         ) : (
-          <p className="text-muted-foreground">
-            Set GitHub OAuth env vars to enable sign-in.
-          </p>
+          <p className="text-muted-foreground">Set GitHub OAuth env vars to enable sign-in.</p>
         )}
         {auth.userEmail ? (
-          <Button
-            className="h-8 text-xs"
-            disabled={busy}
-            onClick={signOut}
-            type="button"
-            variant="secondary"
-          >
+          <Button className="h-8 text-xs" disabled={busy} onClick={signOut} type="button" variant="secondary">
             Sign out
           </Button>
         ) : null}
@@ -243,19 +210,10 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
     <div className="rounded-md border border-border bg-background/60 p-2">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="font-medium text-popover-foreground">
-            GitHub App manifest
-          </p>
-          <p className="mt-1 text-muted-foreground">
-            Create a disposable app, then exchange the manifest code.
-          </p>
+          <p className="font-medium text-popover-foreground">GitHub App manifest</p>
+          <p className="mt-1 text-muted-foreground">Create disposable app, then exchange manifest code (now with webhook).</p>
         </div>
-        <Button
-          className="h-7 px-2 text-xs"
-          onClick={() => setName(randomAppName())}
-          type="button"
-          variant="secondary"
-        >
+        <Button className="h-7 px-2 text-xs" onClick={() => setName(randomAppName())} type="button" variant="secondary">
           <Shuffle className="size-3" />
         </Button>
       </div>
@@ -273,40 +231,31 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
           Origin
           <input
             className="h-8 rounded-md border border-border bg-background px-2 font-mono text-[11px] text-popover-foreground outline-none ring-ring/40 focus:ring-2"
-            onChange={(event) =>
-              setOrigin(trimSlashes(event.currentTarget.value))
-            }
+            onChange={(event) => setOrigin(trimSlashes(event.currentTarget.value))}
+            placeholder={typeof window !== "undefined" ? window.location.origin : "https://your-app.vercel.app"}
             value={origin}
           />
         </label>
         <div className="grid grid-cols-2 gap-2">
-          <PermissionSelect
-            label="Contents"
-            onChange={setContents}
-            value={contents}
-          />
-          <PermissionSelect
-            label="PRs"
-            onChange={setPullRequests}
-            value={pullRequests}
-          />
+          <PermissionSelect label="Contents" onChange={setContents} value={contents} />
+          <PermissionSelect label="PRs" onChange={setPullRequests} value={pullRequests} />
         </div>
+        <p className="text-[11px] text-muted-foreground">
+          Redirect → <code className="font-mono">{manifestRedirectPath}</code>
+          <br />
+          Webhook → <code className="font-mono">/api/wildwood/github/webhook</code> (placeholder, 501 until wired)
+        </p>
       </div>
 
       <details className="mt-3">
-        <summary className="cursor-pointer text-muted-foreground">
-          Manifest JSON
-        </summary>
+        <summary className="cursor-pointer text-muted-foreground">Manifest JSON (preview)</summary>
         <pre className="mt-2 max-h-40 overflow-auto rounded-md border border-border bg-background p-2 text-[10px] text-muted-foreground">
-          {JSON.stringify(manifest, null, 2)}
+          {JSON.stringify(manifestPreview, null, 2)}
         </pre>
       </details>
 
-      <Button
-        className="mt-3 h-8 w-full text-xs"
-        onClick={createGitHubApp}
-        type="button"
-      >
+      <Button className="mt-3 h-8 w-full text-xs" disabled={creating} onClick={createGitHubApp} type="button">
+        {creating ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
         Create GitHub App
       </Button>
       {installUrl ? (
@@ -320,9 +269,7 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
         </a>
       ) : null}
       <p className="mt-2 text-[11px] text-muted-foreground">
-        {installUrl
-          ? "Install the app to grant repository access, then restart or refresh after env changes."
-          : "After exchanging the manifest, restart so GITHUB_APP_SLUG can enable app installation."}
+        After redirect you&apos;ll see Vercel CLI snippets and .env.local. Code is single-use, expires in 1h.
       </p>
     </div>
   );
@@ -332,37 +279,23 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
       {mode === "dev-setup" ? (
         <>
           <div>
-            <p className="text-sm font-semibold text-popover-foreground">
-              GitHub App (local dev)
-            </p>
-            <p className="mt-1 text-muted-foreground">
-              Create a disposable GitHub App for local testing. Production
-              deployments should use pre-configured app credentials.
-            </p>
+            <p className="text-sm font-semibold text-popover-foreground">GitHub App (local dev)</p>
+            <p className="mt-1 text-muted-foreground">Create disposable GitHub App for local testing. Production uses pre-configured credentials from Vercel env.</p>
           </div>
           {githubAppManifestSection}
         </>
       ) : (
         <>
           <div>
-            <p className="text-sm font-semibold text-popover-foreground">
-              Auth
-            </p>
-            <p className="mt-1 text-muted-foreground">
-              GitHub sign-in for local Wildwood development.
-            </p>
+            <p className="text-sm font-semibold text-popover-foreground">Auth</p>
+            <p className="mt-1 text-muted-foreground">GitHub sign-in for local Wildwood development.</p>
           </div>
           {sessionSection}
         </>
       )}
 
       {error ? (
-        <p
-          className={cn(
-            "max-h-24 overflow-auto rounded-md border border-destructive/30 bg-destructive/10 p-2 text-destructive",
-          )}
-          role="alert"
-        >
+        <p className={cn("max-h-32 overflow-auto rounded-md border border-destructive/30 bg-destructive/10 p-2 text-destructive")} role="alert">
           {error}
         </p>
       ) : null}

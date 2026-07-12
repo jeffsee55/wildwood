@@ -1,3 +1,3 @@
-import { createGitHubAppManifestConversionRoute } from "tr33/nextjs";
+import { createGitHubAppManifestConversionRoute } from "wildwood/nextjs";
 
 export const POST = createGitHubAppManifestConversionRoute();

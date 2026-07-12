@@ -82,10 +82,24 @@ export {
 } from "./resolve-active-ref";
 
 export {
+  buildWildwoodGitHubAppManifest,
   createGitHubAppManifestConversionRoute,
+  exchangeGitHubAppManifestCode,
+  formatEnvFileContent,
   GitHubAppManifestCallback,
   githubAppManifestConversionCommand,
+  manifestConversionToEnv,
+  shellExportSnippets,
+  vercelEnvAddSnippets,
+  type GitHubAppManifestConversion,
+  type GitHubPermissionLevel,
+  type WildwoodGitHubAppManifest,
+  type WildwoodGitHubAppManifestOptions,
+  type WildwoodGitHubEnvMap,
 } from "./github-app-manifest";
+
+export { createGitHubAppManifestRouter } from "./handlers/github-app-manifest-router";
+export { WildwoodGitHubAppSetup } from "./github-app-setup";
 
 // `createWildwoodPlayAuth` is intentionally NOT re-exported from the main barrel.
 // It has heavy native deps (`better-sqlite3`, `node:fs`, etc) and must only be
