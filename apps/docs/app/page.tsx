@@ -3,9 +3,24 @@ import { Markdown } from "wildwood/react/markdown";
 import { wildwood } from "@/lib/wildwood";
 
 export default async function Home() {
-  const res = await wildwood.docs.findMany({});
+  let res: { items: Array<{ title: string; body: unknown }> } | null = null;
+  try {
+    res = await wildwood.docs.findMany({});
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (
+      process.env.NEXT_PHASE === "phase-production-build" ||
+      msg.includes("ETIMEDOUT") ||
+      msg.includes("fetch failed") ||
+      msg.includes("LibsqlError")
+    ) {
+      console.warn(`[docs:home] docs.findMany failed during build: ${msg.slice(0, 600)}`);
+    } else {
+      throw e;
+    }
+  }
   const current =
-    res.items.toSorted((a, b) => a.title.localeCompare(b.title))[0] ?? null;
+    res?.items.toSorted((a, b) => a.title.localeCompare(b.title))[0] ?? null;
 
   return (
     <div className="typeset typeset-man">

@@ -41,22 +41,70 @@ async function fetchLatestCommit(): Promise<string> {
 }
 
 /** Stable VS Code web assets on `main.vscode-cdn.net` (not bundled in serverless). */
+const FALLBACK_VSCODE_COMMIT =
+  process.env.WILDWOOD_VSCODE_WEB_COMMIT?.trim() || "8a1aaed389a7bc6a8f2d9dbc2b34635633cf8ff2";
+const FALLBACK_VSCODE_VERSION =
+  process.env.WILDWOOD_VSCODE_WEB_VERSION?.trim() && process.env.WILDWOOD_VSCODE_WEB_VERSION.trim() !== "latest"
+    ? process.env.WILDWOOD_VSCODE_WEB_VERSION.trim()
+    : "1.105.1";
+
+async function fetchWithTimeout(url: string, ms = 4000): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function tryFetchLatestVersion(): Promise<string | null> {
+  try {
+    const res = await fetchWithTimeout("https://update.code.visualstudio.com/api/releases/stable");
+    if (!res.ok) throw new Error(String(res.status));
+    const versions = (await res.json()) as string[];
+    return versions[0] ?? null;
+  } catch (e) {
+    console.warn(`[wildwood:vscode-cdn] fetchLatestVersion failed, using fallback ${FALLBACK_VSCODE_VERSION}:`, e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+async function tryFetchLatestCommit(): Promise<string | null> {
+  try {
+    const res = await fetchWithTimeout(
+      `https://update.code.visualstudio.com/api/commits/stable/${VSCODE_WEB_PLATFORM}`,
+    );
+    if (!res.ok) throw new Error(String(res.status));
+    const commits = (await res.json()) as string[];
+    return commits[0] ?? null;
+  } catch (e) {
+    console.warn(`[wildwood:vscode-cdn] fetchLatestCommit failed, using fallback ${FALLBACK_VSCODE_COMMIT}:`, e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 export function resolveVscodeWebCdn(): Promise<VscodeWebCdn> {
   if (!vscodeWebCdnPromise) {
     vscodeWebCdnPromise = (async () => {
       const commitOverride = process.env.WILDWOOD_VSCODE_WEB_COMMIT?.trim();
       const versionOverride = process.env.WILDWOOD_VSCODE_WEB_VERSION?.trim();
 
-      const commit = commitOverride || (await fetchLatestCommit());
-      const version =
-        versionOverride && versionOverride !== "latest"
-          ? versionOverride
-          : await fetchLatestVersion();
+      let commit: string | null = commitOverride || null;
+      let version: string | null =
+        versionOverride && versionOverride !== "latest" ? versionOverride : null;
+
+      if (!commit) commit = await tryFetchLatestCommit();
+      if (!version) version = await tryFetchLatestVersion();
+
+      // Never throw during build/prerender — fall back to known good.
+      const finalCommit = commit || FALLBACK_VSCODE_COMMIT;
+      const finalVersion = version || FALLBACK_VSCODE_VERSION;
 
       return {
-        commit,
-        version,
-        cdnBase: `https://main.vscode-cdn.net/stable/${commit}`,
+        commit: finalCommit,
+        version: finalVersion,
+        cdnBase: `https://main.vscode-cdn.net/stable/${finalCommit}`,
       };
     })();
   }

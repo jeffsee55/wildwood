@@ -131,13 +131,39 @@ export async function WildwoodKit({
   vscodeCommit,
 }: WildwoodKitProps) {
   const wildwood = wildwoodProp ?? tr33Prop!;
-  const shouldAutoResolve = activeRefProp == null;
-  const [commit, resolvedRef] = await Promise.all([
-    vscodeCommit ? Promise.resolve(vscodeCommit) : resolveVscodeWebCdn().then((c) => c.commit),
-    shouldAutoResolve
-      ? getBranch(wildwood, cookieName ? { cookieName } : undefined)
-      : Promise.resolve(activeRefProp as string),
-  ]);
+
+  async function safeVscodeCommit(): Promise<string> {
+    if (vscodeCommit) return vscodeCommit;
+    // During static prerender / build, network may be throttled or blocked.
+    // Don't let VS Code CDN fetch crash /_not-found.
+    if (process.env.NEXT_PHASE === "phase-production-build") {
+      return process.env.WILDWOOD_VSCODE_WEB_COMMIT?.trim() || "8a1aaed389a7bc6a8f2d9dbc2b34635633cf8ff2";
+    }
+    try {
+      const cdn = await resolveVscodeWebCdn();
+      return cdn.commit;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`[wildwood:kit] resolveVscodeWebCdn failed, using fallback: ${msg.slice(0, 400)}`);
+      return process.env.WILDWOOD_VSCODE_WEB_COMMIT?.trim() || "8a1aaed389a7bc6a8f2d9dbc2b34635633cf8ff2";
+    }
+  }
+
+  async function safeBranch(): Promise<string> {
+    if (activeRefProp != null) return activeRefProp as string;
+    try {
+      return await getBranch(wildwood, cookieName ? { cookieName } : undefined);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (process.env.NEXT_PHASE === "phase-production-build") {
+        console.warn(`[wildwood:kit] getBranch failed during build, falling back to config ref: ${msg.slice(0, 400)}`);
+        return wildwood._.config.ref;
+      }
+      throw e;
+    }
+  }
+
+  const [commit, resolvedRef] = await Promise.all([safeVscodeCommit(), safeBranch()]);
 
   const activeRef = resolvedRef ?? wildwood._.config.ref;
   // Server-derived default so `<Toolbar wildwood={wildwood} />` is enough in most hosts.
