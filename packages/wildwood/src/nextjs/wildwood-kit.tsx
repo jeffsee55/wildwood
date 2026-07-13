@@ -36,17 +36,36 @@ function resolveKitAuthFromEnv(): KitAuthConfig | undefined {
   const appSlug = process.env.GITHUB_APP_SLUG?.trim();
   const appId = process.env.GITHUB_APP_ID?.trim();
   const privateKey = process.env.GITHUB_PRIVATE_KEY?.trim();
-  const configured = !!(appId && privateKey);
+  const clientId = process.env.GITHUB_CLIENT_ID?.trim();
+  const clientSecret = process.env.GITHUB_CLIENT_SECRET?.trim();
 
-  if (!appSlug && !configured) {
+  const configured = !!(appId && privateKey);
+  // A GitHub App's own client_id/client_secret *are* the OAuth credentials.
+  // We don't need a second OAuth App — one set does both git writes and sign-in.
+  const oAuthReady = !!(clientId && clientSecret);
+  // Even if oAuth env hasn't propagated yet (just created via manifest),
+  // the App itself implies OAuth capability. The UI should say "via App"
+  // and prompt redeploy if needed, rather than "set GitHub OAuth env vars".
+  const providesOAuth = true as const;
+
+  if (!appSlug && !configured && !oAuthReady) {
     return {
       githubApp: {
         configured: false as const,
         name: process.env.GITHUB_APP_NAME?.trim() || "Wildwood",
         origin: vercelOrigin,
+        providesOAuth,
+      },
+      // Keep back-compat flag false — new `oauth.providers` below is the real source.
+      githubOAuthEnabled: false,
+      oauth: {
+        providers: [{ id: "github", name: "GitHub", viaGitHubApp: false, enabled: false }],
       },
     };
   }
+
+  const appPresent = !!(appSlug || configured);
+  const githubEnabled = configured || oAuthReady || !!appSlug;
 
   return {
     githubApp: {
@@ -54,6 +73,19 @@ function resolveKitAuthFromEnv(): KitAuthConfig | undefined {
       configured: configured || !!appSlug,
       name: process.env.GITHUB_APP_NAME?.trim() || "Wildwood",
       origin: vercelOrigin,
+      providesOAuth,
+    },
+    githubOAuthEnabled: githubEnabled,
+    oauth: {
+      providers: [
+        {
+          id: "github" as const,
+          name: "GitHub",
+          // Single credential set happy path: the App doubles as the OAuth app.
+          viaGitHubApp: appPresent ? true : undefined,
+          enabled: githubEnabled,
+        },
+      ],
     },
   };
 }
@@ -65,21 +97,44 @@ function mergeKitAuth(
   if (!base && !override) return undefined;
   if (!base) return override;
   if (!override) return base;
+
   const mergedGitHubApp =
     base.githubApp || override.githubApp
       ? {
           ...base.githubApp,
           ...override.githubApp,
-          // If override has explicit configured, keep it, but server truth wins when present in base
           configured:
             (override.githubApp?.configured as boolean | undefined) ??
             (base.githubApp?.configured as boolean | undefined),
+          providesOAuth:
+            (override.githubApp?.providesOAuth as boolean | undefined) ??
+            (base.githubApp?.providesOAuth as boolean | undefined) ??
+            true,
         }
       : undefined;
+
+  // Merge OAuth providers: override list wins if provided, else keep base.
+  // Otherwise keep new pluggable shape while still honoring legacy githubOAuthEnabled.
+  const mergedOAuth =
+    override.oauth || base.oauth
+      ? {
+          providers:
+            override.oauth?.providers ??
+            base.oauth?.providers ??
+            (base.githubOAuthEnabled || override.githubOAuthEnabled
+              ? [{ id: "github" as const, name: "GitHub", enabled: true }]
+              : undefined),
+        }
+      : undefined;
+
   return {
     ...base,
     ...override,
     githubApp: mergedGitHubApp,
+    oauth: mergedOAuth,
+    githubOAuthEnabled:
+      (override.githubOAuthEnabled as boolean | undefined) ??
+      (base.githubOAuthEnabled as boolean | undefined),
   };
 }
 

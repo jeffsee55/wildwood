@@ -8,11 +8,50 @@ import { cn } from "@/lib/utils";
 
 type Permission = "read" | "write";
 
+export type OAuthProviderId = "github" | "google" | "gitlab" | "discord" | (string & {});
+
+export type OAuthProviderConfig = {
+  id: OAuthProviderId;
+  /**
+   * Display label. Defaults to capitalized id.
+   * e.g. "github" -> "GitHub"
+   */
+  name?: string;
+  /**
+   * Whether this provider is enabled.
+   * If omitted, inferred as true when provider's env is present.
+   */
+  enabled?: boolean;
+  /**
+   * When true, this provider is powered by the GitHub App's own
+   * client_id / client_secret (single credential set). No separate
+   * OAuth App needed.
+   */
+  viaGitHubApp?: boolean;
+};
+
 export type KitAuthConfig = {
   enabled?: boolean;
   authBase?: string;
   callbackURL?: string;
   userEmail?: string | null;
+  /**
+   * New, pluggable OAuth providers. Happy path is single GitHub provider
+   * powered by the GitHub App itself (viaGitHubApp=true). Additional
+   * providers can be added without changing Kit UI.
+   *
+   * If omitted, Kit will infer from legacy `githubOAuthEnabled` + `githubApp.configured`.
+   */
+  oauth?: {
+    providers?: OAuthProviderConfig[];
+  };
+  /**
+   * @deprecated Use `oauth.providers`. Kept for back-compat — when true,
+   * GitHub is offered as a sign-in provider. When a GitHub App is configured,
+   * GitHub sign-in is automatically enabled via the App's own OAuth creds
+   * (client_id/client_secret from the manifest conversion), so no separate
+   * OAuth App env is needed.
+   */
   githubOAuthEnabled?: boolean;
   githubApp?: {
     appSlug?: string;
@@ -29,6 +68,13 @@ export type KitAuthConfig = {
      * If omitted, inferred from presence of appSlug — missing slug == not configured.
      */
     configured?: boolean;
+    /**
+     * When true, this App's client_id/client_secret can be used for
+     * user sign-in. This is the default — GitHub Apps ARE OAuth apps.
+     * Set to false only if you explicitly want to disable GitHub sign-in
+     * even though the App exists.
+     */
+    providesOAuth?: boolean;
   };
   /**
    * @deprecated The Kit is a UI affordance — it must never throw in production when
@@ -56,8 +102,63 @@ function normalizeAuthBase(authBase: string | undefined): string {
   return base.startsWith("/") ? base : `/${base}`;
 }
 
+function providerLabel(id: string, fallback?: string): string {
+  if (fallback) return fallback;
+  if (id === "github") return "GitHub";
+  if (id === "google") return "Google";
+  if (id === "gitlab") return "GitLab";
+  if (id === "discord") return "Discord";
+  return id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+function resolveOAuthProviders(auth: KitAuthConfig): (OAuthProviderConfig & { enabledResolved: boolean })[] {
+  const explicit = auth.oauth?.providers;
+
+  // New config path — explicit list wins, but still resolves enabled default.
+  if (explicit && explicit.length > 0) {
+    const ghAppConfigured = auth.githubApp?.configured !== false && (!!auth.githubApp?.appSlug || auth.githubApp?.configured === true);
+    const providesOAuth = auth.githubApp?.providesOAuth !== false;
+    return explicit.map((p) => {
+      const id = p.id.trim().toLowerCase();
+      const isGithub = id === "github";
+      const enabledDefault = (() => {
+        if (p.enabled != null) return p.enabled;
+        if (isGithub) {
+          // Single source of truth happy path: GitHub App itself provides OAuth.
+          if (ghAppConfigured && providesOAuth) return true;
+          // Legacy: standalone OAuth env var presence — server plugs it in as githubOAuthEnabled.
+          if (auth.githubOAuthEnabled) return true;
+          return false;
+        }
+        // Non-github providers: respect explicit enabled, otherwise require server to mark enabled.
+        return p.enabled ?? false;
+      })();
+      return { ...p, id: id as OAuthProviderConfig["id"], enabledResolved: enabledDefault };
+    });
+  }
+
+  // Back-compat: single github provider inferred from legacy flag + App config.
+  const ghAppConfigured = auth.githubApp?.configured !== false && (!!auth.githubApp?.appSlug || auth.githubApp?.configured === true);
+  const providesOAuth = auth.githubApp?.providesOAuth !== false;
+  const legacyGithubOAuthEnabled = auth.githubOAuthEnabled === true;
+  // Happy path: if GitHub App exists and opts into providing OAuth (default), GitHub sign-in is enabled
+  // even without a separate OAuth App. No second credential set needed.
+  const githubEnabled = (ghAppConfigured && providesOAuth) || legacyGithubOAuthEnabled;
+
+  return [
+    {
+      id: "github" as const,
+      name: "GitHub",
+      viaGitHubApp: ghAppConfigured && providesOAuth ? true : undefined,
+      enabledResolved: githubEnabled,
+      enabled: githubEnabled ? true : false,
+    },
+  ];
+}
+
 export function KitAuthPanel({ auth, mode = "session" }: Props) {
   const authBase = normalizeAuthBase(auth.authBase);
+  const [busyProvider, setBusyProvider] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [creating, setCreating] = React.useState(false);
@@ -78,6 +179,8 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
     setOrigin(window.location.origin);
   }, [auth.githubApp?.origin, origin]);
 
+  const providers = React.useMemo(() => resolveOAuthProviders(auth), [auth]);
+
   const manifestPreview = React.useMemo(() => {
     const base = {
       name,
@@ -94,29 +197,36 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
     return base;
   }, [contents, manifestRedirectPath, name, oauthCallbackPath, origin, pullRequests, auth.githubApp?.webhookUrl]);
 
-  const signInWithGitHub = React.useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch(`${authBase}/sign-in/social`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: "github",
-          callbackURL,
-          scopes: ["repo", "read:user", "user:email"],
-        }),
-      });
-      const result = (await response.json().catch(() => null)) as { url?: string; redirect?: boolean; message?: string } | null;
-      if (!response.ok) throw new Error(result?.message || response.statusText);
-      if (result?.url) window.location.href = result.url;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [authBase, callbackURL]);
+  const signIn = React.useCallback(
+    async (providerId: string) => {
+      setBusyProvider(providerId);
+      setBusy(true);
+      setError(null);
+      try {
+        const response = await fetch(`${authBase}/sign-in/social`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider: providerId,
+            callbackURL,
+            // For GitHub via GitHub App, repo scope isn't needed for sign-in — only read:user / user:email.
+            // Keep repo for backward compat or when user truly needs repo write via PAT-less flow.
+            scopes: providerId === "github" ? ["read:user", "user:email"] : undefined,
+          }),
+        });
+        const result = (await response.json().catch(() => null)) as { url?: string; redirect?: boolean; message?: string } | null;
+        if (!response.ok) throw new Error(result?.message || response.statusText);
+        if (result?.url) window.location.href = result.url;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+        setBusyProvider(null);
+      }
+    },
+    [authBase, callbackURL],
+  );
 
   const signOut = React.useCallback(async () => {
     setBusy(true);
@@ -196,29 +306,65 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
     }
   }, [auth.githubApp?.webhookUrl, contents, manifestRedirectPath, name, oauthCallbackPath, origin, pullRequests]);
 
-  const sessionSection = (
-    <div className="rounded-md border border-border bg-background/60 p-2">
-      <p className="font-medium text-popover-foreground">Session</p>
-      <p className="mt-1 break-all text-muted-foreground">
-        {auth.userEmail ? `Signed in as ${auth.userEmail}` : "Not signed in"}
-      </p>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {auth.githubOAuthEnabled ? (
-          <Button className="h-8 text-xs" disabled={busy} onClick={signInWithGitHub} type="button" variant="secondary">
-            {busy ? <Loader2 className="size-3 animate-spin" /> : null}
-            Continue with GitHub
-          </Button>
-        ) : (
-          <p className="text-muted-foreground">Set GitHub OAuth env vars to enable sign-in.</p>
-        )}
-        {auth.userEmail ? (
-          <Button className="h-8 text-xs" disabled={busy} onClick={signOut} type="button" variant="secondary">
-            Sign out
-          </Button>
+  const sessionSection = (() => {
+    const enabledProviders = providers.filter((p) => p.enabledResolved);
+    const ghAppConfigured = auth.githubApp?.configured !== false && (!!auth.githubApp?.appSlug || auth.githubApp?.configured === true);
+    const providesOAuth = auth.githubApp?.providesOAuth !== false;
+    const viaSingleApp = ghAppConfigured && providesOAuth;
+
+    return (
+      <div className="rounded-md border border-border bg-background/60 p-2">
+        <p className="font-medium text-popover-foreground">Session</p>
+        <p className="mt-1 break-all text-muted-foreground">
+          {auth.userEmail ? `Signed in as ${auth.userEmail}` : "Not signed in"}
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {enabledProviders.length > 0 ? (
+            enabledProviders.map((p) => (
+              <Button
+                key={p.id}
+                className="h-8 text-xs"
+                disabled={busy}
+                onClick={() => void signIn(p.id)}
+                type="button"
+                variant="secondary"
+              >
+                {busy && busyProvider === p.id ? <Loader2 className="size-3 animate-spin" /> : null}
+                Continue with {providerLabel(p.id, p.name)}
+                {p.viaGitHubApp || (p.id === "github" && viaSingleApp) ? (
+                  <span className="ml-1 rounded bg-muted px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                    via App
+                  </span>
+                ) : null}
+              </Button>
+            ))
+          ) : (
+            <div className="space-y-1">
+              {ghAppConfigured ? (
+                <p className="text-muted-foreground">
+                  GitHub sign-in will be available once your deploy picks up the App&apos;s <code className="font-mono">GITHUB_CLIENT_ID</code>/<code className="font-mono">GITHUB_CLIENT_SECRET</code> from the manifest conversion. Redeploy after saving env.
+                </p>
+              ) : (
+                <p className="text-muted-foreground">
+                  Set up the GitHub App once — it provides both sign-in and write access. No separate OAuth app needed. Or configure additional providers via <code className="font-mono">auth.oauth.providers</code>.
+                </p>
+              )}
+            </div>
+          )}
+          {auth.userEmail ? (
+            <Button className="h-8 text-xs" disabled={busy} onClick={signOut} type="button" variant="secondary">
+              Sign out
+            </Button>
+          ) : null}
+        </div>
+        {viaSingleApp ? (
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Single credential set: your GitHub App&apos;s own <code className="font-mono">client_id</code>/<code className="font-mono">client_secret</code> doubles as the OAuth app. Add more providers later via <code className="font-mono">oauth.providers</code>.
+          </p>
         ) : null}
       </div>
-    </div>
-  );
+    );
+  })();
 
   const githubAppManifestSection = (
     <div className="rounded-md border border-border bg-background/60 p-2">

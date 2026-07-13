@@ -77,8 +77,28 @@ const database = createLibsqlClient({
   authToken: resolveAuthToken(),
 });
 
+/**
+ * GitHub Auth: single credential set happy path.
+ * The manifest flow returns GITHUB_APP_ID, GITHUB_PRIVATE_KEY, GITHUB_CLIENT_ID,
+ * GITHUB_CLIENT_SECRET, GITHUB_APP_SLUG from ONE conversion. The App's own
+ * client_id/client_secret doubles as the OAuth app credentials — no second
+ * OAuth App needed. Additional OAuth providers (Google, etc) remain
+ * configurable via host's Better Auth config via oauth.providers.
+ *
+ * Here we only wire the GitHub App for git writes; the OAuth credential reuse
+ * for Better Auth happens in createWildwoodPlayAuth / host auth route that
+ * reads the same GITHUB_CLIENT_ID/_SECRET env (same 5-var set).
+ */
 export const wildwood = createClient({
-  auth: gh ? { github: gh, authorize: () => true } : undefined,
+  auth: gh
+    ? {
+        github: gh,
+        // The same GITHUB_CLIENT_ID/_SECRET from the App manifest can be used
+        // by Better Auth's github provider for user sign-in — no separate OAuth App.
+        betterAuth: undefined,
+        authorize: () => true,
+      }
+    : undefined,
   config,
   database,
 });

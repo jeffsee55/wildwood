@@ -36,6 +36,12 @@ import { resolveEventOrigin } from "./util";
 const STATE_COOKIE = "__wildwood_github_app_state";
 const STATE_MAX_AGE_SEC = 10 * 60;
 
+/** JS-readable cookie so the opener tab (docs) learns slug/installUrl after new-tab flow. */
+const PENDING_COOKIE = "__wildwood_github_app_pending";
+const PENDING_MAX_AGE_SEC = 10 * 60;
+const BROADCAST_CHANNEL = "wildwood:gh-app-created";
+const STORAGE_KEY = "__wildwood_gh_app_pending";
+
 function randomState(): string {
   // Edge-safe: crypto.randomUUID is available everywhere Next runs.
   try {
@@ -67,19 +73,48 @@ const BASE_CSS = `
   .tab[aria-selected=true]{color:#111;border-bottom-color:#111}
 `;
 
+function mergeIntoHeaders(target: Headers, source: HeadersInit | Record<string, string | string[]> | undefined) {
+  if (!source) return;
+  if (source instanceof Headers) {
+    source.forEach((value, key) => {
+      if (key.toLowerCase() === "set-cookie") target.append(key, value);
+      else target.set(key, value);
+    });
+    return;
+  }
+  if (Array.isArray(source)) {
+    for (const [k, v] of source as [string, string][]) {
+      if (k.toLowerCase() === "set-cookie") target.append(k, v);
+      else target.set(k, v);
+    }
+    return;
+  }
+  for (const [k, raw] of Object.entries(source as Record<string, string | string[] | undefined>)) {
+    if (raw == null) continue;
+    if (Array.isArray(raw)) {
+      for (const vi of raw) target.append(k, vi);
+    } else {
+      if (k.toLowerCase() === "set-cookie") target.append(k, raw as string);
+      else target.set(k, raw as string);
+    }
+  }
+}
+
 function htmlResponse(bodyInner: string, init?: ResponseInit): Response {
   const doc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Wildwood — GitHub App</title><style>${BASE_CSS}</style></head><body>${bodyInner}</body></html>`;
-  return new Response(doc, {
-    ...init,
-    headers: { "content-type": "text/html; charset=utf-8", ...init?.headers },
-  });
+  const headers = new Headers();
+  headers.set("content-type", "text/html; charset=utf-8");
+  mergeIntoHeaders(headers, init?.headers as HeadersInit | undefined);
+  const { headers: _h, ...rest } = init ?? {};
+  return new Response(doc, { ...rest, headers });
 }
 
 function jsonResponse(data: unknown, init?: ResponseInit): Response {
-  return new Response(JSON.stringify(data, null, 2), {
-    ...init,
-    headers: { "content-type": "application/json; charset=utf-8", ...init?.headers },
-  });
+  const headers = new Headers();
+  headers.set("content-type", "application/json; charset=utf-8");
+  mergeIntoHeaders(headers, init?.headers as HeadersInit | undefined);
+  const { headers: _h, ...rest } = init ?? {};
+  return new Response(JSON.stringify(data, null, 2), { ...rest, headers });
 }
 
 function cookieValueFromHeader(cookieHeader: string | null, name: string): string | null {
@@ -116,6 +151,40 @@ function clearStateCookieHeader(secure: boolean): string {
   const attrs = [`${STATE_COOKIE}=`, "Path=/", "Max-Age=0", "HttpOnly", "SameSite=Lax", "Expires=Thu, 01 Jan 1970 00:00:00 GMT"];
   if (secure) attrs.push("Secure");
   return attrs.join("; ");
+}
+
+function setPendingAppCookieHeader(payload: { slug?: string; installUrl?: string; appId?: number | string | null; htmlUrl?: string; repo?: string }, secure: boolean): string {
+  // Non-HttpOnly so JS tab can read it. No private key in here.
+  const json = JSON.stringify({ ...payload, at: Date.now() });
+  const attrs = [
+    `${PENDING_COOKIE}=${encodeURIComponent(json)}`,
+    "Path=/",
+    `Max-Age=${PENDING_MAX_AGE_SEC}`,
+    "SameSite=Lax",
+  ];
+  if (secure) attrs.push("Secure");
+  return attrs.join("; ");
+}
+
+function clearPendingCookieHeader(secure: boolean): string {
+  const attrs = [`${PENDING_COOKIE}=`, "Path=/", `Max-Age=0`, "SameSite=Lax", "Expires=Thu, 01 Jan 1970 00:00:00 GMT"];
+  if (secure) attrs.push("Secure");
+  return attrs.join("; ");
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function setCookieHeaderPair(head: Record<string, string | string[]>, key: string, value: string) {
+  const existing = head[key];
+  if (!existing) {
+    head[key] = value;
+    return;
+  }
+  if (Array.isArray(existing)) head[key] = [...existing, value];
+  else head[key] = [existing, value];
+}
+
+function appendSetCookie(headers: Headers, value: string) {
+  headers.append("Set-Cookie", value);
 }
 
 function escapeHtml(s: string): string {
@@ -252,8 +321,10 @@ export function createGitHubAppManifestRouter(client: WildwoodClient): H3 {
       callbackUrls: [`${origin}${oauthCallbackPath.startsWith("/") ? oauthCallbackPath : `/${oauthCallbackPath}`}`],
       webhookUrl: webhookUrl || undefined,
       webhookActive: body.webhookActive ?? true,
-      contents: (body.contents as GitHubPermissionLevel) ?? "write",
-      pullRequests: (body.pullRequests as GitHubPermissionLevel) ?? "write",
+      defaultPermissions: {
+        contents: (body.contents as GitHubPermissionLevel) ?? "write",
+        pull_requests: (body.pullRequests as GitHubPermissionLevel) ?? "write",
+      },
       public: body.public ?? false,
       defaultEvents: body.events ?? (webhookUrl ? ["pull_request", "push"] : []),
       description: body.description,
@@ -334,8 +405,31 @@ export function createGitHubAppManifestRouter(client: WildwoodClient): H3 {
     const dotEnv = formatEnvFileContent(env);
     const appHtmlUrl = conversion.html_url ?? (conversion.slug ? `https://github.com/settings/apps/${encodeURIComponent(conversion.slug)}` : "");
     const installUrl = conversion.slug ? `https://github.com/apps/${encodeURIComponent(conversion.slug)}/installations/new` : "";
+    const repoFull = `${client._.git?.config?.org ?? ""}/${client._.git?.config?.repo ?? ""}`.replace(/^\//, "");
+    const suggestedInstallHint = repoFull && repoFull.includes("/") ? repoFull : client._.git?.config?.repo ?? "your repo";
+    // Single credential set: the GitHub App IS the OAuth app. Conversion returns client_id/client_secret
+    // which double as OAuth creds for sign-in. No second OAuth App needed.
+    const _publicEnvKeys = [
+      "GITHUB_APP_ID",
+      "GITHUB_APP_SLUG",
+      "GITHUB_CLIENT_ID",
+      repoFull.includes("/") ? undefined : "GITHUB_APP_NAME",
+    ].filter(Boolean) as string[];
+    void _publicEnvKeys;
+    const pendingPayload = {
+      slug: conversion.slug,
+      installUrl,
+      htmlUrl: appHtmlUrl,
+      appId: conversion.id,
+      repo: suggestedInstallHint,
+    } as const;
 
     if (wantsJson) {
+      // Opener tab needs to learn slug/installUrl even though we open GitHub in a new tab.
+      // Also accept optional `?setup_action=install` post-install redirect sharing same code param.
+      const headers = new Headers();
+      headers.set("Set-Cookie", clearStateCookieHeader(cookieToClear));
+      appendSetCookie(headers, setPendingAppCookieHeader(pendingPayload, secure));
       return jsonResponse(
         {
           ok: true,
@@ -344,70 +438,281 @@ export function createGitHubAppManifestRouter(client: WildwoodClient): H3 {
           installUrl,
           htmlUrl: appHtmlUrl,
           stateValid,
+          repo: suggestedInstallHint,
         },
-        { headers: { "Set-Cookie": clearStateCookieHeader(cookieToClear) } },
+        { headers },
       );
     }
 
-    const tabsScript = `<script>
+    // ── HTML: 2-step wizard — Step 1 env, Step 2 install ────────────────────────
+    const stepScript = `<script>
 (function(){
-  const root=document.getElementById('wildwood-gh-app');
+  var root=document.getElementById('wildwood-gh-app');
   if(!root) return;
-  const tabs=root.querySelectorAll('[role=tab]');
-  const panels=root.querySelectorAll('[role=tabpanel]');
-  function activate(id){ panels.forEach(p=>{p.hidden=p.id!==id}); tabs.forEach(t=>{const s=t.getAttribute('aria-controls')===id; t.setAttribute('aria-selected', s?'true':'false')}); }
-  tabs.forEach(t=>t.addEventListener('click',()=>activate(t.getAttribute('aria-controls'))));
-  activate(panels[0]?.id);
-  function copy(sel){ const el=document.querySelector(sel); if(!el) return; const txt=el.textContent||''; navigator.clipboard.writeText(txt).then(()=>{ const b=document.activeElement; }).catch(()=>{ const r=document.createRange(); r.selectNodeContents(el); const s=window.getSelection(); s&&s.removeAllRanges(); s&&s.addRange(r); });}
-  root.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click',()=>copy(b.getAttribute('data-copy'))));
+
+  var STORAGE_KEY=${JSON.stringify(STORAGE_KEY)};
+  var BROADCAST=${JSON.stringify(BROADCAST_CHANNEL)};
+  var slug=${JSON.stringify(conversion.slug ?? "")};
+  var installUrl=${JSON.stringify(installUrl)};
+  var appHtmlUrl=${JSON.stringify(appHtmlUrl)};
+  var repo=${JSON.stringify(suggestedInstallHint)};
+  var appId=${JSON.stringify(conversion.id)};
+
+  // Expose to opener tab via BroadcastChannel + localStorage + JS-readable cookie (already set below via Set-Cookie on this response).
+  // Cookie is non-HttpOnly __wildwood_github_app_pending; BC/storage covers same-origin even when cookie jar is partitioned.
+  try {
+    var payload={slug:slug,installUrl:installUrl,htmlUrl:appHtmlUrl,appId:appId,repo:repo,at:Date.now()};
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    if ('BroadcastChannel' in window) {
+      var bc=new BroadcastChannel(BROADCAST);
+      bc.postMessage(payload);
+      // keep open briefly then close
+      setTimeout(function(){ try{bc.close();}catch(e){} }, 1000);
+    }
+  } catch(e){}
+
+  // Stepper
+  var step=1;
+  var step1=document.getElementById('step-1');
+  var step2=document.getElementById('step-2');
+  var pillStep1=document.getElementById('pill-step-1');
+  var pillStep2=document.getElementById('pill-step-2');
+  var continueBtn=document.getElementById('btn-continue-install');
+  function setStep(n){
+    step=n;
+    if(step1) step1.hidden = n!==1;
+    if(step2) step2.hidden = n!==2;
+    if(pillStep1) pillStep1.setAttribute('data-active', n===1 ? 'true':'false');
+    if(pillStep2) pillStep2.setAttribute('data-active', n===2 ? 'true':'false');
+    if(!n || n===1){ history.replaceState(null,'','#step-keys'); }
+    else { history.replaceState(null,'','#step-install'); }
+  }
+  // Tabs within step 1
+  var tabs=root.querySelectorAll('[role=tab]');
+  var panels=root.querySelectorAll('[role=tabpanel]');
+  function activate(id){ panels.forEach(function(p){p.hidden=p.id!==id}); tabs.forEach(function(t){var s=t.getAttribute('aria-controls')===id; t.setAttribute('aria-selected', s?'true':'false')}); }
+  tabs.forEach(function(t){t.addEventListener('click',function(){activate(t.getAttribute('aria-controls'))});});
+  if(panels[0]) activate(panels[0].id);
+  function copy(sel){ var el=document.querySelector(sel); if(!el) return; var txt=el.textContent||''; if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){ var b=document.activeElement; if(b){ var orig=b.textContent; b.textContent='Copied!'; setTimeout(function(){b.textContent=orig;},1200);} }).catch(function(){}); } else { var r=document.createRange(); r.selectNodeContents(el); var s=window.getSelection(); s&&s.removeAllRanges(); s&&s.addRange(r); } }
+  root.querySelectorAll('[data-copy]').forEach(function(b){b.addEventListener('click',function(){copy(b.getAttribute('data-copy'))});});
+  if(continueBtn){ continueBtn.addEventListener('click', function(){ setStep(2); }); }
+  // deep-link #step-install support
+  if(location.hash==='#step-install') setStep(2); else setStep(1);
+  window.addEventListener('hashchange', function(){ if(location.hash==='#step-install') setStep(2); else if(location.hash==='#step-keys') setStep(1); });
+
+  // Install verification — poll GitHub installation status via our own origin (which now has env).
+  // Because this tab was created before env was persisted, verify may fail until redeploy / .env reload.
+  // We show guidance for both cases.
+  var verifyBtn=document.getElementById('btn-verify-install');
+  var verifyMsg=document.getElementById('verify-msg');
+  var doneBtn=document.getElementById('btn-done');
+  function setVerify(html, ok){
+    if(!verifyMsg) return;
+    verifyMsg.innerHTML=html;
+    verifyMsg.setAttribute('data-ok', ok ? 'true':'false');
+  }
+  if(verifyBtn){
+    verifyBtn.addEventListener('click', async function(){
+      verifyBtn.disabled=true; var orig=verifyBtn.textContent; verifyBtn.textContent='Checking…';
+      try{
+        // installation check is on /api/wildwood/github/installation (not app-manifest prefix) — also try editor-guards.
+        // Single source: the App's own client_id/client_secret are the OAuth creds too — no second OAuth App.
+        var urls=['/api/wildwood/github/installation','/api/wildwood/git/editor-guards'];
+        var lastErr='';
+        for(var i=0;i<urls.length;i++){
+          try{
+            var res=await fetch(urls[i],{credentials:'include',headers:{Accept:'application/json'}});
+            var j=null; try{ j=await res.json(); }catch(_e){ var t=await res.text(); setVerify('<span class="muted">Unexpected response from '+urls[i]+': '+t.slice(0,400)+'</span>', false); continue; }
+            if(!res.ok){ lastErr=(j&& (j.message||j.error))|| (res.status+' '+res.statusText); continue; }
+            // normalize both shapes
+            var st=j.status || (j.installationId ? 'installed' : (j.installUrl ? 'not_installed' : 'unknown'));
+            if(st==='installed' || st==='ready'){
+              setVerify('<b style="color:#15803d">✓ Installed'+(j.repo? ' on '+j.repo : '')+'</b> — you can close this tab and go back to the editor. If you still see “Install the GitHub App”, redeploy once so the server picks up GITHUB_APP_* (single cred set — App ID, private key, client_id/secret, slug).', true);
+              if(doneBtn){ doneBtn.hidden=false; }
+              verifyBtn.textContent='Verified ✓';
+              return;
+            }
+            if(st==='not_installed'){
+              setVerify('App not yet installed on <code>'+(j.repo||repo||'your repo')+'</code>. Open install link, pick <b>Only select repositories</b> → <code>'+(j.repo||repo||'repo')+'</code>, then click Verify again.', false);
+              verifyBtn.textContent=orig; verifyBtn.disabled=false; return;
+            }
+            if(st==='not_configured'){
+              setVerify('Server still reports <code>not_configured</code> — env vars haven\\'t propagated yet. This is the single credential set from this page: <code>GITHUB_APP_ID</code>, <code>GITHUB_PRIVATE_KEY</code> (also powers sign-in via <code>GITHUB_CLIENT_ID</code>/<code>SECRET</code> from same App), <code>GITHUB_APP_SLUG</code>. Set them in Vercel → Settings → Environment Variables (Build+Runtime, Preview+Production) and <b>Redeploy</b>. Locally: <code>vercel env pull .env.development.local</code> and restart.', false);
+              verifyBtn.textContent=orig; verifyBtn.disabled=false; return;
+            }
+          }catch(e){ lastErr = e && e.message ? e.message : String(e); }
+        }
+        setVerify('Could not verify — '+ (lastErr||'network error') +'. That\\'s OK — if you completed GitHub\\'s “Only select repositories” flow, go back to the docs tab and click <b>I\\'ve installed it</b>. Single cred set — no separate OAuth app needed (GitHub App doubles as OAuth app).', false);
+      } finally {
+        if(verifyBtn.textContent==='Checking…'){ verifyBtn.textContent=orig; }
+        verifyBtn.disabled=false;
+      }
+    });
+  }
 })();
 </script>`;
 
+    const vercelEnvCommands = vercelSnippets.join("\n");
+    const envPre = escapeHtml(dotEnv);
+
     const body = `
-<div class="card" id="wildwood-gh-app">
-  <div class="row"><span class="pill">GitHub App created</span> ${stateValid===false?'<span class="pill" style="border-color:#f59e0b;color:#92400e">state mismatch (ignored)</span>':''}</div>
-  <h1>Credentials ready</h1>
-  <p class="muted">Code exchanged successfully. The manifest code was single-use and is now consumed.</p>
-
-  <div class="row" style="margin-top:.75rem">
-    ${appHtmlUrl ? `<a class="btn btn-secondary" href="${escapeHtml(appHtmlUrl)}" target="_blank" rel="noreferrer">Open App settings</a>` : ``}
-    ${installUrl ? `<a class="btn" href="${escapeHtml(installUrl)}" target="_blank" rel="noreferrer">Install App on a repo</a>` : ``}
+<div class="card" id="wildwood-gh-app" style="max-width:56rem">
+  <div class="row" style="align-items:center;gap:.5rem;margin-bottom:.25rem">
+    <span class="pill" id="pill-step-1" data-active="true" style="cursor:default">Step 1: Save credentials</span>
+    <span class="muted">→</span>
+    <span class="pill" id="pill-step-2" data-active="false" style="cursor:default">Step 2: Install on repo</span>
+    ${stateValid===false ? '<span class="pill" style="border-color:#f59e0b;color:#92400e">state mismatch (ignored)</span>' : ''}
   </div>
+  <style>
+    #pill-step-1[data-active=true],#pill-step-2[data-active=true]{border-color:#111;background:#111;color:#fff}
+    @media(prefers-color-scheme:dark){#pill-step-1[data-active=true],#pill-step-2[data-active=true]{border-color:#e5e5e5;background:#e5e5e5;color:#111}}
+    #verify-msg[data-ok=true]{border-color:#bbf7d0;background:#f0fdf4}
+    #verify-msg[data-ok=false]{border-color:#e5e5e5;background:transparent}
+    @media(prefers-color-scheme:dark){#verify-msg[data-ok=true]{border-color:#166534;background:#052e16} #verify-msg[data-ok=false]{border-color:#2a2a2a}}
+  </style>
 
-  <div class="tabs" role="tablist" aria-label="Env output">
-    <button role="tab" class="tab" aria-controls="panel-env" id="tab-env">.env.local</button>
-    <button role="tab" class="tab" aria-controls="panel-vercel" id="tab-vercel">Vercel CLI</button>
-    <button role="tab" class="tab" aria-controls="panel-export" id="tab-export">Shell export</button>
-    <button role="tab" class="tab" aria-controls="panel-json" id="tab-json">JSON</button>
-  </div>
+  <!-- ── STEP 1 ── -->
+  <section id="step-1">
+    <h1>GitHub App created — one credential set, two powers</h1>
+    <p class="muted">This single App gives you both <b>sign-in</b> (GitHub App doubles as OAuth app via its own <code>client_id</code>/<code>secret</code>) and <b>write access</b> (installation token). No second OAuth App needed — happy path is 1 source of GH creds. Additional providers (Google, etc) stay configurable via <code>oauth.providers</code>.</p>
+    <p class="muted" style="margin-top:.35rem">Step 2 will prompt you to install the App on <code>${escapeHtml(suggestedInstallHint || "your repo")}</code>: choose <b>Only select repositories</b> and pick that repo. On GitHub&apos;s screen that is the list where you see your repo name and can tick it — we can&apos;t pre-select it for you, but the Verify button checks it.</p>
 
-  <section role="tabpanel" id="panel-env"><h2>.env.local</h2><pre id="pre-env">${escapeHtml(dotEnv)}</pre><p><button class="btn btn-secondary" data-copy="#pre-env" type="button">Copy</button> <span class="muted">Paste into <code>.env.local</code> then restart dev server.</span></p></section>
-  <section role="tabpanel" id="panel-vercel"><h2>Vercel</h2><pre id="pre-vercel">${escapeHtml(vercelSnippets.join("\n"))}</pre><p><button class="btn btn-secondary" data-copy="#pre-vercel" type="button">Copy</button> <span class="muted">Run after <code>vercel link</code>. Requires Vercel CLI login. Adds to <code>production</code> as sensitive.</span></p><p class="muted">Or manually in Vercel Dashboard → Project → Settings → Environment Variables (Build + Runtime) — paste values from .env tab.</p></section>
-  <section role="tabpanel" id="panel-export"><h2>Shell export</h2><pre id="pre-export">${escapeHtml(exportSnippets.join("\n"))}</pre><p><button class="btn btn-secondary" data-copy="#pre-export">Copy</button></p></section>
-  <section role="tabpanel" id="panel-json"><h2>JSON env map</h2><pre id="pre-json">${escapeHtml(JSON.stringify(env, null, 2))}</pre><p><button class="btn btn-secondary" data-copy="#pre-json">Copy</button></p>
-    <h2 style="margin-top:1rem">Save to .env.local (dev)</h2>
-    <p class="muted">Dev helper — writes via <code>POST /api/wildwood/github/app-manifest/dev/write-env</code>. Disabled in prod.</p>
-    <form method="post" action="/api/wildwood/github/app-manifest/dev/write-env">
-      <input type="hidden" name="payload" value="${escapeHtml(JSON.stringify(env))}" />
-      <button class="btn-secondary btn" type="submit">Write to .env.local and restart hint</button>
-    </form>
+    <div class="row" style="margin-top:.75rem">
+      ${vercelEnvCommands ? `<span class="pill">Single cred set — Vercel CLI below</span>` : `<span class="pill">Single cred set — .env.local below</span>`}
+      ${installUrl ? `<span class="pill">Slug: <code>${escapeHtml(conversion.slug ?? "")}</code></span>` : ``}
+      ${repoFull.includes("/") ? `<span class="pill">Repo: <code>${escapeHtml(repoFull)}</code></span>` : ``}
+      <span class="pill">OAuth via App — no separate OAuth App</span>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="Env output">
+      <button role="tab" class="tab" aria-controls="panel-env" id="tab-env">.env.local</button>
+      <button role="tab" class="tab" aria-controls="panel-vercel" id="tab-vercel">Vercel CLI</button>
+      <button role="tab" class="tab" aria-controls="panel-export" id="tab-export">Shell export</button>
+      <button role="tab" class="tab" aria-controls="panel-json" id="tab-json">JSON</button>
+    </div>
+
+    <section role="tabpanel" id="panel-env"><h2>.env.local</h2><pre id="pre-env">${envPre}</pre>
+      <div class="row"><button class="btn btn-secondary" data-copy="#pre-env" type="button">Copy</button><span class="muted">Paste into <code>.env.local</code> then restart dev server. These 5 vars are the only GH creds you need for both sign-in and git writes.</span></div>
+      <form method="post" action="/api/wildwood/github/app-manifest/dev/write-env" style="margin-top:.75rem">
+        <input type="hidden" name="payload" value="${escapeHtml(JSON.stringify(env))}" />
+        <button class="btn-secondary btn" type="submit">Write to .env.local (dev only)</button>
+        <span class="muted">dev helper — same-origin + authorize gate.</span>
+      </form>
+    </section>
+    <section role="tabpanel" id="panel-vercel"><h2>Vercel — production</h2>
+      <pre id="pre-vercel">${escapeHtml(vercelSnippets.join("\n"))}</pre>
+      <div class="row"><button class="btn btn-secondary" data-copy="#pre-vercel" type="button">Copy</button><span class="muted">Run after <code>vercel link</code>. Requires Vercel CLI login. Adds to <code>production</code> as sensitive. This single set powers both OAuth sign-in and git operations.</span></div>
+      <p class="muted" style="margin-top:.5rem">Or manually in Vercel Dashboard → Project → Settings → Environment Variables (Build + Runtime / Preview + Production) — paste values from .env tab. Then <b>Redeploy</b> so build env picks up keys.</p>
+      <p class="muted" style="margin-top:.5rem">Quick pull for local: <code>vercel env pull .env.development.local</code> — you don&apos;t need separate <code>GITHUB_CLIENT_ID</code>/<code>SECRET</code> from another OAuth App; reuse the App&apos;s own values already in the snippet above.</p>
+    </section>
+    <section role="tabpanel" id="panel-export"><h2>Shell export</h2><pre id="pre-export">${escapeHtml(exportSnippets.join("\n"))}</pre><p><button class="btn btn-secondary" data-copy="#pre-export">Copy</button></p></section>
+    <section role="tabpanel" id="panel-json"><h2>JSON env map</h2><pre id="pre-json">${escapeHtml(JSON.stringify(env, null, 2))}</pre><p><button class="btn btn-secondary" data-copy="#pre-json">Copy</button></p></section>
+
+    <div class="row" style="margin-top:1rem">
+      <button class="btn" id="btn-continue-install" type="button">I've saved the env → Install App on repo →</button>
+      ${installUrl ? `<a class="btn btn-secondary" href="${escapeHtml(installUrl)}" target="_blank" rel="noreferrer">Open Install directly (skip save)</a>` : ``}
+    </div>
+    <p class="muted" style="margin-top:.5rem">Saving env first ensures this page (and your docs deployment after redeploy) can verify installation in step 2. After install, return here and click Verify — we&apos;ll confirm <code>${escapeHtml(suggestedInstallHint || "your repo")}</code> is covered, so you never get stranded after the POC.</p>
+    <details style="margin-top:1rem"><summary class="muted">Raw conversion (id, slug, html_url — secrets only in tabs above)</summary><pre>${escapeHtml(JSON.stringify({ id: conversion.id, slug: conversion.slug, html_url: conversion.html_url, client_id: conversion.client_id }, null, 2))}</pre></details>
   </section>
 
-  <details style="margin-top:1rem"><summary class="muted">Raw conversion (id, slug, html_url shown, secrets via tabs above)</summary><pre>${escapeHtml(JSON.stringify({ id: conversion.id, slug: conversion.slug, html_url: conversion.html_url, client_id: conversion.client_id }, null, 2))}</pre></details>
+  <!-- ── STEP 2 ── -->
+  <section id="step-2" hidden>
+    <h1>Install the GitHub App on ${escapeHtml(repoFull || suggestedInstallHint || "your repository")}</h1>
+    <p class="muted">On GitHub you&apos;ll see the App install screen. Choose <strong>Only select repositories</strong> and pick <code>${escapeHtml(suggestedInstallHint || "wildwood")}</code> — that&apos;s the repo list where you search / tick your repo. This grants Wildwood write access via the installation token. You stay in control of scope; we validate in the next click that the right repo is covered.</p>
+    <p class="muted" style="margin-top:.35rem"><b>Single credential set:</b> this same App&apos;s <code>client_id</code>/<code>client_secret</code> (already saved as <code>GITHUB_CLIENT_ID</code>/<code>SECRET</code>) doubles as the OAuth app for sign-in. Additional providers (Google, etc) remain configurable via <code>oauth.providers</code> — no second GH credential set needed.</p>
+
+    <div class="row" style="margin-top:1rem">
+      ${installUrl ? `<a class="btn" id="btn-install-github" href="${escapeHtml(installUrl)}" target="_blank" rel="noopener noreferrer">Install on GitHub →</a>` : `<span class="pill">No slug in conversion — set GITHUB_APP_SLUG then reopen this page</span>`}
+      <button class="btn btn-secondary" id="btn-verify-install" type="button">Verify installation</button>
+      <a class="btn btn-secondary" id="btn-done" hidden href="/" rel="noreferrer">Done — back to docs →</a>
+    </div>
+
+    <div id="verify-msg" class="card" style="margin-top:1rem;padding:.75rem;min-height:2.5rem" data-ok="false"><span class="muted">Click Verify after you finish on GitHub. If you&apos;re on Vercel prod, redeploy once after pasting env vars so <code>/api/wildwood/github/installation</code> can read them — but install itself is already done, we just need env propagation to confirm it.</span></div>
+
+    <div style="margin-top:1rem;border-top:1px solid #e5e5e5;padding-top:.75rem" class="muted">
+      <p><b>Manual link:</b> <code>https://github.com/apps/${escapeHtml(conversion.slug ?? "<slug>")}/installations/new</code> — after clicking, the GitHub page shows a repo picker; choose <b>Only select repositories</b> → search for <code>${escapeHtml(suggestedInstallHint || "your repo")}</code> → select it → Install.</p>
+      ${appHtmlUrl ? `<p><a class="btn btn-secondary" href="${escapeHtml(appHtmlUrl)}" target="_blank" rel="noreferrer" style="margin-top:.5rem">Open App settings</a> <span class="muted">— manage permissions / rename / delete. If you delete the App, recreate via toolbar; sign-in keeps working via same App creds.</span></p>` : ``}
+      <p style="margin-top:.75rem"><a href="#step-keys" style="text-decoration:underline">← Back to env keys</a></p>
+    </div>
+  </section>
 </div>
-${tabsScript}
+${stepScript}
 `;
 
+    const resHeaders = new Headers();
+    resHeaders.set("content-type", "text/html; charset=utf-8");
+    // Keep CSRF cookie clearing + set pending cookie so opener tab learns slug even in partitioned storage.
+    appendSetCookie(resHeaders, clearStateCookieHeader(cookieToClear));
+    appendSetCookie(resHeaders, setPendingAppCookieHeader(pendingPayload, secure));
+
     return new Response(
-      `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Wildwood — GitHub App ready</title><style>${BASE_CSS}</style></head><body>${body}</body></html>`,
-      {
-        status: 200,
-        headers: {
-          "content-type": "text/html; charset=utf-8",
-          "Set-Cookie": clearStateCookieHeader(cookieToClear),
-        },
-      },
+      `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Wildwood — GitHub App ready — install next</title><style>${BASE_CSS}</style></head><body>${body}</body></html>`,
+      { status: 200, headers: resHeaders },
     );
+  });
+
+  // ── GET /pending — JS-readable pending payload from cookie/storage/BC ──────────
+  // Returns same shape as PENDING_COOKIE so opener tab can recover even when JS cookie read fails.
+  router.get("/pending", async (event) => {
+    const cookieHeader = event.req.headers.get("cookie");
+    const raw = cookieValueFromHeader(cookieHeader, PENDING_COOKIE);
+    let parsed: unknown = null;
+    try {
+      if (raw) parsed = JSON.parse(raw);
+    } catch {}
+    // Accept query as well for debugging: ?slug=&installUrl=
+    const slug = event.url.searchParams.get("slug")?.trim() || (parsed as { slug?: string } | null)?.slug || undefined;
+    const installUrl =
+      event.url.searchParams.get("installUrl")?.trim() ||
+      (parsed as { installUrl?: string } | null)?.installUrl ||
+      (slug ? `https://github.com/apps/${encodeURIComponent(slug)}/installations/new` : undefined);
+    if (!installUrl && !slug) {
+      return jsonResponse({ ok: false, pending: null }, { status: 404 });
+    }
+    const at = (parsed as { at?: number } | null)?.at;
+    const appId = (parsed as { appId?: number | string | null } | null)?.appId ?? undefined;
+    const htmlUrl = (parsed as { htmlUrl?: string } | null)?.htmlUrl ?? undefined;
+    const repo = (parsed as { repo?: string } | null)?.repo ?? undefined;
+    return jsonResponse({
+      ok: true,
+      pending: { slug, installUrl, htmlUrl, appId, repo, at: at ?? Date.now() },
+    });
+  });
+
+  router.post("/pending/clear", async (event) => {
+    const origin = defaultOrigin(event);
+    const secure = origin.startsWith("https://");
+    return jsonResponse({ ok: true }, { headers: { "Set-Cookie": clearPendingCookieHeader(secure) } });
+  });
+
+  // ── GET /installation — thin proxy: check installation for current repo ───────
+  // Allows callback's Step 2 verify button to work even when main /github/installation route
+  // is mounted at higher level — keeps logic self-contained here too.
+  router.get("/installation", async (event) => {
+    try {
+      const { GitHubRemote: GR } = await import("@/git/remote/github");
+      const remote = client._.git.remote as unknown;
+      if (!(remote instanceof GR)) {
+        return jsonResponse({ status: "not_configured", repo: `${client._.git.config.org}/${client._.git.config.repo}` });
+      }
+      const inst = await (remote as InstanceType<typeof GR>).getRepoInstallationStatus();
+      const slug = process.env.GITHUB_APP_SLUG?.trim();
+      const repo = `${client._.git.config.org}/${client._.git.config.repo}`;
+      if (inst.status === "installed") {
+        // Avoid duplicate `status` key from spread — `inst` carries `status: "installed"` and `installationId`.
+        const { status: _ignored, ...rest } = inst as { status: string; installationId: number };
+        return jsonResponse({ status: "installed", ...rest, repo, installationId: (inst as { installationId: number }).installationId });
+      }
+      return jsonResponse({
+        status: inst.status,
+        repo,
+        installUrl: inst.status === "not_installed" && slug ? `https://github.com/apps/${slug}/installations/new` : undefined,
+        hint: inst.status === "not_installed" ? `Install the GitHub App on ${repo}. Choose "Only select repositories" and pick ${client._.git.config.repo}.` : undefined,
+      });
+    } catch (e) {
+      return jsonResponse({ status: "error", message: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
   });
 
   // ── POST /conversions — JSON API, gated by authorize (same policy as git writes) ──
@@ -438,12 +743,22 @@ ${tabsScript}
     try {
       const conversion = await exchangeGitHubAppManifestCode(code);
       const env = manifestConversionToEnv(conversion) as Record<string, string>;
-      return jsonResponse({
-        ok: true,
-        conversion: { id: conversion.id, slug: conversion.slug, html_url: conversion.html_url, client_id: conversion.client_id },
-        env,
-        installUrl: conversion.slug ? `https://github.com/apps/${conversion.slug}/installations/new` : undefined,
-      });
+      const origin = defaultOrigin(event);
+      const secure = origin.startsWith("https://");
+      const appHtmlUrl2 = conversion.html_url ?? (conversion.slug ? `https://github.com/settings/apps/${encodeURIComponent(conversion.slug)}` : "");
+      const installUrl2 = conversion.slug ? `https://github.com/apps/${encodeURIComponent(conversion.slug)}/installations/new` : undefined;
+      const headers = new Headers();
+      headers.set("Set-Cookie", setPendingAppCookieHeader({ slug: conversion.slug, installUrl: installUrl2, htmlUrl: appHtmlUrl2, appId: conversion.id }, secure));
+      return jsonResponse(
+        {
+          ok: true,
+          conversion: { id: conversion.id, slug: conversion.slug, html_url: conversion.html_url, client_id: conversion.client_id },
+          env,
+          installUrl: installUrl2,
+          htmlUrl: appHtmlUrl2,
+        },
+        { headers },
+      );
     } catch (err) {
       return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
     }

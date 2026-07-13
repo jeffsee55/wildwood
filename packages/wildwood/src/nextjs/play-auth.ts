@@ -11,10 +11,20 @@ import { createRequire } from "node:module";
 import { SqliteDialect } from "kysely";
 import Database from "better-sqlite3";
 
-type WildwoodPlayAuthOptions = {
+export type WildwoodPlayAuthOptions = {
   databaseUrl: () => string;
   appName?: string;
   allowedEmailsEnv?: string;
+  /**
+   * Additional Better Auth social providers beyond GitHub.
+   * GitHub is auto-wired from the single GitHub App credential set
+   * (GITHUB_CLIENT_ID/_SECRET from the manifest). Other providers are
+   * pluggable here without touching Kit UI.
+   *
+   * Example:
+   *   { google: { clientId: process.env.GOOGLE_CLIENT_ID!, clientSecret: process.env.GOOGLE_CLIENT_SECRET! } }
+   */
+  socialProviders?: BetterAuthOptions["socialProviders"];
 };
 
 // keep native dep behind a lazy require so `wildwood/dist/index.mjs` (docs, etc)
@@ -83,9 +93,31 @@ function splitSqlStatements(sql: string): string[] {
     .filter((statement) => statement && !statement.startsWith("--"));
 }
 
+/**
+ * GitHub sign-in provider.
+ *
+ * Happy path: a GitHub App's own client_id / client_secret doubles as the OAuth app
+ * credentials. GitHub Apps ARE OAuth apps — every App manifest conversion returns
+ * `client_id` + `client_secret` that can be used for user sign-in.
+ *
+ * This means we only need ONE source of GitHub creds in production:
+ *   GITHUB_APP_ID, GITHUB_PRIVATE_KEY, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_APP_SLUG
+ * which all come from the same manifest conversion.
+ *
+ * Additional OAuth providers (Google, etc) remain configurable independently via
+ * `options.socialProviders` override or Better Auth's own env handling.
+ *
+ * If a consumer explicitly wants a *separate* OAuth App for GitHub (e.g. different
+ * scopes or public GitHub App vs internal), they can still pass `GITHUB_CLIENT_ID/_SECRET`
+ * from a different OAuth App — we don't forbid it, we just don't require it when
+ * the App is present.
+ */
 function optionalGithubProvider(): BetterAuthOptions["socialProviders"] {
-  const clientId = process.env.GITHUB_CLIENT_ID;
-  const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+  // Primary: GITHUB_CLIENT_ID/_SECRET. These can come from either:
+  // - a standalone OAuth App, OR
+  // - the GitHub App's own OAuth credentials (manifest flow). Same env names — single source.
+  const clientId = process.env.GITHUB_CLIENT_ID?.trim();
+  const clientSecret = process.env.GITHUB_CLIENT_SECRET?.trim();
   if (!clientId || !clientSecret) {
     return undefined;
   }
@@ -141,13 +173,25 @@ export function createWildwoodPlayAuth(options: WildwoodPlayAuthOptions) {
     };
   }
 
+  // Single source GitHub creds: GitHub App manifest returns client_id/secret that doubles as OAuth.
+  // Merge with any extra providers the host supplies (Google, etc) — pluggable OAuth surface.
+  const githubProvider = optionalGithubProvider();
+  const extraProviders = options.socialProviders;
+  const socialProviders =
+    githubProvider || extraProviders
+      ? {
+          ...(extraProviders ?? {}),
+          ...(githubProvider ?? {}),
+        }
+      : undefined;
+
   const auth = betterAuth({
     appName: options.appName || "Wildwood Play",
     database: createAuthDatabase(),
     emailAndPassword: {
       enabled: true,
     },
-    socialProviders: optionalGithubProvider(),
+    socialProviders,
     trustedOrigins: trustedOrigins(),
     plugins: [nextCookies()],
   });

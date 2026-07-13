@@ -101,11 +101,19 @@ function authEnabled(auth: KitAuthConfig | undefined): boolean {
   // The actual GitHub App install flow gates itself with guards.
   if (isUnconfigured) return true;
 
+  // After unification, a single GitHub App powers both git writes and OAuth sign-in.
+  // So if a slug/name exists we should show the Auth affordance. Plural OAuth
+  // providers (Google, etc) are optional and also count.
+  const oauthProviders = auth.oauth?.providers ?? [];
+  const hasOAuthProvider = oauthProviders.some((p) => p.enabled !== false) || !!auth.githubOAuthEnabled;
+
   const hasAny =
     !!auth.githubApp?.appSlug?.trim() ||
     !!auth.githubApp?.name?.trim() ||
     !!auth.userEmail ||
-    !!auth.githubOAuthEnabled;
+    hasOAuthProvider ||
+    !!auth.githubApp?.configured;
+
   return hasAny;
 }
 
@@ -120,7 +128,7 @@ function warnIfMissingGithubAppInProd(auth: KitAuthConfig | undefined): void {
   // One-time per render cycle — dedupe via console.warn grouping is enough.
   if (typeof window !== "undefined" && auth?.githubApp?.name) return;
   console.warn(
-    "[wildwood] Kit: GitHub App is not configured (GITHUB_APP_SLUG missing). Editing / draft branches will be disabled. To enable, set GITHUB_APP_SLUG / GITHUB_APP_NAME / GITHUB_APP_ID / GITHUB_PRIVATE_KEY and reinstall the app on the repo. Docs: /docs/kit#github-app",
+    "[wildwood] Kit: GitHub App is not configured. Single credential set powers both sign-in (App doubles as OAuth via its own client_id/secret) and git writes. To enable, create the App from the toolbar → save the 5 env vars (GITHUB_APP_ID, GITHUB_PRIVATE_KEY, GITHUB_CLIENT_ID/SECRET, GITHUB_APP_SLUG) → install on the repo → redeploy. Docs: /docs/kit#github-app. Additional OAuth providers remain configurable via `oauth.providers`.",
   );
 }
 
@@ -134,13 +142,128 @@ function githubAppIsUnconfigured(auth: KitAuthConfig | undefined): boolean {
 
 function setupHintLabel(auth: KitAuthConfig | undefined): string {
   const name = auth?.githubApp?.name?.trim();
-  if (!name) return "Disabled — set up GitHub App";
-  return `Disabled — set up ${name}`;
+  if (!name) return "Disabled — set up GitHub App (single cred set: sign-in + writes)";
+  return `Disabled — set up ${name} (one App for sign-in + writes)`;
 }
 
 function shouldShowDevSetup(_auth: KitAuthConfig | undefined): boolean {
   // Always offer setup — non-throwing model. The Kit must never gate off its own setup UI.
   return true;
+}
+
+// ── Single-source-of-truth helpers for UI copy ────────────────────────
+function githubSignInViaApp(auth: KitAuthConfig | undefined): boolean {
+  // Happy path: GitHub App's own client_id/secret is the OAuth credential. No second OAuth app.
+  if (!auth?.githubApp) return false;
+  if (auth.githubApp.providesOAuth === false) return false;
+  // If App exists (configured or at least slug) we treat sign-in as via App by default.
+  return !!(auth.githubApp.configured || auth.githubApp.appSlug?.trim());
+}
+
+// ── Pending GitHub App creation (cross-tab) ─────────────────────────────
+// Callback page sets non-HttpOnly __wildwood_github_app_pending + localStorage + BroadcastChannel.
+// Opener tab listens so `needs-setup` can morph into `needs-install` without refresh.
+
+const GH_PENDING_COOKIE = "__wildwood_github_app_pending";
+const GH_PENDING_STORAGE = "__wildwood_gh_app_pending";
+const GH_PENDING_BROADCAST = "wildwood:gh-app-created";
+
+type PendingAppPayload = {
+  slug?: string;
+  installUrl?: string;
+  htmlUrl?: string;
+  appId?: number | string | null;
+  repo?: string;
+  at?: number;
+};
+
+function readPendingFromCookie(): PendingAppPayload | null {
+  if (typeof document === "undefined") return null;
+  try {
+    const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${GH_PENDING_COOKIE}=([^;]*)`));
+    if (!m) return null;
+    const raw = decodeURIComponent(m[1] ?? "");
+    if (!raw) return null;
+    const j = JSON.parse(raw) as PendingAppPayload;
+    if (!j?.installUrl && !j?.slug) return null;
+    return j;
+  } catch {
+    return null;
+  }
+}
+
+function readPendingFromStorage(): PendingAppPayload | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(GH_PENDING_STORAGE);
+    if (!raw) return null;
+    const j = JSON.parse(raw) as PendingAppPayload;
+    if (!j?.installUrl && !j?.slug) return null;
+    return j;
+  } catch {
+    return null;
+  }
+}
+
+function readPendingMerged(): PendingAppPayload | null {
+  const fromCookie = readPendingFromCookie();
+  const fromStorage = readPendingFromStorage();
+  if (!fromCookie) return fromStorage;
+  if (!fromStorage) return fromCookie;
+  const a = fromCookie.at ?? 0;
+  const b = fromStorage.at ?? 0;
+  return b > a ? fromStorage : fromCookie;
+}
+
+function usePendingGitHubApp(): PendingAppPayload | null {
+  const [pending, setPending] = React.useState<PendingAppPayload | null>(null);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    // initial read
+    setPending(readPendingMerged());
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== "undefined") {
+        bc = new BroadcastChannel(GH_PENDING_BROADCAST);
+        bc.onmessage = (ev: MessageEvent<PendingAppPayload>) => {
+          const d = ev.data;
+          if (!d || (typeof d !== "object")) return;
+          if (!d.installUrl && !d.slug) return;
+          try {
+            window.localStorage.setItem(GH_PENDING_STORAGE, JSON.stringify(d));
+          } catch {}
+          setPending(d);
+        };
+      }
+    } catch {}
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== GH_PENDING_STORAGE) return;
+      setPending(readPendingMerged());
+    };
+    window.addEventListener("storage", onStorage);
+
+    // Cookie polling fallback (BC may be partitioned)
+    const iv = window.setInterval(() => {
+      const m = readPendingMerged();
+      setPending((prev) => {
+        if (!m && !prev) return prev;
+        if (!m || !prev) return m;
+        if ((m.at ?? 0) !== (prev.at ?? 0) || m.installUrl !== prev.installUrl) return m;
+        return prev;
+      });
+    }, 2000);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.clearInterval(iv);
+      try { bc?.close(); } catch {}
+    };
+  }, []);
+
+  return pending;
 }
 
 type EditorOpenState =
@@ -189,8 +312,10 @@ function apiOrigin(): string {
 
 function apiUrl(base: string, path: string): string {
   const origin = apiOrigin();
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return `${origin}${base}${normalizedPath}`;
+  // Accept either "git/editor-guards" or "/git/editor-guards" — normalize to single leading slash then prefix base.
+  const trimmed = path.trim().replace(/^\/+/, "");
+  // base is already normalized "/api/…" with no trailing slash; trimmed may start with "git/" or "github/…"
+  return `${origin}${base}/${trimmed}`;
 }
 
 export function KitFabMenu({
@@ -239,6 +364,34 @@ export function KitFabMenu({
   const base = normalizeApiBase(apiBase);
   const displayRef = activeRef ?? configRef;
   const gitOrigin = apiOrigin();
+  const pendingGhApp = usePendingGitHubApp();
+  const [installVerifying, setInstallVerifying] = React.useState(false);
+  const [installVerifyMsg, setInstallVerifyMsg] = React.useState<string | null>(null);
+
+  // Auto-promote needs-setup → needs-install when callback tab broadcasts.
+  // User created App in new tab while this tab's editor overlay was open at needs-setup.
+  React.useEffect(() => {
+    if (!pendingGhApp?.installUrl) return;
+    if (openState.kind !== "needs-setup") return;
+    const repo = pendingGhApp.repo?.trim() || openState.repo;
+    setOpenState({
+      kind: "needs-install",
+      repo,
+      installUrl: pendingGhApp.installUrl,
+      hint: `App \`${pendingGhApp.slug ?? "created"}\` detected from callback tab. Install on ${repo}, then redeploy so Build env picks up GITHUB_APP_*.`,
+    });
+    // Once promoted, the Verify button will also work even when server still says not_configured.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingGhApp?.installUrl, pendingGhApp?.repo, pendingGhApp?.slug, openState.kind]);
+
+  // Also auto-downgrade Verify generic error copy once pending arrives.
+  React.useEffect(() => {
+    if (!pendingGhApp?.installUrl) return;
+    if (!installVerifyMsg) return;
+    if (/Could not verify/i.test(installVerifyMsg) && pendingGhApp.slug) {
+      setInstallVerifyMsg(`Detected ${pendingGhApp.slug} from callback — finish install on GitHub, then Verify.`);
+    }
+  }, [pendingGhApp?.installUrl, pendingGhApp?.slug, installVerifyMsg]);
 
   React.useEffect(() => {
     persistActiveRefToStorage(displayRef);
@@ -331,6 +484,23 @@ export function KitFabMenu({
         return;
       }
       if (guards.status === "not_configured") {
+        // If we just created the App in another tab, server may still say not_configured
+        // until env propagated / redeploy, but we know slug/installUrl — promote to install step.
+        const pending = readPendingMerged();
+        const pendingInstall = pending?.installUrl?.trim();
+        const pendingRepo = pending?.repo?.trim() || guards.repo || refForOpen;
+        if (pendingInstall) {
+          setOpenState({
+            kind: "needs-install",
+            repo: pendingRepo,
+            installUrl: pendingInstall,
+            hint:
+              `App created as \`${pending.slug ?? "your-app"}\`. ` +
+              `Finish by saving env vars (callback tab → Vercel CLI / .env.local) and then install on ${pendingRepo}. ` +
+              `Until the deploy picks up GITHUB_APP_* the editor will still report not_configured — install anyway, then redeploy.`,
+          });
+          return;
+        }
         setOpenState({
           kind: "needs-setup",
           repo: guards.repo ?? refForOpen,
@@ -341,13 +511,15 @@ export function KitFabMenu({
         return;
       }
       if (guards.status === "not_installed") {
+        const pending = readPendingMerged();
+        const mergedInstallUrl = guards.installUrl || pending?.installUrl || undefined;
         setOpenState({
           kind: "needs-install",
           repo: guards.repo ?? refForOpen,
-          installUrl: guards.installUrl,
+          installUrl: mergedInstallUrl,
           hint:
             guards.hint?.trim() ||
-            "Install the GitHub App on this repository to edit files.",
+            (pending?.slug ? `Install \`${pending.slug}\` on ${guards.repo ?? refForOpen}. Choose "Only select repositories" and pick ${guards.repo ?? "your repo"}.` : "Install the GitHub App on this repository to edit files."),
         });
         return;
       }
@@ -992,79 +1164,108 @@ export function KitFabMenu({
                   {editorBlockingState.kind === "needs-setup" ? (
                     <>
                       <div className="space-y-2">
-                        <p className="text-sm font-medium">GitHub App not configured</p>
+                        <p className="text-sm font-medium">GitHub App — one credential set for sign-in + writes</p>
                         <p className="text-xs text-muted-foreground">{editorBlockingState.message}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Create an app in one click, then Vercel → Project → Settings → Environment Variables → paste
-                          the values from the callback page, redeploy. Or locally via <code className="font-mono">.env.local</code>.
-                        </p>
+                        {pendingGhApp?.installUrl ? (
+                          <p className="text-xs text-muted-foreground">
+                            We detected <code className="font-mono">{pendingGhApp.slug ?? "your app"}</code> created in another tab. This single App powers both <b>sign-in</b> (via its own <code>client_id</code>/<code>secret</code> — no second OAuth app) and <b>git writes</b>. Save the 5 env vars from the callback tab&apos;s Step 1, then hit Install. Even while the server still says <code>not_configured</code> (env hasn&apos;t propagated yet), you can proceed to install.
+                          </p>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            One-click setup: we create a GitHub App via manifest. Its own <code className="font-mono">client_id</code>/<code>secret</code> doubles as the OAuth app — no separate OAuth creds needed. After GitHub review you&apos;ll land on a 2-step page: <b>Step 1</b> saves env (single cred set), <b>Step 2</b> installs on <code className="font-mono">{editorBlockingState.repo}</code> (choose <b>Only select repositories</b>). Vercel: paste then redeploy; local: <code className="font-mono">.env.local</code>. Additional providers (Google, etc) remain configurable via <code className="font-mono">oauth.providers</code>.
+                          </p>
+                        )}
                       </div>
                       <div className="flex flex-wrap items-center justify-center gap-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={async () => {
-                            try {
-                              const origin = window.location.origin;
-                              const res = await fetch("/api/wildwood/github/app-manifest/start", {
-                                method: "POST",
-                                credentials: "include",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                  name: auth?.githubApp?.name || "Wildwood Dev",
-                                  origin,
-                                  redirectPath: "/api/wildwood/github/app-manifest/callback",
-                                }),
-                              });
-                              if (!res.ok) throw new Error(await res.text());
-                              const data = (await res.json()) as { action: string; manifest: unknown; state: string };
-                              const form = document.createElement("form");
-                              form.method = "POST";
-                              form.action = data.action;
-                              form.target = "_blank";
-                              (form as HTMLFormElement & { rel?: string }).rel = "noopener";
-                              const mf = document.createElement("input");
-                              mf.type = "hidden";
-                              mf.name = "manifest";
-                              mf.value = JSON.stringify(data.manifest);
-                              form.appendChild(mf);
-                              const st = document.createElement("input");
-                              st.type = "hidden";
-                              st.name = "state";
-                              st.value = data.state;
-                              form.appendChild(st);
-                              document.body.appendChild(form);
-                              form.submit();
-                            } catch (e) {
-                              setGitError(e instanceof Error ? e.message : String(e));
-                            }
-                          }}
-                        >
-                          Set up GitHub App
-                        </Button>
-                        <Button type="button" size="sm" variant="secondary" onClick={() => setEditorOpen(false)}>
-                          Close
-                        </Button>
+                        {pendingGhApp?.installUrl ? (
+                          <>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => {
+                                setOpenState({
+                                  kind: "needs-install",
+                                  repo: pendingGhApp.repo?.trim() || editorBlockingState.repo,
+                                  installUrl: pendingGhApp.installUrl,
+                                  hint: `App \`${pendingGhApp.slug ?? "created"}\` (single cred set — sign-in + writes) detected from callback. Install on ${pendingGhApp.repo ?? editorBlockingState.repo} — pick Only select repositories → ${pendingGhApp.repo ?? editorBlockingState.repo} — then Verify. If server still says not_configured, redeploy after saving env.`,
+                                });
+                              }}
+                            >
+                              Continue to Install →
+                            </Button>
+                            <Button type="button" size="sm" variant="secondary" onClick={() => setEditorOpen(false)}>
+                              Close
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={async () => {
+                                try {
+                                  const origin = window.location.origin;
+                                  const res = await fetch("/api/wildwood/github/app-manifest/start", {
+                                    method: "POST",
+                                    credentials: "include",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      name: auth?.githubApp?.name || "Wildwood Dev",
+                                      origin,
+                                      redirectPath: "/api/wildwood/github/app-manifest/callback",
+                                    }),
+                                  });
+                                  if (!res.ok) throw new Error(await res.text());
+                                  const data = (await res.json()) as { action: string; manifest: unknown; state: string };
+                                  const form = document.createElement("form");
+                                  form.method = "POST";
+                                  form.action = data.action;
+                                  form.target = "_blank";
+                                  (form as HTMLFormElement & { rel?: string }).rel = "noopener";
+                                  const mf = document.createElement("input");
+                                  mf.type = "hidden";
+                                  mf.name = "manifest";
+                                  mf.value = JSON.stringify(data.manifest);
+                                  form.appendChild(mf);
+                                  const st = document.createElement("input");
+                                  st.type = "hidden";
+                                  st.name = "state";
+                                  st.value = data.state;
+                                  form.appendChild(st);
+                                  document.body.appendChild(form);
+                                  form.submit();
+                                } catch (e) {
+                                  setGitError(e instanceof Error ? e.message : String(e));
+                                }
+                              }}
+                            >
+                              Set up GitHub App
+                            </Button>
+                            <Button type="button" size="sm" variant="secondary" onClick={() => setEditorOpen(false)}>
+                              Close
+                            </Button>
+                          </>
+                        )}
                       </div>
                       <p className="text-[11px] text-muted-foreground">
-                        After creation you&apos;ll see <code>Vercel CLI</code> snippets and <code>.env.local</code> at{" "}
-                        <code>/api/wildwood/github/app-manifest/callback</code>.
+                        After creation you&apos;ll see <code>Vercel CLI</code> + <code>.env.local</code> for the <b>single</b> 5-var set (<code>GITHUB_APP_ID</code>, <code>GITHUB_PRIVATE_KEY</code>, <code>GITHUB_CLIENT_ID</code>, <code>GITHUB_CLIENT_SECRET</code>, <code>GITHUB_APP_SLUG</code>). That one set powers both OAuth sign-in and git operations. Step 1 saves env, Step 2 installs on repo → Verify checks <code>{editorBlockingState.repo}</code>.
                       </p>
                     </>
                   ) : editorBlockingState.kind === "needs-install" ? (
                     <>
                       <div className="space-y-2">
-                        <p className="text-sm font-medium">
-                          Install the GitHub App
-                        </p>
+                        <p className="text-sm font-medium">Install the GitHub App on {editorBlockingState.repo}</p>
+                        <p className="text-xs text-muted-foreground">{editorBlockingState.hint}</p>
                         <p className="text-xs text-muted-foreground">
-                          {editorBlockingState.hint}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          On GitHub, choose{" "}
+                          On GitHub&apos;s install screen, choose{" "}
                           <strong>Only select repositories</strong> and pick{" "}
-                          <span className="font-mono">{editorBlockingState.repo}</span>.
+                          <span className="font-mono">{editorBlockingState.repo}</span> from the searchable repo list. This is the single App — its own <code className="font-mono">client_id</code>/<code>secret</code> already covers sign-in, so no second GitHub OAuth app is needed. Additional providers (Google, etc) are still configurable via <code className="font-mono">oauth.providers</code>.
                         </p>
+                        {pendingGhApp?.slug ? (
+                          <p className="text-[11px] text-muted-foreground">
+                            Detected <code className="font-mono">{pendingGhApp.slug}</code> from callback. If you haven&apos;t saved the env yet (Step 1), go back to the callback tab first — then return here and Verify.
+                          </p>
+                        ) : null}
                       </div>
                       <div className="flex flex-wrap items-center justify-center gap-2">
                         {editorBlockingState.installUrl ? (
@@ -1086,17 +1287,78 @@ export function KitFabMenu({
                           type="button"
                           size="sm"
                           variant="secondary"
+                          disabled={installVerifying}
+                          onClick={async () => {
+                            setInstallVerifying(true);
+                            setInstallVerifyMsg(null);
+                            try {
+                              const candidates = [
+                                `github/installation`,
+                                `git/editor-guards`,
+                              ];
+                              let lastMsg = "";
+                              for (const p of candidates) {
+                                try {
+                                  const r = await fetch(apiUrl(base, p), {
+                                    credentials: "include",
+                                    headers: { Accept: "application/json" },
+                                  });
+                                  const j = (await r.json().catch(async () => ({ _text: await r.text().catch(() => "") }))) as {
+                                    status?: string;
+                                    installationId?: number;
+                                    repo?: string;
+                                    message?: string;
+                                    error?: string;
+                                    _text?: string;
+                                    installUrl?: string;
+                                  };
+                                  if (!r.ok) { lastMsg = String(j.message || j.error || j._text || `${r.status}`); continue; }
+                                  const st = j.status || (j.installationId ? "installed" : j.installUrl ? "not_installed" : "unknown");
+                                  if (st === "installed" || st === "ready") {
+                                    setInstallVerifyMsg(`✓ Installed${j.repo ? ` on ${j.repo}` : ""} — single App powers sign-in + writes. Opening editor…`);
+                                    setTimeout(() => void retryEditorOpen(), 300);
+                                    return;
+                                  }
+                                  if (st === "not_installed") {
+                                    setInstallVerifyMsg(`App not yet installed on ${j.repo ?? editorBlockingState.repo}. On GitHub: pick "Only select repositories" → search for ${j.repo ?? editorBlockingState.repo} → tick it → Install, then Verify.`);
+                                    return;
+                                  }
+                                  if (st === "not_configured") {
+                                    setInstallVerifyMsg("Server still reports not_configured — save the 5 vars from callback Step 1 (GITHUB_APP_ID, GITHUB_PRIVATE_KEY, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_APP_SLUG — single cred set, App doubles as OAuth) on the deployment and redeploy. You can finish the GitHub install now; verification will succeed after redeploy.");
+                                    return;
+                                  }
+                                } catch (e) { lastMsg = e instanceof Error ? e.message : String(e); }
+                              }
+                              setInstallVerifyMsg(lastMsg ? `Could not verify: ${lastMsg}. If you completed GitHub's Only select repositories → ${editorBlockingState.repo} flow, click “I've installed it” to retry.` : "Could not verify — try again.");
+                            } finally {
+                              setInstallVerifying(false);
+                            }
+                          }}
+                        >
+                          {installVerifying ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
+                          Verify
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
                           onClick={() => void retryEditorOpen()}
                         >
                           I&apos;ve installed it
                         </Button>
                       </div>
+                      {installVerifyMsg ? (
+                        <p className="max-w-sm text-[11px] text-muted-foreground">{installVerifyMsg}</p>
+                      ) : null}
                       {!editorBlockingState.installUrl ? (
                         <p className="text-xs text-muted-foreground">
-                          Set{" "}
-                          <code className="font-mono">GITHUB_APP_SLUG</code> on
-                          the deployment so we can link to your app&apos;s
-                          install page.
+                          {pendingGhApp?.installUrl ? (
+                            <a href={pendingGhApp.installUrl} target="_blank" rel="noreferrer" className="underline">
+                              Use detected install link →
+                            </a>
+                          ) : (
+                            <>Set <code className="font-mono">GITHUB_APP_SLUG</code> on the deployment so we can link to your app&apos;s install page. Single set: this App&apos;s own client_id/secret is the OAuth cred — no second app needed.</>
+                          )}
                         </p>
                       ) : null}
                     </>
