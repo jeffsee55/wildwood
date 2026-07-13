@@ -14,15 +14,28 @@ export type CreateHandlerOptions = { currentRef?: string };
 
 export function createHandler(client: WildwoodClient, _options?: CreateHandlerOptions) {
   const base = new H3();
-  const app = new H3();
+  const api = new H3();
+  const wildwoodNs = new H3();
 
-  app.mount("/git", createGitServiceRouter(client));
-  app.mount("/vscode", createVscodeRouter(client));
-  app.mount("/github", createGitHubRouter(client));
+  // Singletons — H3 router instances are stateless — reuse same sub-routers for both namespaces.
+  const gitRouter = createGitServiceRouter(client);
+  const githubRouter = createGitHubRouter(client);
+  const vscodeRouter = createVscodeRouter(client);
+
+  // Canonical: /api/wildwood/*
+  wildwoodNs.mount("/git", gitRouter);
+  wildwoodNs.mount("/github", githubRouter);
+  wildwoodNs.mount("/vscode", vscodeRouter);
+
+  api.mount("/wildwood", wildwoodNs);
+  // Legacy aliases: /api/git, /api/github, /api/vscode (keep so existing consumers + current vercel.json rewrites don't break)
+  api.mount("/git", gitRouter);
+  api.mount("/github", githubRouter);
+  api.mount("/vscode", vscodeRouter);
 
   base.use(async (event, next) => {
     const pathname = event.url.pathname;
-    const isVscodeApi = pathname.startsWith("/api/vscode/");
+    const isVscodeApi = pathname.startsWith("/api/vscode/") || pathname.startsWith("/api/wildwood/vscode/");
     const origin = event.req.headers.get("origin");
     const corsHeaders: Record<string, string> = isVscodeApi
       ? (vscodeEmbedCorsHeaders(event.req) as Record<string, string>)
@@ -46,7 +59,9 @@ export function createHandler(client: WildwoodClient, _options?: CreateHandlerOp
     return res;
   });
 
-  base.mount("/api", app);
+  base.mount("/api", api);
+  // keep /api/* catch-alls working — if apps use `app/api/[...path]` with prefix /api/wildwood/*,
+  // `api.mount("/")` already covers both, but ensure legacy `/api/git/*` → still works.
   return base;
 }
 
