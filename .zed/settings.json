@@ -12,16 +12,18 @@
   "ensure_final_newline_on_save": false,
 
   // Tailwind CSS language server settings.
-  // `suggestCanonicalClasses` is a noisy Tailwind v4 lint (default: warning) that flags
-  // non-canonical forms like `!border-0` → `border-0!` or `[&_.foo]:bar` rewrites.
-  // Disable it everywhere — we format with oxfmt, not Tailwind's canonical rewrite.
-  // Zed runs two different Tailwind servers depending on filetype / version, so cover all ids.
+  // `suggestCanonicalClasses` (Tailwind v4, default: warning) flags non-canonical
+  // forms, e.g. `!border-0` → `border-0!`, `w-[5.5rem]` → `w-22`. Some are worth
+  // fixing (5.5rem == spacing 22, `!` suffix is the new v4 canonical), others are
+  // noisy (internal `[&_.foo]:bar` shadcn rewrites). Keep as warning so the useful
+  // ones surface; address them intentionally rather than silencing the whole rule.
+  // Zed runs multiple Tailwind servers depending on version/filetype — cover all ids.
   "lsp": {
     "tailwindcss-language-server": {
       "settings": {
         "tailwindCSS": {
           "lint": {
-            "suggestCanonicalClasses": "ignore"
+            "suggestCanonicalClasses": "warning"
           }
         }
       }
@@ -30,7 +32,7 @@
       "settings": {
         "tailwindCSS": {
           "lint": {
-            "suggestCanonicalClasses": "ignore"
+            "suggestCanonicalClasses": "warning"
           }
         }
       }
@@ -39,7 +41,7 @@
       "settings": {
         "tailwindCSS": {
           "lint": {
-            "suggestCanonicalClasses": "ignore"
+            "suggestCanonicalClasses": "warning"
           }
         }
       }

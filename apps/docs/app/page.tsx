@@ -12,10 +12,10 @@ export default async function Home() {
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
           name
         </div>
-        <h1 className="!mt-3 !border-0 !pt-0 !text-[28px] !font-semibold !normal-case !tracking-[-0.03em]">
+        <h1 className="mt-3! border-0! pt-0! text-[28px]! font-semibold! normal-case! tracking-[-0.03em]!">
           wildwood — git as content store
         </h1>
-        <p className="!mt-5 max-w-[60ch] !leading-[1.95] text-muted-foreground">
+        <p className="mt-5! max-w-[60ch] leading-[1.95]! text-muted-foreground">
           Markdown and JSON in <code>content/</code> → typed collection API. Edits go through a
           shared H3/HTTP surface that powers both the floating editor and your own routes. This site
           is <code>content/</code> from this repo rendered through itself.
@@ -23,7 +23,7 @@ export default async function Home() {
 
         <div className="mt-8 grid gap-3 border border-border p-4 font-mono text-[11px] leading-[1.9]">
           <div className="flex gap-3">
-            <span className="w-[5.5rem] shrink-0 uppercase tracking-[0.12em] text-muted-foreground">
+            <span className="w-22 shrink-0 uppercase tracking-[0.12em] text-muted-foreground">
               synopsis
             </span>
             <span>
@@ -32,7 +32,7 @@ export default async function Home() {
             </span>
           </div>
           <div className="flex gap-3">
-            <span className="w-[5.5rem] shrink-0 uppercase tracking-[0.12em] text-muted-foreground">
+            <span className="w-22 shrink-0 uppercase tracking-[0.12em] text-muted-foreground">
               source
             </span>
             <Link

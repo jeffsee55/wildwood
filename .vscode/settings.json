@@ -6,10 +6,11 @@
   "editor.formatOnSave": true,
   "editor.codeActionsOnSave": {},
 
-  // Tailwind CSS IntelliSense lint: `suggestCanonicalClasses` is a noisy v4 rule
-  // that flags non-canonical forms like `[&_[cmdk-group-heading]]:text-muted`.
-  // Disable it — we format with oxfmt, not Tailwind's canonical rewrite.
-  "tailwindCSS.lint.suggestCanonicalClasses": "ignore",
+  // Tailwind CSS IntelliSense: `suggestCanonicalClasses` is Tailwind v4's canonical-form
+  // hint (e.g. `!border-0` → `border-0!`, `w-[5.5rem]` → `w-22`). Some are worth fixing,
+  // so keep as warning and address intentionally. We format with oxfmt, but these are
+  // semantic rewrites oxfmt won't do.
+  "tailwindCSS.lint.suggestCanonicalClasses": "warning",
 
   "[typescript]": {
     "editor.defaultFormatter": "oxc.oxc-vscode"

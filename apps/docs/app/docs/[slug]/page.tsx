@@ -39,12 +39,12 @@ export default async function DocsPage({ params }: PageProps) {
           <span className="ml-auto tabular-nums">{doc._meta.path ?? `${slug}.md`}</span>
         </div>
 
-        <h1 className="!mt-5 !border-0 !pt-0 !text-[26px] !normal-case !tracking-[-0.02em]">
+        <h1 className="mt-5! border-0! pt-0! text-[26px]! normal-case! tracking-[-0.02em]!">
           {doc.title.toLowerCase()}
         </h1>
 
         {doc.description ? (
-          <p className="!mt-3 max-w-[60ch] !text-[12.5px] !leading-[1.95] text-muted-foreground">
+          <p className="mt-3! max-w-[60ch] text-[12.5px]! leading-[1.95]! text-muted-foreground">
             {doc.description}
           </p>
         ) : null}
