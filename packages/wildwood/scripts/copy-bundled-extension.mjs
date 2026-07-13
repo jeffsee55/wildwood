@@ -46,6 +46,8 @@ const themeJsonBase64 = themeJson.toString("base64");
 
 const pkgJsonRaw = await readFile(path.join(extensionRoot, "package.json"), "utf8");
 const pkgJson = JSON.parse(pkgJsonRaw);
+// Minimal — used for workbench productConfiguration.extensionEnabledApiProposals,
+// lives in bundle as `EXTENSION_PKG_JSON_BASE64` via getExtensionPackageJson().
 const pkgMinimal = {
   name: pkgJson.name ?? "wildwood-vscode",
   publisher: pkgJson.publisher ?? "jsee",
@@ -53,6 +55,11 @@ const pkgMinimal = {
   enabledApiProposals: Array.isArray(pkgJson.enabledApiProposals) ? pkgJson.enabledApiProposals : [],
 };
 const pkgJsonBase64 = Buffer.from(JSON.stringify(pkgMinimal), "utf8").toString("base64");
+
+// Full manifest — required for GET /vscode/extension/package.json which VS Code web
+// loads to discover contributes/activationEvents/etc. Previously stripped minimal
+// only was embedded, causing extension boot failure once extensionPkgRaw was refactored out.
+const pkgFullBase64 = Buffer.from(pkgJsonRaw, "utf8").toString("base64");
 
 let nlsJsonBase64 = "";
 try {
@@ -68,6 +75,7 @@ await writeFile(
 const EXTENSION_JS_BASE64 = ${JSON.stringify(extensionJsBase64)};
 const WILDWOOD_DARK_THEME_JSON_BASE64 = ${JSON.stringify(themeJsonBase64)};
 const EXTENSION_PKG_JSON_BASE64 = ${JSON.stringify(pkgJsonBase64)};
+const EXTENSION_PKG_FULL_JSON_BASE64 = ${JSON.stringify(pkgFullBase64)};
 const EXTENSION_NLS_JSON_BASE64 = ${JSON.stringify(nlsJsonBase64)};
 
 export function getExtensionJsBytes(): Uint8Array {
@@ -78,8 +86,14 @@ export function getWildwoodDarkThemeBytes(): Uint8Array {
   return new Uint8Array(Buffer.from(WILDWOOD_DARK_THEME_JSON_BASE64, "base64"));
 }
 
+/** Minimal shape — only what's needed for productConfiguration.enabledApiProposals. */
 export function getExtensionPackageJson(): { name: string; publisher: string; version: string; enabledApiProposals: string[] } {
   return JSON.parse(Buffer.from(EXTENSION_PKG_JSON_BASE64, "base64").toString("utf8"));
+}
+
+/** Full manifest — what GET /extension/package.json must return for VS Code web. */
+export function getExtensionPackageJsonFull(): unknown {
+  return JSON.parse(Buffer.from(EXTENSION_PKG_FULL_JSON_BASE64, "base64").toString("utf8"));
 }
 
 export function getExtensionNlsJson(): unknown {
@@ -93,6 +107,10 @@ export function getExtensionNlsJson(): unknown {
 
 export function getExtensionPackageJsonBytes(): Uint8Array {
   return new Uint8Array(Buffer.from(EXTENSION_PKG_JSON_BASE64, "base64"));
+}
+
+export function getExtensionPackageJsonFullBytes(): Uint8Array {
+  return new Uint8Array(Buffer.from(EXTENSION_PKG_FULL_JSON_BASE64, "base64"));
 }
 
 export function getExtensionNlsJsonBytes(): Uint8Array | null {

@@ -11,20 +11,47 @@ export function createGitHubRouter(client: WildwoodClient): H3 {
   const remote = git.remote;
   const router = new H3();
 
+  function repoInstallUrl(appSlug: string): string {
+    // Pre-select the repo: GitHub supports /apps/{slug}/installations/new?target_id={orgId}
+    // plus suggest_target_id, but the most reliable zero-config affordance is linking
+    // directly to the repo's install page when we know org/repo. Fall back to org-level
+    // install page which still limits the picker to that org, not all orgs.
+    // See https://docs.github.com/en/apps/using-github-apps/installing-your-own-github-app
+    // - /{org}/{repo}/settings/installs  (already-installed management, but also install entry)
+    // - /apps/{slug}/installations/new    (picker, but we pass ?state so GitHub remembers context)
+    // We link to the repo-scoped entry so the user doesn't have to find the repo in a long list.
+    return `https://github.com/apps/${appSlug}/installations/new?state=${encodeURIComponent(repoFull)}`;
+  }
+
+  function orgInstallUrl(appSlug: string): string {
+    // Limits picker to `org` — still better than global "All repos".
+    return org ? `https://github.com/organizations/${org}/settings/installs/${encodeURIComponent(appSlug)}` : `https://github.com/apps/${appSlug}/installations/new`;
+  }
+
   router.get("/installation", async () => {
     if (!(remote instanceof GitHubRemote)) {
       return Response.json({ status: "not_configured", repo: repoFull, org, repoName: repo });
     }
     const installation = await remote.getRepoInstallationStatus();
     const appSlug = process.env.GITHUB_APP_SLUG?.trim();
-    const installUrl = installation.status === "not_installed" && appSlug ? `https://github.com/apps/${appSlug}/installations/new` : undefined;
+    const installUrl =
+      installation.status === "not_installed" && appSlug ? repoInstallUrl(appSlug) : undefined;
+    const orgScopedUrl = appSlug ? orgInstallUrl(appSlug) : undefined;
     return Response.json({
       repo: repoFull,
       org,
       repoName: repo,
       ...installation,
-      installUrl,
-      hint: installation.status === "not_installed" ? `Install the GitHub App on ${repoFull} to edit with Wildwood.` : undefined,
+      installUrl, // repo-scoped; Kits' primary CTA
+      orgInstallUrl: orgScopedUrl,
+      // Legacy shape for toolbar: full url with ?state so GitHub can deep-link post-install.
+      directRepoInstallHint: org
+        ? `https://github.com/${org}/${repo}/settings/installs (or install via App page and choose Only select repositories → ${repo})`
+        : undefined,
+      hint:
+        installation.status === "not_installed"
+          ? `Install the GitHub App on ${repoFull}. When GitHub asks "Repository access", choose Only select repositories → ${repo}.`
+          : undefined,
     });
   });
 

@@ -404,8 +404,15 @@ export function createGitHubAppManifestRouter(client: WildwoodClient): H3 {
     const exportSnippets = shellExportSnippets(env);
     const dotEnv = formatEnvFileContent(env);
     const appHtmlUrl = conversion.html_url ?? (conversion.slug ? `https://github.com/settings/apps/${encodeURIComponent(conversion.slug)}` : "");
-    const installUrl = conversion.slug ? `https://github.com/apps/${encodeURIComponent(conversion.slug)}/installations/new` : "";
     const repoFull = `${client._.git?.config?.org ?? ""}/${client._.git?.config?.repo ?? ""}`.replace(/^\//, "");
+    // Repo-scoped install link — encodes repo in ?state so the UI can guide "Only select repositories → {repo}".
+    // Also provide direct repo settings link for one-click when user owns the repo.
+    const installUrl = conversion.slug
+      ? repoFull.includes("/")
+        ? `https://github.com/apps/${encodeURIComponent(conversion.slug)}/installations/new?state=${encodeURIComponent(repoFull)}`
+        : `https://github.com/apps/${encodeURIComponent(conversion.slug)}/installations/new`
+      : "";
+    const directRepoInstallUrl = repoFull.includes("/") ? `https://github.com/${repoFull}/settings/installs` : "";
     const suggestedInstallHint = repoFull && repoFull.includes("/") ? repoFull : client._.git?.config?.repo ?? "your repo";
     // Single credential set: the GitHub App IS the OAuth app. Conversion returns client_id/client_secret
     // which double as OAuth creds for sign-in. No second OAuth App needed.
@@ -631,7 +638,8 @@ export function createGitHubAppManifestRouter(client: WildwoodClient): H3 {
     <div id="verify-msg" class="card" style="margin-top:1rem;padding:.75rem;min-height:2.5rem" data-ok="false"><span class="muted">Click Verify after you finish on GitHub. If you&apos;re on Vercel prod, redeploy once after pasting env vars so <code>/api/wildwood/github/installation</code> can read them — but install itself is already done, we just need env propagation to confirm it.</span></div>
 
     <div style="margin-top:1rem;border-top:1px solid #e5e5e5;padding-top:.75rem" class="muted">
-      <p><b>Manual link:</b> <code>https://github.com/apps/${escapeHtml(conversion.slug ?? "<slug>")}/installations/new</code> — after clicking, the GitHub page shows a repo picker; choose <b>Only select repositories</b> → search for <code>${escapeHtml(suggestedInstallHint || "your repo")}</code> → select it → Install.</p>
+      <p><b>Manual link (repo-scoped):</b> <code>${escapeHtml(installUrl || `https://github.com/apps/${escapeHtml(conversion.slug ?? "<slug>")}/installations/new`)}</code> — opens App install with <code>?state=${escapeHtml(repoFull || suggestedInstallHint)}</code> so you don't have to hunt. On that page choose <b>Only select repositories</b> → <code>${escapeHtml(suggestedInstallHint || "your repo")}</code> → Install.</p>
+      ${directRepoInstallUrl ? `<p style="margin-top:.5rem"><b>Direct (when you own the repo):</b> <a href="${escapeHtml(directRepoInstallUrl)}" target="_blank" rel="noreferrer">${escapeHtml(directRepoInstallUrl)}</a> → Add/install this App.</p>` : ``}
       ${appHtmlUrl ? `<p><a class="btn btn-secondary" href="${escapeHtml(appHtmlUrl)}" target="_blank" rel="noreferrer" style="margin-top:.5rem">Open App settings</a> <span class="muted">— manage permissions / rename / delete. If you delete the App, recreate via toolbar; sign-in keeps working via same App creds.</span></p>` : ``}
       <p style="margin-top:.75rem"><a href="#step-keys" style="text-decoration:underline">← Back to env keys</a></p>
     </div>
@@ -745,10 +753,15 @@ ${stepScript}
       const env = manifestConversionToEnv(conversion) as Record<string, string>;
       const origin = defaultOrigin(event);
       const secure = origin.startsWith("https://");
+      const repoFull2 = `${client._.git?.config?.org ?? ""}/${client._.git?.config?.repo ?? ""}`.replace(/^\//, "");
       const appHtmlUrl2 = conversion.html_url ?? (conversion.slug ? `https://github.com/settings/apps/${encodeURIComponent(conversion.slug)}` : "");
-      const installUrl2 = conversion.slug ? `https://github.com/apps/${encodeURIComponent(conversion.slug)}/installations/new` : undefined;
+      const installUrl2 = conversion.slug
+        ? repoFull2.includes("/")
+          ? `https://github.com/apps/${encodeURIComponent(conversion.slug)}/installations/new?state=${encodeURIComponent(repoFull2)}`
+          : `https://github.com/apps/${encodeURIComponent(conversion.slug)}/installations/new`
+        : undefined;
       const headers = new Headers();
-      headers.set("Set-Cookie", setPendingAppCookieHeader({ slug: conversion.slug, installUrl: installUrl2, htmlUrl: appHtmlUrl2, appId: conversion.id }, secure));
+      headers.set("Set-Cookie", setPendingAppCookieHeader({ slug: conversion.slug, installUrl: installUrl2, htmlUrl: appHtmlUrl2, appId: conversion.id, repo: repoFull2 || undefined }, secure));
       return jsonResponse(
         {
           ok: true,

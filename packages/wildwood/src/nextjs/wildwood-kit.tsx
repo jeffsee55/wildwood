@@ -30,7 +30,7 @@ import { ClientKitBoundary } from "./client-boundary";
 /** Any `createClient()` instance satisfies this umbrella shape. */
 export type WildwoodKitHostClient = WildwoodForActiveRef;
 
-function resolveKitAuthFromEnv(): KitAuthConfig | undefined {
+function resolveKitAuthFromEnv(wildwood?: WildwoodKitHostClient): KitAuthConfig | undefined {
   // Vercel-first origin: covers NEXT_PUBLIC_ORIGIN > VERCEL_PROJECT_PRODUCTION_URL > VERCEL_BRANCH_URL > VERCEL_URL
   const vercelOrigin = resolveOrigin();
 
@@ -49,6 +49,21 @@ function resolveKitAuthFromEnv(): KitAuthConfig | undefined {
   // and prompt redeploy if needed, rather than "set GitHub OAuth env vars".
   const providesOAuth = true as const;
 
+  // Best-effort org/repo for repo-scoped install links — avoids generic /installations/new
+  // that forces user to hunt through all repos. We prefer wildwood client's git config
+  // (defineConfig org/repo or env-inferred), which is always correct for the current site.
+  let org: string | undefined;
+  let repo: string | undefined;
+  try {
+    // wildwood._.config is public in host; safe to read even during build — never throws.
+    org = wildwood?._?.config?.org?.trim();
+    repo = wildwood?._?.config?.repo?.trim();
+  } catch {}
+  org = org || process.env.WILDWOOD_GITHUB_ORG?.trim() || process.env.WILDWOOD_ORG?.trim() || process.env.GITHUB_ORG?.trim();
+  repo = repo || process.env.WILDWOOD_GITHUB_REPO?.trim() || process.env.WILDWOOD_REPO?.trim() || process.env.GITHUB_REPO?.trim();
+  const repoFull = org && repo ? `${org}/${repo}` : undefined;
+  const directRepoInstallUrl = repoFull ? `https://github.com/${repoFull}/settings/installs` : undefined;
+
   if (!appSlug && !configured && !oAuthReady) {
     return {
       githubApp: {
@@ -56,13 +71,18 @@ function resolveKitAuthFromEnv(): KitAuthConfig | undefined {
         name: process.env.GITHUB_APP_NAME?.trim() || "Wildwood",
         origin: vercelOrigin,
         providesOAuth,
-      },
+        // Still pass repo hints so setup UI can show repo-scoped CTAs even before App exists.
+        ...(repoFull ? { repoFull } : {}),
+        ...(org ? { org } : {}),
+        ...(repo ? { repo } : {}),
+        ...(directRepoInstallUrl ? { directRepoInstallUrl } : {}),
+      } as KitAuthConfig["githubApp"] & { repoFull?: string; org?: string; repo?: string; directRepoInstallUrl?: string },
       // Keep back-compat flag false — new `oauth.providers` below is the real source.
       githubOAuthEnabled: false,
       oauth: {
         providers: [{ id: "github", name: "GitHub", viaGitHubApp: false, enabled: false }],
       },
-    };
+    } as KitAuthConfig;
   }
 
   const appPresent = !!(appSlug || configured);
@@ -75,7 +95,11 @@ function resolveKitAuthFromEnv(): KitAuthConfig | undefined {
       name: process.env.GITHUB_APP_NAME?.trim() || "Wildwood",
       origin: vercelOrigin,
       providesOAuth,
-    },
+      ...(repoFull ? { repoFull } : {}),
+      ...(org ? { org } : {}),
+      ...(repo ? { repo } : {}),
+      ...(directRepoInstallUrl ? { directRepoInstallUrl } : {}),
+    } as KitAuthConfig["githubApp"] & { repoFull?: string; org?: string; repo?: string; directRepoInstallUrl?: string },
     githubOAuthEnabled: githubEnabled,
     oauth: {
       providers: [
@@ -88,7 +112,7 @@ function resolveKitAuthFromEnv(): KitAuthConfig | undefined {
         },
       ],
     },
-  };
+  } as KitAuthConfig;
 }
 
 function mergeKitAuth(
@@ -223,8 +247,9 @@ export async function WildwoodKit({
 
   const activeRef = resolvedRef ?? wildwood._.config.ref;
   // Server-derived default so `<Toolbar wildwood={wildwood} />` is enough in most hosts.
-  // App-supplied `auth` wins (shallow + githubApp merge).
-  const envAuth = resolveKitAuthFromEnv();
+  // App-supplied `auth` wins (shallow + githubApp merge). Pass wildwood so we can read org/repo
+  // for repo-scoped install links (avoids generic picker UX).
+  const envAuth = resolveKitAuthFromEnv(wildwood as WildwoodKitHostClient);
   const auth = mergeKitAuth(envAuth, authProp);
 
   return (

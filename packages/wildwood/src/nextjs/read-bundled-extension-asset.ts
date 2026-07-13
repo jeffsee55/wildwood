@@ -8,6 +8,36 @@ import {
   getWildwoodDarkThemeBytes,
 } from "@/nextjs/bundled-extension-bytes.gen";
 
+// Optional full-manifest export that only exists after `scripts/copy-bundled-extension.mjs`
+// has been re-run. The on-disk `bundled-extension-bytes.gen.ts` in the repo is currently
+// stale (only minimal manifest embedded), so we must not statically import the missing
+// symbol — that would crash the module evaluation in the Edge/Node server. Resolve lazily.
+type MaybeFullExports = {
+  getExtensionPackageJsonFullBytes?: () => Uint8Array;
+  getExtensionPackageJsonFull?: () => unknown;
+};
+let cachedGen: MaybeFullExports | null = null;
+async function tryGetFullBytesFromGen(): Promise<Uint8Array | null> {
+  if (cachedGen === undefined) return null;
+  if (!cachedGen) {
+    try {
+      // Dynamic import avoids static binding to a missing export.
+      const mod = (await import("@/nextjs/bundled-extension-bytes.gen")) as unknown as MaybeFullExports;
+      cachedGen = mod;
+    } catch {
+      cachedGen = {} as MaybeFullExports; // mark as tried
+      return null;
+    }
+  }
+  const fn = cachedGen?.getExtensionPackageJsonFullBytes;
+  if (typeof fn !== "function") return null;
+  try {
+    return fn();
+  } catch {
+    return null;
+  }
+}
+
 const assetCache = new Map<string, Uint8Array>();
 
 function extensionAssetRoots(): string[] {
@@ -43,6 +73,45 @@ export async function readBundledExtensionAsset(
     return cached;
   }
 
+  // package.json / package.nls.json are special: VS Code web requires the FULL manifest
+  // (contributes, browser, activationEvents, etc). The old embedded bytes only had the
+  // minimal {name,publisher,version,enabledApiProposals} — serving that broke the editor.
+  //
+  // Strategy: FS first (bundled-extension/package.json is shipped via package.json.files),
+  // then try the (new) full-bytes export from the gen module, then fall back to minimal.
+  // This makes a stale gen file non-fatal.
+  if (assetPath === "package.json" || assetPath === "package.nls.json") {
+    for (const root of extensionAssetRoots()) {
+      const filePath = join(root, assetPath);
+      if (!existsSync(filePath)) continue;
+      try {
+        const bytes = new Uint8Array(await readFile(filePath));
+        assetCache.set(assetPath, bytes);
+        return bytes;
+      } catch {
+        // try next root
+      }
+    }
+    if (assetPath === "package.json") {
+      const full = await tryGetFullBytesFromGen();
+      if (full) {
+        assetCache.set(assetPath, full);
+        return full;
+      }
+      // Last resort — minimal manifest. Editor will load degraded, but we avoid 500.
+      const min = getExtensionPackageJsonBytes();
+      assetCache.set(assetPath, min);
+      return min;
+    }
+    if (assetPath === "package.nls.json") {
+      const nls = getExtensionNlsJsonBytes();
+      if (nls) {
+        assetCache.set(assetPath, nls);
+        return nls;
+      }
+    }
+  }
+
   // Embedded — always available, no filesystem needed (serverless-safe)
   if (assetPath === "dist/extension.js") {
     const bytes = getExtensionJsBytes();
@@ -54,20 +123,14 @@ export async function readBundledExtensionAsset(
     assetCache.set(assetPath, bytes);
     return bytes;
   }
-  if (assetPath === "package.json") {
+  // legacy name for fallback runners that touched min manifest bytes directly via package.json.
+  if (assetPath === "package.min.json") {
     const bytes = getExtensionPackageJsonBytes();
     assetCache.set(assetPath, bytes);
     return bytes;
   }
-  if (assetPath === "package.nls.json") {
-    const nls = getExtensionNlsJsonBytes();
-    if (nls) {
-      assetCache.set(assetPath, nls);
-      return nls;
-    }
-  }
 
-  // Fallback: search local filesystem roots (useful in monorepo dev, not required in prod)
+  // Generic fallback: search local filesystem roots (useful in monorepo dev, not required in prod)
   for (const root of extensionAssetRoots()) {
     const filePath = join(root, assetPath);
     if (!existsSync(filePath)) continue;

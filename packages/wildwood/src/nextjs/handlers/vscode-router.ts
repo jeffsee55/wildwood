@@ -95,8 +95,44 @@ export function createVscodeRouter(client: WildwoodClient): H3 {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setNoStoreHeaders(event as any);
     try {
-      if (asset === "package.json") return withVscodeEmbedCors(event.req, Response.json(extensionPkgRaw as unknown, { headers: { "content-type": "application/json" } }));
-      if (asset === "package.nls.json") return withVscodeEmbedCors(event.req, Response.json(extensionNls as unknown, { headers: { "content-type": "application/json" } }));
+      if (asset === "package.json") {
+        // MUST serve the full manifest (contributes, activationEvents, browser, etc).
+        // Previously referenced undeclared `extensionPkgRaw` — the refactor to embedded bytes
+        // left that identifier behind, causing Runtime: ReferenceError and 500-ing all assets
+        // because the catch-all `extension/**` route resolved `package.json` through this path.
+        //
+        // We intentionally read via `readBundledExtensionAsset` (FS → bundled-extension/package.json
+        // → embedded full bytes fallback) so a stale `*.gen.ts` cannot break prod. The file
+        // `packages/wildwood/bundled-extension/package.json` is shipped via `files` in package.json
+        // and also exists as node_modules/wildwood/bundled-extension in Vercel.
+        const bytes = await readBundledExtensionAsset("package.json");
+        if (bytes) {
+          try {
+            const text = new TextDecoder("utf-8").decode(bytes);
+            const full = JSON.parse(text) as Record<string, unknown>;
+            return withVscodeEmbedCors(
+              event.req,
+              Response.json(full, { headers: { "content-type": "application/json" } }),
+            );
+          } catch {
+            // fall through to minimal fallback below
+          }
+        }
+        // Absolute fallback  — still return something rather than 500 so editor loads degraded.
+        return withVscodeEmbedCors(
+          event.req,
+          Response.json(pkg as unknown as Record<string, unknown>, {
+            headers: { "content-type": "application/json", "x-wildwood-fallback": "minimal-pkg" },
+          }),
+        );
+      }
+      if (asset === "package.nls.json") {
+        // Prefer embedded NLS (works offline), falls through to bundling
+        return withVscodeEmbedCors(
+          event.req,
+          Response.json(extensionNls as unknown as Record<string, unknown>, { headers: { "content-type": "application/json" } }),
+        );
+      }
       const bytes = await readBundledExtensionAsset(asset);
       if (!bytes) {
         console.error("[wildwood:vscode] extension asset not found:", asset);
@@ -106,7 +142,7 @@ export function createVscodeRouter(client: WildwoodClient): H3 {
       const headers = new Headers(vscodeEmbedCorsHeaders(event.req));
       if (ct) headers.set("content-type", ct);
       headers.set("cache-control", "no-store");
-      return new Response(bytes, { status: 200, headers });
+      return new Response(bytes as unknown as BodyInit, { status: 200, headers });
     } catch (e) {
       console.error("[wildwood:vscode] extension asset failed:", asset, e);
       return new Response(`Failed to load extension asset: ${e instanceof Error ? e.message : String(e)}`, { status: 500, headers: vscodeEmbedCorsHeaders(event.req) });

@@ -75,6 +75,11 @@ export type KitAuthConfig = {
      * even though the App exists.
      */
     providesOAuth?: boolean;
+    /** Full "org/repo" of this site — used to scope install links so user doesn't hunt all repos. */
+    repoFull?: string;
+    org?: string;
+    repo?: string;
+    directRepoInstallUrl?: string;
   };
   /**
    * @deprecated The Kit is a UI affordance — it must never throw in production when
@@ -170,9 +175,24 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
   const manifestRedirectPath = auth.githubApp?.manifestRedirectPath || "/api/wildwood/github/app-manifest/callback";
   const oauthCallbackPath = auth.githubApp?.oauthCallbackPath || `${authBase}/callback/github`;
   const callbackURL = auth.callbackURL || "/";
+  // Repo-scoped install URL — GitHub's App install page lets you pre-filter by state/repo hint.
+  // When the server provides org/repo we link via ?state so the callback and install pages can
+  // guide the user to "Only select repositories → {repo}". Falls back to generic picker.
+  const repoFull = (auth as unknown as { repoFull?: string; org?: string; repo?: string }).repoFull?.trim()
+    || ([(auth as unknown as { org?: string }).org, (auth as unknown as { repo?: string }).repo].filter(Boolean).join("/")).trim())
+    || "";
   const installUrl = auth.githubApp?.appSlug
-    ? `https://github.com/apps/${auth.githubApp.appSlug}/installations/new`
+    ? repoFull
+      ? `https://github.com/apps/${auth.githubApp.appSlug}/installations/new?state=${encodeURIComponent(repoFull)}`
+      : `https://github.com/apps/${auth.githubApp.appSlug}/installations/new`
     : null;
+  const directRepoInstallLink = (() => {
+    if (!repoFull || !repoFull.includes("/")) return null;
+    const [o, r] = repoFull.split("/") as [string, string];
+    if (!o || !r) return null;
+    // Deep link to repo's install/manage page — best UX when you already own the repo.
+    return `https://github.com/${o}/${r}/settings/installs`;
+  })();
 
   React.useEffect(() => {
     if (auth.githubApp?.origin || origin) return;
@@ -419,14 +439,34 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
         Create GitHub App
       </Button>
       {installUrl ? (
-        <a
-          className="mt-2 inline-flex h-8 w-full items-center justify-center rounded-md bg-secondary px-2 text-xs font-medium text-secondary-foreground hover:bg-secondary/80"
-          href={installUrl}
-          rel="noreferrer"
-          target="_blank"
-        >
-          Install GitHub App on a repo
-        </a>
+        <>
+          <div className="mt-2 grid gap-2">
+            <a
+              className="inline-flex h-8 w-full items-center justify-center rounded-md bg-secondary px-2 text-xs font-medium text-secondary-foreground hover:bg-secondary/80"
+              href={installUrl}
+              rel="noreferrer"
+              target="_blank"
+              title={repoFull ? `Opens App install; choose Only select repositories → ${repoFull}` : undefined}
+            >
+              Install GitHub App{repoFull ? ` on ${repoFull}` : " on a repo"}
+            </a>
+            {directRepoInstallLink ? (
+              <a
+                className="inline-flex h-7 w-full items-center justify-center rounded-md border border-border bg-background px-2 text-[11px] font-medium text-muted-foreground hover:bg-muted"
+                href={directRepoInstallLink}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open {repoFull} → Settings → Installs
+              </a>
+            ) : null}
+          </div>
+          {repoFull ? (
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              On GitHub pick <b>Only select repositories</b> → <code className="font-mono">{repoFull.split("/")[1] ?? repoFull}</code>. No need to hunt — we link directly to <code className="font-mono">{repoFull}</code>.
+            </p>
+          ) : null}
+        </>
       ) : null}
       <p className="mt-2 text-[11px] text-muted-foreground">
         After redirect you&apos;ll see Vercel CLI snippets and .env.local. Code is single-use, expires in 1h.

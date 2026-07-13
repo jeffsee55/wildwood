@@ -48,6 +48,9 @@ function githubAuth(): WildwoodAuthConfig["github"] | undefined {
   };
 }
 
+// On Vercel, org/repo are inferred from VERCEL_GIT_REPO_{OWNER,SLUG} automatically
+// via env.ts zero-config inside Wildwood core, so explicit org/repo here is optional.
+// We still leave version '1' explicit so Kit can read config.ref.
 const config = defineConfig({
   version: '1',
   collections,
