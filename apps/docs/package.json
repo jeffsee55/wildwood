@@ -12,26 +12,26 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@babel/runtime": "^7.29.2",
-    "@libsql/client": "^0.14.0",
-    "@libsql/kysely-libsql": "^0.4.1",
-    "better-auth": "^1.6.11",
-    "kysely": "^0.28.8",
-    "next": "16.2.1",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
+    "@babel/runtime": "catalog:",
+    "@libsql/client": "catalog:",
+    "@libsql/kysely-libsql": "catalog:",
+    "better-auth": "catalog:",
+    "kysely": "catalog:",
+    "next": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "wildwood": "workspace:*",
     "wildwood-kit": "workspace:*",
     "wildwood-shared": "workspace:*",
     "wildwood-store": "workspace:*"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.0",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "postcss": "8.5.8",
-    "tailwindcss": "^4.1.0",
-    "typescript": "^5"
+    "@tailwindcss/postcss": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "postcss": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:"
   }
 }

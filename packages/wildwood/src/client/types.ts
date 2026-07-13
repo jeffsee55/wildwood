@@ -4,31 +4,53 @@ import type { WhereClause, WithClause } from "@/types";
 
 // ── primitives ───────────────────────────────────────────────────────────
 
-export type StringQueryType = z.infer<typeof QuerySchema>;
+// Forward-declare shape for circular self-reference (TS7 requires explicit annotation)
+type QuerySchemaRaw = {
+  eq?: string;
+  ne?: string;
+  gt?: string;
+  gte?: string;
+  lt?: string;
+  lte?: string;
+  in?: string[];
+  notIn?: string[];
+  like?: string;
+  ilike?: string;
+  notLike?: string;
+  notIlike?: string;
+  isNull?: boolean;
+  isNotNull?: boolean;
+  OR?: QuerySchemaRaw[];
+};
 
-const QuerySchema = z
-  .object({
-    eq: z.string().optional(),
-    ne: z.string().optional(),
-    gt: z.string().optional(),
-    gte: z.string().optional(),
-    lt: z.string().optional(),
-    lte: z.string().optional(),
-    in: z.string().array().optional(),
-    notIn: z.string().array().optional(),
-    like: z.string().optional(),
-    ilike: z.string().optional(),
-    notLike: z.string().optional(),
-    notIlike: z.string().optional(),
-    isNull: z.boolean().optional(),
-    isNotNull: z.boolean().optional(),
-    get OR(): z.ZodLazy<z.ZodOptional<z.ZodArray<typeof QuerySchema>>> {
-      return z.lazy(() => z.array(QuerySchema).optional());
-    },
-  })
-  .refine((o) => Object.values(o).some((v) => v !== undefined), {
+const QuerySchemaBase: z.ZodType<QuerySchemaRaw> = z.object({
+  eq: z.string().optional(),
+  ne: z.string().optional(),
+  gt: z.string().optional(),
+  gte: z.string().optional(),
+  lt: z.string().optional(),
+  lte: z.string().optional(),
+  in: z.string().array().optional(),
+  notIn: z.string().array().optional(),
+  like: z.string().optional(),
+  ilike: z.string().optional(),
+  notLike: z.string().optional(),
+  notIlike: z.string().optional(),
+  isNull: z.boolean().optional(),
+  isNotNull: z.boolean().optional(),
+  OR: z
+    .lazy((): z.ZodType<QuerySchemaRaw[]> => z.array(QuerySchemaBase))
+    .optional() as z.ZodOptional<z.ZodType<QuerySchemaRaw[]>>,
+});
+
+const QuerySchema = QuerySchemaBase.refine(
+  (o: QuerySchemaRaw) => Object.values(o).some((v) => v !== undefined),
+  {
     message: "At least one query condition must be specified.",
-  });
+  },
+);
+
+export type StringQueryType = QuerySchemaRaw;
 
 // ── helpers ──────────────────────────────────────────────────────────────
 

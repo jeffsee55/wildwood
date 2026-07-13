@@ -5,6 +5,7 @@
     "target": "ES2022",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
+    // TS5 "bundler" is TS7 default per migration guide; keep explicit for clarity.
     "moduleResolution": "bundler",
     "strict": true,
     "skipLibCheck": true,
@@ -15,9 +16,12 @@
     "declarationMap": true,
     "sourceMap": true,
     "jsx": "react-jsx",
+    // TS7 new: these are now checked more strictly when bundler resolution.
     "verbatimModuleSyntax": false,
     "allowImportingTsExtensions": false,
     "incremental": true,
+    // TS7 removes baseUrl+paths global inference — keep in base but
+    // consumers overriding `paths` will replace, not merge.
     "paths": {
       "@/*": ["./src/*"]
     }

@@ -21,19 +21,14 @@
     "test:wildwood:watch": "turbo run test:watch --filter=wildwood"
   },
   "devDependencies": {
-    "oxfmt": "^0.18.0",
-    "oxlint": "^1.26.0",
-    "syncpack": "^13.0.0",
-    "turbo": "2.9.4",
-    "typescript": "5.5.4"
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "syncpack": "catalog:",
+    "turbo": "catalog:",
+    "typescript": "catalog:"
   },
   "packageManager": "pnpm@10.33.0",
   "pnpm": {
-    "overrides": {
-      "@tailwindcss/postcss": "4.2.2",
-      "tailwindcss": "4.2.2",
-      "postcss": "8.5.8"
-    },
     "onlyBuiltDependencies": [
       "@clerk/shared",
       "@parcel/watcher",

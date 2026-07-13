@@ -279,14 +279,14 @@
     "onFileSystem:wildwood-vfs"
   ],
   "dependencies": {
-    "tsdown": "^0.15.4",
+    "tsdown": "catalog:",
     "wildwood-shared": "workspace:*",
     "wildwood-store": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^20.11.24",
+    "@types/node": "catalog:",
     "@types/vscode": "1.109.0",
-    "typescript": "5.5.4"
+    "typescript": "catalog:"
   },
   "extensionKind": [
     "web"

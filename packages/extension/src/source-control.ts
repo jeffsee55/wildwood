@@ -269,10 +269,38 @@ export class WildwoodSourceControlProvider implements vscode.QuickDiffProvider {
             }
           }
           await this.pushIfSupported();
-          await this.doSyncAfterPush(configRef, currentRef);
+          await this.pushIfSupported(); // push is idempotent-guarded; second call is no-op after first
+          // Sync to config ref: create PR or merge, using the same flow as performSyncToConfigRef
+          const syncMessage = this._sourceControl.inputBox.value || message;
+          try {
+            const pr = await this._fs.findPrToConfigRef();
+            if (pr) {
+              await this._fs.mergeToConfigRef(syncMessage);
+            } else {
+              try {
+                const created = await this._fs.createPrToConfigRef(syncMessage);
+                this._existingPr = created;
+              } catch (err) {
+                if (this.isRemoteCapabilityError(err)) {
+                  this._prActionsSupported = false;
+                  await this._fs.mergeToConfigRef(syncMessage);
+                } else {
+                  throw err;
+                }
+              }
+            }
+          } catch (err) {
+            if (this.isPrUnsupportedError(err)) {
+              this._prActionsSupported = false;
+              await this._fs.mergeToConfigRef(syncMessage);
+            } else {
+              throw err;
+            }
+          }
         },
       );
       this._sourceControl.inputBox.value = "";
+      this._fs.invalidateConfigRefState();
       await this.refresh();
     } catch (error) {
       vscode.window.showErrorMessage(

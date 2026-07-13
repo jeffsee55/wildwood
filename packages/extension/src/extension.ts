@@ -303,7 +303,7 @@ export async function activate(context: vscode.ExtensionContext) {
         const w = globalThis.window;
         // Kit embeds the workbench in an iframe; the extension host is nested deeper.
         // parent is often the workbench frame, not the host page — use top.
-        if (w.top === w) {
+        if (!w.top || w.top === w) {
           return;
         }
         let targetOrigin = "*";

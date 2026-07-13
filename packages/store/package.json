@@ -28,12 +28,12 @@
     "format": "oxfmt ."
   },
   "dependencies": {
-    "node-diff3": "^3.2.0"
+    "node-diff3": "catalog:"
   },
   "devDependencies": {
-    "@types/diff3": "^0.0.2",
-    "tsdown": "0.18.2",
-    "typescript": "5.5.4"
+    "@types/diff3": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
   },
   "publishConfig": {
     "access": "public"
