@@ -29,7 +29,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       <body className="min-h-screen">
         {/* top rule — man header */}
         <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-          <div className="mx-auto flex h-[2.75rem] w-full max-w-[112ch] items-center justify-between gap-6 px-6 tabular-nums">
+          <div className="mx-auto flex h-11 w-full max-w-[112ch] items-center justify-between gap-6 px-6 tabular-nums">
             <div className="flex items-center gap-8">
               <Link
                 href="/"
@@ -49,7 +49,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
 
         <div className="mx-auto grid w-full max-w-[112ch] grid-cols-1 gap-0 px-6 md:grid-cols-[18rem_1fr]">
           {/* sidebar — SYNOPSIS style index */}
-          <aside className="border-border py-10 pr-8 max-md:border-b md:sticky md:top-[2.75rem] md:h-[calc(100svh-2.75rem)] md:overflow-auto md:border-r">
+          <aside className="border-border py-10 pr-8 max-md:border-b md:sticky md:top-11 md:h-[calc(100svh-2.75rem)] md:overflow-auto md:border-r">
             <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
               {nav?.label ?? "INDEX"}
             </div>
