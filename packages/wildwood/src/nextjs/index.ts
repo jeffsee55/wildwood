@@ -51,6 +51,13 @@ export {
   WILDWOOD_BRANCH_COOKIE as WILDWOOD_ROUTE_BRANCH_COOKIE,
   WILDWOOD_CACHE_TAG as WILDWOOD_ROUTE_CACHE_TAG,
   type CreateWildwoodRouteOptions,
+  type WildwoodRouteAuthOptions,
+  type WildwoodAuthenticateContext,
+  type WildwoodAuthenticateFn,
+  type WildwoodAuthorizeContext,
+  type WildwoodAuthorizeFn,
+  type WildwoodBaseURL,
+  type WildwoodTrustedOrigins,
 } from "./route";
 
 export {

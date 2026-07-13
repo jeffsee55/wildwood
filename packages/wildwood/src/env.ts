@@ -1,35 +1,12 @@
 /**
- * First-class Vercel System Env resolution for Wildwood.
+ * Explicit env resolution — no fallbacks inside wildwood.
  *
- * Goal: `defineConfig({ collections })` just works on Vercel without any
- * `WILDWOOD_*` env vars. We infer `org`, `repo`, `ref`, `origin` from
- * Vercel's System Environment Variables when available, falling back to
- * explicit `WILDWOOD_*` overrides, then to local git remote parsing.
+ * Wildwood no longer does `WILDWOOD_DOCS_DATABASE_URL || TURSO_DATABASE_URL || LIBSQL_URL`.
+ * The host app maps its env to explicit options. Wildwood only reads Vercel
+ * System Environment Variables for org/repo/origin/ref zero-config, plus optional
+ * git remote inference in dev.
  *
  * Reference: https://vercel.com/docs/environment-variables/system-environment-variables
- *
- * Priority (highest → lowest):
- *   org:
- *     1. explicit param (config.org)
- *     2. WILDWOOD_GITHUB_ORG / WILDWOOD_ORG / GITHUB_ORG
- *     3. VERCEL_GIT_REPO_OWNER (system)
- *     4. git remote.origin owner (dev only, fs read)
- *   repo:
- *     1. explicit
- *     2. WILDWOOD_GITHUB_REPO / WILDWOOD_REPO / GITHUB_REPO
- *     3. VERCEL_GIT_REPO_SLUG (system)
- *     4. git remote.origin repo
- *   ref:
- *     1. explicit
- *     2. WILDWOOD_DOCS_REF / WILDWOOD_REF / WILDWOOD_GIT_REF
- *     3. VERCEL_GIT_COMMIT_REF (branch name, e.g. "main", "feat/foo")
- *     4. VERCEL_GIT_COMMIT_SHA (pinned SHA, useful for immutable deploys)
- *     5. "main"
- *   origin / production URL:
- *     1. NEXT_PUBLIC_ORIGIN / ORIGIN / NEXT_PUBLIC_SITE_URL
- *     2. VERCEL_PROJECT_PRODUCTION_URL
- *     3. VERCEL_BRANCH_URL (preview)
- *     4. VERCEL_URL
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -52,7 +29,7 @@ function withHttps(hostOrUrl: string | undefined): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Vercel detection
+// Vercel System Env (auto-provided by Vercel, no user config needed)
 // ---------------------------------------------------------------------------
 
 export function isVercel(): boolean {
@@ -60,7 +37,7 @@ export function isVercel(): boolean {
 }
 
 export function vercelEnv(): string | undefined {
-  return trimEnv("VERCEL_ENV"); // production | preview | development
+  return trimEnv("VERCEL_ENV");
 }
 
 export type VercelSystemEnv = {
@@ -70,7 +47,7 @@ export type VercelSystemEnv = {
   deploymentId: string | undefined;
   projectId: string | undefined;
   region: string | undefined;
-  url: string | undefined; // *.vercel.app (no scheme)
+  url: string | undefined;
   branchUrl: string | undefined;
   productionUrl: string | undefined;
   git: {
@@ -84,7 +61,7 @@ export type VercelSystemEnv = {
     pullRequestId: string | undefined;
     previousSha: string | undefined;
   };
-  origin: string | undefined; // absolute https://...
+  origin: string | undefined;
 };
 
 let cachedVercelEnv: VercelSystemEnv | null = null;
@@ -96,14 +73,11 @@ export function getVercelSystemEnv(): VercelSystemEnv {
   const branchUrl = trimEnv("VERCEL_BRANCH_URL");
   const url = trimEnv("VERCEL_URL");
 
-  // NEXT_PUBLIC_ORIGIN wins over Vercel auto URLs, but we still compute the
-  // Vercel fallback so callers can use a single `origin` without wiring env.
-  const explicitOrigin =
-    trimEnv("NEXT_PUBLIC_ORIGIN") ||
-    trimEnv("ORIGIN") ||
-    trimEnv("NEXT_PUBLIC_SITE_URL") ||
-    trimEnv("SITE_URL");
-
+  // Origin resolution: explicit (legacy userland) wins, else Vercel auto URLs.
+  // Note: for auth we now prefer autodetect from Request via better-auth, so `origin`
+  // here is only for non-auth metadata (OG images, docs origin, etc) and can be omitted.
+  // NEXT_PUBLIC_ORIGIN / ORIGIN are kept for back-compat but are not required.
+  const explicitOrigin = trimEnv("NEXT_PUBLIC_ORIGIN") || trimEnv("ORIGIN");
   const fallbackOrigin = productionUrl || branchUrl || url;
   const origin = withHttps(explicitOrigin || fallbackOrigin);
 
@@ -135,23 +109,18 @@ export function getVercelSystemEnv(): VercelSystemEnv {
   return env;
 }
 
-/** Clear cached Vercel env (for tests that mutate process.env). */
 export function __resetVercelEnvCache(): void {
   cachedVercelEnv = null;
 }
 
 // ---------------------------------------------------------------------------
-// Git remote parsing (dev zero-config)
+// Git remote parsing (dev zero-config only)
 // ---------------------------------------------------------------------------
 
-export function parseGitRemoteUrl(
-  remoteUrl: string,
-): { org: string; repo: string } | null {
+export function parseGitRemoteUrl(remoteUrl: string): { org: string; repo: string } | null {
   const url = remoteUrl.trim().replace(/\.git\/?$/, "");
   if (!url) return null;
 
-  // git@github.com:owner/repo
-  // ssh://git@github.com/owner/repo
   const scpMatch = url.match(/^(?:ssh:\/\/)?(?:[^@]+@)?[^:]+[:/]([^/]+)\/([^/]+)$/);
   if (scpMatch) {
     const org = scpMatch[1]!;
@@ -159,7 +128,6 @@ export function parseGitRemoteUrl(
     if (org && repo) return { org, repo };
   }
 
-  // https://github.com/owner/repo
   try {
     const u = new URL(url.includes("://") ? url : `https://${url}`);
     const parts = u.pathname.replace(/^\/+/, "").split("/");
@@ -192,25 +160,20 @@ function readGitRemoteOrigin(): { org: string; repo: string } | null {
     const gitDir = findGitDir();
     if (!gitDir) return null;
 
-    // .git may be a file (worktree) pointing elsewhere
     let configPath = join(gitDir, "config");
     try {
       const stat = readFileSync(gitDir, "utf8");
-      // worktree: "gitdir: /path/to/main/.git/worktrees/..."
       const m = stat.match(/gitdir:\s*(.+)/);
       if (m) {
         const mainGit = m[1]!.trim();
         const mainConfig = join(mainGit, "config");
         if (existsSync(mainConfig)) configPath = mainConfig;
       }
-    } catch {
-      // gitDir is a directory, normal case
-    }
+    } catch {}
 
     if (!existsSync(configPath)) return null;
     const config = readFileSync(configPath, "utf8");
 
-    // Very small INI parser: look for [remote "origin"] then url = ...
     const lines = config.split("\n");
     let inOrigin = false;
     for (const raw of lines) {
@@ -237,10 +200,7 @@ let cachedGitRemote: { org: string; repo: string } | null | undefined;
 
 function getCachedGitRemote(): { org: string; repo: string } | null {
   if (cachedGitRemote !== undefined) return cachedGitRemote;
-  // Only attempt in non-production (dev / build) to avoid fs reads in serverless
-  // unless explicitly allowed via WILDWOOD_INFER_GIT_REMOTE=1
-  const allowInProd = trimEnv("WILDWOOD_INFER_GIT_REMOTE") === "1";
-  if (isProdRuntime() && !allowInProd) {
+  if (isProdRuntime()) {
     cachedGitRemote = null;
     return null;
   }
@@ -253,54 +213,27 @@ export function __resetGitRemoteCache(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Public resolvers
+// Public resolvers — explicit wins, then Vercel system envs, then dev git remote
+// No WILDWOOD_* / GITHUB_* fallback cascade. Host maps its env explicitly.
 // ---------------------------------------------------------------------------
 
 export function resolveOrg(explicit?: string): string | undefined {
   const e = explicit?.trim();
   if (e) return e;
-  return (
-    trimEnv("WILDWOOD_GITHUB_ORG") ||
-    trimEnv("WILDWOOD_ORG") ||
-    trimEnv("GITHUB_ORG") ||
-    trimEnv("WILDWOOD_GIT_ORG") ||
-    getVercelSystemEnv().git.owner ||
-    getCachedGitRemote()?.org ||
-    undefined
-  );
+  return getVercelSystemEnv().git.owner ?? getCachedGitRemote()?.org ?? undefined;
 }
 
 export function resolveRepo(explicit?: string): string | undefined {
   const e = explicit?.trim();
   if (e) return e;
-  return (
-    trimEnv("WILDWOOD_GITHUB_REPO") ||
-    trimEnv("WILDWOOD_REPO") ||
-    trimEnv("GITHUB_REPO") ||
-    trimEnv("WILDWOOD_GIT_REPO") ||
-    getVercelSystemEnv().git.slug ||
-    getCachedGitRemote()?.repo ||
-    undefined
-  );
+  return getVercelSystemEnv().git.slug ?? getCachedGitRemote()?.repo ?? undefined;
 }
 
 export function resolveRef(explicit?: string): string {
   const e = explicit?.trim();
   if (e) return e;
-
-  return (
-    trimEnv("WILDWOOD_DOCS_REF") ||
-    trimEnv("WILDWOOD_REF") ||
-    trimEnv("WILDWOOD_GIT_REF") ||
-    trimEnv("WILDWOOD_BRANCH") ||
-    // Vercel: prefer branch name (human-readable, works with git remote)
-    // over SHA. SHA is second choice for immutable deploys.
-    trimEnv("VERCEL_GIT_COMMIT_REF") ||
-    trimEnv("VERCEL_GIT_COMMIT_SHA") ||
-    // legacy fallback used before Vercel system envs existed
-    trimEnv("GIT_REF") ||
-    "main"
-  );
+  const v = getVercelSystemEnv().git;
+  return v.commitRef ?? v.commitSha ?? "main";
 }
 
 export function resolveOrigin(explicit?: string): string | undefined {
@@ -312,7 +245,7 @@ export function resolveOrigin(explicit?: string): string | undefined {
 export function resolveVersion(explicit?: string): string {
   const e = explicit?.trim();
   if (e) return e;
-  return trimEnv("WILDWOOD_VERSION") || "0";
+  return "0";
 }
 
 export type ResolvedWildwoodIdentity = {
@@ -341,28 +274,18 @@ export function resolveIdentity(explicit?: {
   };
 }
 
-// Convenience: throw if org/repo still missing after all fallbacks.
-// Used by `defineConfig` when the user omitted both and we are not in a
-// context where git remote inference can help.
 export function requireOrgRepo(org: string | undefined, repo: string | undefined): { org: string; repo: string } {
   if (!org || !repo) {
     const v = getVercelSystemEnv();
-    const parts: string[] = [];
-    if (v.isVercel) {
-      parts.push(
-        "On Vercel, Wildwood auto-detects org/repo from VERCEL_GIT_REPO_OWNER and VERCEL_GIT_REPO_SLUG.",
-        "Make sure System Environment Variables are enabled in your Vercel project settings (Settings → Environment Variables → Enable System Environment Variables).",
-      );
-    }
-    parts.push(
-      `Could not resolve org/repo. Explicitly pass them or set env:`,
-      `  defineConfig({ org: "your-org", repo: "your-repo", ... })`,
-      `or`,
-      `  WILDWOOD_GITHUB_ORG / WILDWOOD_GITHUB_REPO`,
-      `Received org=${JSON.stringify(org ?? "")} repo=${JSON.stringify(repo ?? "")}`,
-      `Vercel detected: ${v.isVercel ? `yes (owner=${v.git.owner ?? "∅"} slug=${v.git.slug ?? "∅"} ref=${v.git.commitRef ?? v.git.commitSha ?? "∅"})` : "no"}`,
+    throw new Error(
+      [
+        `Could not resolve org/repo.`,
+        `Pass them explicitly: defineConfig({ org: "your-org", repo: "your-repo", ... })`,
+        `On Vercel, Wildwood auto-detects from VERCEL_GIT_REPO_OWNER/SLUG — ensure System Env Vars are enabled.`,
+        `Received org=${JSON.stringify(org ?? "")} repo=${JSON.stringify(repo ?? "")}`,
+        `Vercel: ${v.isVercel ? `yes (owner=${v.git.owner ?? "∅"} slug=${v.git.slug ?? "∅"} ref=${v.git.commitRef ?? v.git.commitSha ?? "∅"})` : "no"}`,
+      ].join("\n"),
     );
-    throw new Error(parts.join("\n"));
   }
   return { org, repo };
 }

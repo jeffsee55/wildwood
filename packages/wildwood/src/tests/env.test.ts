@@ -37,13 +37,6 @@ describe("env — Vercel system env first-class", () => {
     VERCEL_GIT_COMMIT_MESSAGE: undefined,
     VERCEL_GIT_COMMIT_AUTHOR_LOGIN: undefined,
     VERCEL_GIT_PULL_REQUEST_ID: undefined,
-    WILDWOOD_GITHUB_ORG: undefined,
-    WILDWOOD_GITHUB_REPO: undefined,
-    WILDWOOD_ORG: undefined,
-    WILDWOOD_REPO: undefined,
-    WILDWOOD_DOCS_REF: undefined,
-    WILDWOOD_REF: undefined,
-    WILDWOOD_INFER_GIT_REMOTE: undefined,
     NEXT_PUBLIC_ORIGIN: undefined,
     ORIGIN: undefined,
   };
@@ -86,23 +79,13 @@ describe("env — Vercel system env first-class", () => {
     expect(resolveRef()).toBe("main");
   });
 
-  it("explicit WILDWOOD_* wins over Vercel", () => {
+  it("explicit arg wins over Vercel env", () => {
     setEnv({
       VERCEL_GIT_REPO_OWNER: "vercel",
       VERCEL_GIT_REPO_SLUG: "next.js",
-      WILDWOOD_GITHUB_ORG: "jeffsee55",
-      WILDWOOD_GITHUB_REPO: "wildwood",
-    });
-    expect(resolveOrg()).toBe("jeffsee55");
-    expect(resolveRepo()).toBe("wildwood");
-  });
-
-  it("explicit arg wins over env", () => {
-    setEnv({
-      VERCEL_GIT_REPO_OWNER: "vercel",
-      WILDWOOD_GITHUB_ORG: "jeffsee55",
     });
     expect(resolveOrg("my-explicit")).toBe("my-explicit");
+    expect(resolveRepo("my-explicit-repo")).toBe("my-explicit-repo");
   });
 
   it("resolveOrigin prefers NEXT_PUBLIC_ORIGIN then Vercel production URL", () => {

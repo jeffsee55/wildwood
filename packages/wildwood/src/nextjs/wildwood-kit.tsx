@@ -59,8 +59,11 @@ function resolveKitAuthFromEnv(wildwood?: WildwoodKitHostClient): KitAuthConfig 
     org = wildwood?._?.config?.org?.trim();
     repo = wildwood?._?.config?.repo?.trim();
   } catch {}
-  org = org || process.env.WILDWOOD_GITHUB_ORG?.trim() || process.env.WILDWOOD_ORG?.trim() || process.env.GITHUB_ORG?.trim();
-  repo = repo || process.env.WILDWOOD_GITHUB_REPO?.trim() || process.env.WILDWOOD_REPO?.trim() || process.env.GITHUB_REPO?.trim();
+  // Only canonical envs per cleanup: org/repo come from Vercel system envs or defineConfig.
+  // No WILDWOOD_GITHUB_* cascade — config already resolved them.
+  // Fallback to GITHUB_ORG/REPO only if user explicitly mapped (rare).
+  org = org || process.env.GITHUB_ORG?.trim();
+  repo = repo || process.env.GITHUB_REPO?.trim();
   const repoFull = org && repo ? `${org}/${repo}` : undefined;
   const directRepoInstallUrl = repoFull ? `https://github.com/${repoFull}/settings/installs` : undefined;
 

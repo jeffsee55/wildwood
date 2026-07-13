@@ -6,7 +6,7 @@ description: "defineConfig, remotes, database, auth, and resolution across envir
 
 # Configuration
 
-Wildwood's runtime is driven by a single `defineConfig` call plus a database and optional auth.
+Wildwood's runtime is driven by a single `defineConfig` call plus a database and optional provider/auth.
 
 ## defineConfig — zero-config on Vercel
 
@@ -36,12 +36,14 @@ Resolution order — no `WILDWOOD_*` env required on Vercel when System Envs are
 
 | Field | Priority (first wins) |
 |-------|-----------------------|
-| `org` | explicit `org` → `WILDWOOD_GITHUB_ORG` / `WILDWOOD_ORG` / `GITHUB_ORG` → `VERCEL_GIT_REPO_OWNER` (system) → git `remote.origin` owner (dev only) |
-| `repo`| explicit `repo` → `WILDWOOD_GITHUB_REPO` / `WILDWOOD_REPO` → `VERCEL_GIT_REPO_SLUG` (system) → git `remote.origin` repo |
-| `ref` | explicit `ref` → `WILDWOOD_DOCS_REF` / `WILDWOOD_REF` → `VERCEL_GIT_COMMIT_REF` (branch, e.g. `main`) → `VERCEL_GIT_COMMIT_SHA` (SHA for immutable deploys) → `"main"` |
-| `origin`| explicit `origin` → `NEXT_PUBLIC_ORIGIN` / `ORIGIN` / `NEXT_PUBLIC_SITE_URL` → `VERCEL_PROJECT_PRODUCTION_URL` → `VERCEL_BRANCH_URL` → `VERCEL_URL` |
+| `org` | explicit `org` → `VERCEL_GIT_REPO_OWNER` (system) → git `remote.origin` owner (dev only) |
+| `repo`| explicit `repo` → `VERCEL_GIT_REPO_SLUG` (system) → git `remote.origin` repo |
+| `ref` | explicit `ref` → `VERCEL_GIT_COMMIT_REF` (branch) → `VERCEL_GIT_COMMIT_SHA` (immutable) → `"main"` |
+| `origin`| explicit `origin` → `VERCEL_PROJECT_PRODUCTION_URL` → `VERCEL_BRANCH_URL` → `VERCEL_URL` |
 
-That means `defineConfig({ collections })` alone is sufficient on Vercel after you enable System Environment Variables — no custom env wiring. `WILDWOOD_*` overrides still work when you need them (self-hosted, monorepo overrides), but they are no longer required.
+That means `defineConfig({ collections })` alone is sufficient on Vercel after you enable System Environment Variables — no custom env wiring.
+
+For auth, `baseURL` / `trustedOrigins` are optional and autodetected from the incoming `Request` by better-auth. DB is NOT configured in the route — it's reused from `createClient({ database })`. GitHub sign-in is `github: true | { clientId, clientSecret }`.
 
 - `version` — string that namespaces the derived index in LibSQL. When you add a `z.filter`, change a `z.connect`, or otherwise alter indexed shape, bump `version` so wildwood re-indexes instead of serving a stale index.
 - `localPath` — absolute path to a Git checkout. When set, wildwood uses a native Git remote (reads `.git` directly). When omitted, Wildwood auto-detects by walking up from `cwd` to `.git` in dev/build; in production it falls back to GitHub remote (or DB-only when no token is set).
@@ -50,125 +52,111 @@ That means `defineConfig({ collections })` alone is sufficient on Vercel after y
 
 ## Identity resolution (no env required on Vercel)
 
-`defineConfig` now lives in `packages/wildwood/src/env.ts`. All resolution is in one place:
+`defineConfig` resolution via `packages/wildwood/src/env.ts` is explicit — no `WILDWOOD_GITHUB_*` cascade:
 
 - Explicit args win.
-- Otherwise `WILDWOOD_*` overrides (back-compat, self-host).
 - Otherwise Vercel System Envs — `VERCEL_GIT_REPO_OWNER`, `VERCEL_GIT_REPO_SLUG`, `VERCEL_GIT_COMMIT_REF` / `VERCEL_GIT_COMMIT_SHA`, `VERCEL_PROJECT_PRODUCTION_URL` / `VERCEL_BRANCH_URL` / `VERCEL_URL`.
 - Otherwise local git `remote.origin` parsing in dev (no `gh` needed).
-- `WILDWOOD_INFER_GIT_REMOTE=1` allows git remote parsing in production when you deploy outside Vercel without env.
-
-If org/repo still cannot be resolved after all fallbacks, `defineConfig` throws a helpful error that mentions enabling System Environment Variables in Vercel and the received values.
 
 ## Local path resolution
 
-Resolution order for `resolvedLocalPath` (the property the remote chooses, not the raw `localPath`):
+Resolution order for `resolvedLocalPath`:
 
 1. Explicit `localPath` from `defineConfig`.
-2. `WILDWOOD_DOCS_REPO_PATH` or `WILDWOOD_PLAYGROUND_LOCAL_ROOT` env (override for `apps/docs` or `apps/play`).
+2. `WILDWOOD_LOCAL_PATH` env override (for monorepo / CI).
 3. Auto-detection: walk up from `process.cwd()` up to 12 directories looking for `.git`.
-4. In production (`NODE_ENV=production`, not `phase-production-build`), auto-detection is disabled unless `WILDWOOD_DOCS_SOURCE=local` forces it.
-5. If nothing found — undefined, which means "use GitHub remote."
+4. In production, auto-detection disabled unless `WILDWOOD_SOURCE=local` forces it.
+5. If nothing found — undefined → "use GitHub remote."
 
 ## Database
 
-`createClient` requires a LibSQL client:
+`createClient` requires a LibSQL client. This is the ONLY place DB URL is configured — auth reuses it.
 
 ```ts
 import { createClient as libsql } from "@libsql/client";
-import { createClient } from "wildwood";
+import { createClient, defineConfig } from "wildwood";
 
+const config = defineConfig({ collections, version: "1" });
+
+// Host maps env explicitly — Turso integration is canonical on Vercel
 const database = libsql({
-  url: process.env.WILDWOOD_DATABASE_URL || "file:./wildwood.db",
-  authToken: process.env.WILDWOOD_DATABASE_AUTH_TOKEN || "",
+  url: process.env.TURSO_DATABASE_URL!,
+  authToken: process.env.TURSO_AUTH_TOKEN,
 });
 
-const wildwood = createClient({ config, database, auth });
+export const wildwood = createClient({
+  config,
+  database,
+  provider: { github: { type: "app", app: { appId, privateKey } } },
+});
 ```
 
-During `next build` (which has the checkout), `findMany` / `findFirst` cold-cache into `LibsqlDatabase` via `git.switch` → `writeEntries` (tree traversal → blob parse → `config.index` into `filters` / `entries` / `connections` tables). That DB can then be copied to Turso (`process.env.WILDWOOD_DOCS_DATABASE_URL`) for production. When Vercel builds with `VERCEL_GIT_COMMIT_SHA`, `WILDWOOD_DOCS_REF` is set to that SHA so queries are pinned.
+Build indexes locally then syncs Turso for prod. `VERCEL_GIT_COMMIT_SHA` pins queries.
 
-## Auth
+## Auth — `authenticate` vs `authorize`, providers, and zero-duplication
 
-Auth is optional. Pass `auth` to `createClient` when you need it:
+Wildwood's Next.js route owns better-auth. No `database` field — auth tables live in the same Turso DB as content.
 
 ```ts
-import type { WildwoodAuthConfig } from "wildwood";
-
-const auth: WildwoodAuthConfig = {
-  github: {
-    type: "app",
-    app: {
-      appId: process.env.GITHUB_APP_ID!,
-      privateKey: process.env.GITHUB_PRIVATE_KEY!,
-      installationId: process.env.GITHUB_APP_INSTALLATION_ID, // optional optimization
-    },
+// lib/wildwood.ts — git creds (single source of truth for App auth)
+export const wildwood = createClient({
+  config,
+  database, // Turso
+  provider: { // preferred name; `auth` still works as alias
+    github: { type: "app", app: { appId: process.env.GITHUB_APP_ID!, privateKey: process.env.GITHUB_PRIVATE_KEY! } },
+    authorize: () => true,
   },
-  // Optional: better-auth passthrough or custom getUser
-  betterAuth: authInstance, // Tr33BetterAuthLike
-  // getUser?: (req) => Promise<WildwoodAuthUser | null>,
-  // authorize?: (ctx) => boolean | void | Response | Promise<...>
-};
+});
 
-const wildwood = createClient({ config, database, auth });
+// app/api/[...path]/route.ts — sign-in, reuses same App
+export const { GET, POST, ... } = createWildwoodRoute(() => wildwood, {
+  auth: {
+    secret: process.env.BETTER_AUTH_SECRET!,
+    github: true, // ← true = enable GitHub OAuth, reuse App's GITHUB_CLIENT_ID/SECRET
+    // or explicit if sign-in creds differ: github: { clientId, clientSecret }
+
+    authenticate: async ({ user }) => allowList.has(user.email?.toLowerCase() ?? ""),
+    authorize: async ({ user, action }) => !!user,
+  },
+});
 ```
 
-- `github.type = "app"` — installation token flow for reads and writes against the GitHub API.
-- `github.type = "token"` / `"default"` — PAT or unauthenticated fallthrough (legacy / tokens).
-- `betterAuth` / `getUser` — resolve the request actor (`WildwoodAuthUser`). `getUser` takes precedence over `betterAuth`.
-- `authorize(ctx)` — gate for git actions. Context has `action` (discriminated: `git.commit`, `git.push`, `git.createBranch` …), `config`, `request`, and `user`. Return `false` to deny, a `Response` to customize denial, or `true`/void to allow. The H3 route layer (`git-service` router) calls this via `authorizeGitAction`.
+- `github: boolean | { clientId, clientSecret }` — `true` enables OAuth and reuses the App creds already configured for git (via `provider.github` / manifest conversion). No separate `WILDWOOD_GITHUB_*` or `GITHUB_TOKEN` needed in userland.
+- Future: `providers: { gitlab: true }`, `google`, etc — `auth` → `provider` rename in `createClient` is forward-compatible; `auth` remains as deprecated alias for one minor.
+- `baseURL` / `trustedOrigins` omitted → autodetected from Request (works for localhost, `*.vercel.app`, custom domains).
+- `authenticate` = who may create a session? (sign-in gate) vs `authorize` = what may they do? (action gate). `authenticate` replaces `allowedEmails`.
 
-For docs app hosting, the public env slugs are `GITHUB_APP_SLUG` / `GITHUB_APP_NAME` (UI install links only, never for signing). Private signing material stays in `GITHUB_APP_ID` / `GITHUB_PRIVATE_KEY`.
+For client layer (`createClient({ provider })`), `provider.github` = GitHub App / PAT for remote, `provider.authorize` gates git actions.
 
 ## Env overview
 
-### Required — none on Vercel with System Envs
+### Canonical env set — only these should exist (per your cleanup)
 
-When `VERCEL=true` (System Environment Variables enabled), `defineConfig({ collections })` auto-detects:
-
-- `org` from `VERCEL_GIT_REPO_OWNER`
-- `repo` from `VERCEL_GIT_REPO_SLUG`
-- `ref` from `VERCEL_GIT_COMMIT_REF` → `VERCEL_GIT_COMMIT_SHA`
-- `origin` from `VERCEL_PROJECT_PRODUCTION_URL` → `VERCEL_BRANCH_URL` → `VERCEL_URL`
-
-In local dev, `org`/`repo` are auto-detected from `git remote.origin` (no `gh` CLI), and `ref` defaults to `main`.
-
-### Optional — overrides and self-host
+When Vercel Turso + GitHub App manifest are configured:
 
 ```
-# Overrides (highest priority when set) — back-compat, self-host, monorepo:
-WILDWOOD_GITHUB_ORG=jeffsee55        # or WILDWOOD_ORG / GITHUB_ORG
-WILDWOOD_GITHUB_REPO=wildwood         # or WILDWOOD_REPO / GITHUB_REPO
-WILDWOOD_DOCS_REF=main                # or WILDWOOD_REF / WILDWOOD_BRANCH
-WILDWOOD_VERSION=1
-WILDWOOD_INFER_GIT_REMOTE=1           # allow git remote parsing in prod (non-Vercel)
-
-# Origin (for absolute URLs, manifests, OG images):
-NEXT_PUBLIC_ORIGIN=https://wildwood.dev
-# or ORIGIN / NEXT_PUBLIC_SITE_URL / SITE_URL / Vercel auto URLs
-
-# Database — Turso via marketplace (preferred) or libsql://
-# No env needed for local file DB in dev:
-WILDWOOD_DOCS_DATABASE_URL=           # libsql://.. for Turso, or file:./wildwood.db
-WILDWOOD_DOCS_DATABASE_AUTH_TOKEN=
-TURSO_DATABASE_URL=                   # auto-injected by `vercel integration add tursocloud/database`
+# From Turso marketplace — auto-injected, canonical DB source:
+TURSO_DATABASE_URL=
 TURSO_AUTH_TOKEN=
 
-# GitHub App (required only for live edits via toolbar)
+# From GitHub App manifest conversion — single App gives both git + OAuth:
 GITHUB_APP_ID=
 GITHUB_PRIVATE_KEY=
-GITHUB_APP_INSTALLATION_ID=  # optional optimization
-GITHUB_APP_SLUG=             # public install prompt UI (safe to expose)
-GITHUB_APP_NAME=Wildwood
+GITHUB_CLIENT_ID=            # OAuth pair from same App — used when route has `github: true`
+GITHUB_CLIENT_SECRET=
+GITHUB_APP_SLUG=              # public install prompt
+GITHUB_APP_INSTALLATION_ID=   # optional optimization
 
-# Dev engine selection:
-WILDWOOD_DOCS_SOURCE=local|github     # override auto-detection
+# Your own secret for better-auth cookie signing:
+BETTER_AUTH_SECRET=           # openssl rand -base64 32
+
+# Who may sign in — parsed in YOUR `authenticate`, not by wildwood:
+ALLOWED_EMAILS=you@example.com,other@example.com
 ```
 
-### What this repo's docs app actually needs
+What was removed:
 
-- Local dev: nothing — `defineConfig({ collections })` reads git remote.
-- Vercel preview/prod (read-only): `TURSO_*` (auto from integration) + enable System Envs. That's it.
-- Vercel with edits: add `GITHUB_APP_*` (created post-deploy from the toolbar's setup flow).
-
-Next: [Schemas](./schemas.md) for the full collection/schema surface, then [Querying](./querying.md).
+- `WILDWOOD_GITHUB_ORG` / `WILDWOOD_GITHUB_REPO` / `WILDWOOD_DOCS_*` — use `defineConfig({ org, repo })` or Vercel System Envs.
+- `WILDWOOD_DOCS_DATABASE_URL` / `LIBSQL_URL` fallback cascade — host maps `TURSO_DATABASE_URL` once in `lib/wildwood.ts`.
+- `GITHUB_TOKEN` env fallback inside wildwood — pass explicitly via `provider: { github: { type: "token", token } }` if needed; dev `gh auth login` still works for zero-config local.
+- `database:` inside `createWildwoodRoute({ auth })` — reused from client.

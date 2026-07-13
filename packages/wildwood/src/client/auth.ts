@@ -40,7 +40,9 @@ export type WildwoodAuthAction =
   | { type: "git.push"; ref: string }
   | { type: "git.pull"; ref: string }
   | { type: "git.merge"; ref: string; message?: string }
-  | { type: "git.createPr"; ref: string; title?: string; body?: string };
+  | { type: "git.createPr"; ref: string; title?: string; body?: string }
+  | { type: "content.update"; path: string }
+  | { type: "content.delete"; path: string };
 
 export type WildwoodAuthorizeContext = {
   action: WildwoodAuthAction;
@@ -57,8 +59,10 @@ export type WildwoodBetterAuthLike = {
 
 export type WildwoodAuthConfig = {
   /**
-   * Credentials used by Wildwood's GitHub remote. `app` uses installation tokens
-   * for reads/writes. `default` preserves the old env/gh-token behavior.
+   * Git provider credentials used by Wildwood's remote.
+   * `app` = GitHub App (installation tokens), `token` = PAT, `default` = env/gh CLI.
+   * This is where GITHUB_APP_ID/PRIVATE_KEY live — the route's `auth.github`
+   * boolean can reuse these same creds for OAuth sign-in (no duplicate config).
    */
   github?: WildwoodGitHubAuth;
   /**
@@ -77,6 +81,24 @@ export type WildwoodAuthConfig = {
     context: WildwoodAuthorizeContext,
   ) => boolean | void | Response | Promise<boolean | void | Response>;
 };
+
+/**
+ * New `provider` shape for `createClient` — preferred over `auth`.
+ * `auth` remains as deprecated alias for one minor.
+ *
+ * Eventually: `{ github?: GitHubAuth, gitlab?: GitLabAuth, ... }`.
+ * Git operations use `provider.github`; sign-in reuses same when
+ * `route: { auth: { github: true } }`.
+ */
+export type WildwoodProviderConfig = {
+  github?: WildwoodGitHubAuth;
+  // future: gitlab?: ..., google?: ...
+  authorize?: WildwoodAuthConfig["authorize"];
+  betterAuth?: WildwoodAuthConfig["betterAuth"];
+  getUser?: WildwoodAuthConfig["getUser"];
+};
+
+export type WildwoodClientAuthInput = WildwoodAuthConfig | WildwoodProviderConfig;
 
 export function userFromUnknownSession(session: unknown): WildwoodAuthUser | null {
   if (!session || typeof session !== "object") {

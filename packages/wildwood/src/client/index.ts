@@ -1,5 +1,9 @@
 import type { Client as LibsqlClient } from "@libsql/client";
-import type { WildwoodAuthConfig } from "@/client/auth";
+import type {
+  WildwoodAuthConfig,
+  WildwoodClientAuthInput,
+  WildwoodProviderConfig,
+} from "@/client/auth";
 import type { AnyCollections, Config } from "@/client/config";
 import type { OrmConfig } from "@/client/types";
 import { Git } from "@/git/git";
@@ -15,13 +19,22 @@ import type { FindWorktreeEntriesArgs } from "@/types";
  * without being erased by `dist` declaration emit. Previously `C extends Config<ConfigInput>`
  * where `ConfigInput["collections"]` was `Record<string, Collection>` with
  * `Collection["schema"] = ZodCodec<ZodString, ZodObject>` lost inner shape → `with` became `never`.
+ *
+ * `provider` is the new preferred name for `auth` — `provider.github` holds the
+ * GitHub App creds used by GitHubRemote. Route-level `createWildwoodRoute({ auth: { github: true } })`
+ * reuses those same creds for OAuth sign-in (no duplicate env mapping). `auth` is still accepted as
+ * deprecated alias.
  */
 export const createClient = <Colls extends AnyCollections>(args: {
   auth?: WildwoodAuthConfig;
+  provider?: WildwoodProviderConfig;
   config: Config<Colls>;
   database: LibsqlClient;
 }) => {
-  const { auth, config, database } = args;
+  // provider is preferred; auth is deprecated alias — both map to same internal shape
+  const rawAuth = (args.provider ?? args.auth) as WildwoodClientAuthInput | undefined;
+  const auth: WildwoodAuthConfig | undefined = rawAuth as WildwoodAuthConfig | undefined;
+  const { config, database } = args;
   if (!database) {
     throw new Error(
       "createClient requires a LibSQL database client. Pass createClient({ config, database }).",
@@ -56,6 +69,8 @@ export const createClient = <Colls extends AnyCollections>(args: {
     _: {
       config,
       auth,
+      /** preferred — `auth` is deprecated alias */
+      provider: auth,
       git,
       logger: new Logger({ name: "something" }),
       db,

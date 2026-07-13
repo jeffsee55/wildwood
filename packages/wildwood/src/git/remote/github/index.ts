@@ -40,37 +40,38 @@ function inferVercelOidcContext(): string {
 }
 
 function getGitHubToken(): string {
-  if (process.env.GITHUB_TOKEN) {
-    return process.env.GITHUB_TOKEN;
-  }
-
-  // In production (Vercel, etc) `gh` CLI never exists.
-  // Don't spawn at runtime — go straight to the installable error, with Vercel hints.
+  // No env fallback cascade. Host maps GITHUB_TOKEN explicitly if it wants PAT:
+  // `provider: { github: { type: "token", token: process.env.GITHUB_TOKEN! } }`.
+  // We keep gh CLI only for local dev zero-config; prod must pass creds explicitly.
+  // GITHUB_TOKEN env read is kept only as dev convenience — not part of the Turso + GitHub App
+  // canonical env set you listed (GITHUB_CLIENT_SECRET, GITHUB_PRIVATE_KEY, etc).
   if (isProdRuntime()) {
     const hint = inferVercelOidcContext();
     throw new Error(
       "Failed to get GitHub token. In production there is no `gh` CLI — " +
-        "set GITHUB_TOKEN (PAT) or GITHUB_APP_ID + GITHUB_PRIVATE_KEY + GITHUB_APP_INSTALLATION_ID. " +
+        "pass `provider: { github: { type: \"app\", app: { appId, privateKey } } }` " +
+        "via createClient (preferred, will become `provider`) or PAT via `provider: { github: { type: \"token\" } }`. " +
         (hint ? hint + " " : "") +
-        "For read-only docs, ensure the database (Turso/LibSQL) is populated at build time so no GitHub fetch is needed at runtime.",
+        "For read-only docs, ensure the Turso DB (TURSO_DATABASE_URL/_TOKEN) is populated at build time so no GitHub fetch is needed at runtime.",
     );
   }
+
+  // Dev only — allow GITHUB_TOKEN env if host set it and forwarded intention via explicit mapping.
+  // But if they set it, they should also pass provider.github explicitly.
+  // Keep for backward compat in dev.
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
 
   try {
     const token = execSync("gh auth token", {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
     }).trim();
-
-    if (!token) {
-      throw new Error("gh auth token returned empty result");
-    }
-
+    if (!token) throw new Error("gh auth token returned empty result");
     return token;
   } catch (error) {
     const hint = inferVercelOidcContext();
     throw new Error(
-      "Failed to get GitHub token. Either set GITHUB_TOKEN env var or authenticate with `gh auth login`." +
+      "Failed to get GitHub token. Either pass provider explicitly or `gh auth login`." +
         (hint ? `\n${hint}` : "") +
         `\nOriginal error: ${error instanceof Error ? error.message : String(error)}`,
     );
@@ -90,6 +91,10 @@ export class GitHubRemote extends Remote {
     super(baseArgs);
     this.owner = this.config.org;
     this.repo = this.config.repo;
+  }
+
+  override hasCredentials(): boolean {
+    return Boolean(this.auth?.github);
   }
 
   private async getGitHubClient(): Promise<{

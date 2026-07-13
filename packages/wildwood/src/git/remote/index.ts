@@ -66,6 +66,11 @@ export abstract class Remote {
     this.auth = args.auth;
   }
 
+  /** Whether this remote has enough credentials to fetch without local git. Used for error hinting only. */
+  hasCredentials?(): boolean {
+    return Boolean(this.auth?.github);
+  }
+
   abstract listBranches(): Promise<string[]>;
 
   abstract fetchCommit(

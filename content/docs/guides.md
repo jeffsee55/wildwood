@@ -45,9 +45,8 @@ const nav = z.collection({
 export const collections = { authors, docs, nav } as const;
 
 export const config = defineConfig({
-  org: "jeffsee55",
-  repo: "wildwood",
-  ref: "main",
+  // org/repo/ref/origin omitted — auto-resolved from VERCEL_GIT_* / git remote / defaults
+  // No WILDWOOD_GITHUB_ORG / WILDWOOD_GITHUB_REPO fallback cascade.
   version: "docs-0",
   collections,
 });
@@ -93,7 +92,7 @@ No generic find types are exposed via a `Doc` interface file; everything inferre
 
 ```ts
 // apps/docs/app/api/[...path]/route.ts
-import { createWildwoodRoute } from "wildwood"nextjs/route";
+import { createWildwoodRoute } from "wildwood/nextjs/route";
 import { wildwood } from "@/lib/wildwood";
 
 export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createWildwoodRoute(
@@ -106,7 +105,7 @@ That is the full wiring. `createWildwoodRoute` is Next-specific and lazy-initial
 
 - `GET/POST /api/wildwood/draft?branch=<ref>` and `?disable=1` (and legacy `/api/draft` alias) → `draftMode().enable()/disable()` + canonical branch cookie.
 - `GET/POST /api/wildwood/preview` and legacy `/preview/exit` → clears cookies + disables draft.
-- On `/git/create-branch` and `/git/switch-branch` responses, sets canonical branch cookie `x-tr33-branch` (decodes from returned `{ref}` or request `name` on create) and merges upstream `Set-Cookie` headers removed/replaced.
+- On `/git/create-branch` and `/git/switch-branch` responses, sets canonical branch cookie `x-wildwood-branch` (decodes from returned `{ref}` or request `name` on create) and merges upstream `Set-Cookie` headers removed/replaced.
 - On mutations (`commit | discard | merge | pull | create-branch | switch-branch`, customizable via `mutationRe`) calls `revalidateTag(tagName, store)` so `"use cache"` boundaries refresh.
 - No `revalidateTag` on draft enter/exit — draft is per-user bypass (`__prerender_bypass`), purging would invalidate everyone else.
 
@@ -114,19 +113,40 @@ If you manage cookies elsewhere (middleware, custom path), you can avoid `create
 
 ### Client singleton
 
-`apps/docs/lib/wildwood.ts` owns the top-level singleton:
+`apps/docs/lib/wildwood.ts` owns the top-level singleton — explicit env mapping, no fallbacks inside wildwood:
 
 ```ts
 import { createClient as libsql } from "@libsql/client";
 import { createClient } from "wildwood";
 
 const database = libsql({
-  url: process.env.WILDWOOD_DOCS_DATABASE_URL || "file:./tr33-docs.db",
-  authToken: process.env.WILDWOOD_DOCS_DATABASE_AUTH_TOKEN || "",
+  url: process.env.TURSO_DATABASE_URL || "file:./wildwood.db",
+  authToken: process.env.TURSO_AUTH_TOKEN || "",
 });
-// auth optional — only when GitHub App or allow-list needed
-export const wildwood = createClient({ config, database, auth? });
+// auth optional — explicit, no WILDWOOD_* fallbacks
+export const wildwood = createClient({ config, database, auth });
 ```
+
+Route owns auth with explicit mapping + autodetect for origin:
+
+```ts
+// app/api/[...path]/route.ts
+createWildwoodRoute(() => wildwood, {
+  auth: {
+    database: { url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN },
+    secret: process.env.BETTER_AUTH_SECRET,
+    // baseURL / trustedOrigins omitted → autodetected from Request — no NEXT_PUBLIC_ORIGIN needed
+    github: { clientId: process.env.GITHUB_CLIENT_ID!, clientSecret: process.env.GITHUB_CLIENT_SECRET! },
+    authenticate: async ({ user }) =>
+      ["you@example.com"].includes(user.email?.toLowerCase() ?? ""),
+    authorize: async ({ user }) => !!user,
+  },
+});
+```
+
+- `authenticate` = sign-in/sign-up gate (not distinguished; inspect `provider` if you ever need different rules).
+- `authorize`    = per-action gate (git, content).
+- No `allowedEmails` array or `NEXT_PUBLIC_ORIGIN` / `BETTER_AUTH_TRUSTED_ORIGINS` env fallbacks inside wildwood — that's userland callback + Request autodetect.
 
 No `getDocsTr33()` getter needed. Core factory stays pure — app owns the one singleton; Next reuses the module across requests. `createClient` self-heals via `findMany → switch → index` on cold cache.
 
@@ -134,7 +154,7 @@ No `getDocsTr33()` getter needed. Core factory stays pure — app owns the one s
 
 ```tsx
 // inlined auth — just check an env var, no extra module
-import { Toolbar } from "wildwood"nextjs/kit";
+import { Toolbar } from "wildwood/nextjs/kit";
 import { wildwood } from "@/lib/wildwood";
 
 export function DocsLayout({ children }) {
@@ -142,7 +162,7 @@ export function DocsLayout({ children }) {
     <html>
       <body>
         {children}
-        <Toolbar wildwood={tr33} apiBase="/api" />
+        <Toolbar wildwood={wildwood} apiBase="/api" />
       </body>
     </html>
   );
@@ -158,7 +178,7 @@ export function DocsLayout({ children }) {
 // POST /api/git/switch-branch { ref }
 or
 // POST /api/git/create-branch { name, baseRef }
-// Host's response path Sets cookie Set-Cookie: x-tr33-branch=<branch> and revalidates docs-content.
+// Host's response path Sets cookie Set-Cookie: x-wildwood-branch=<branch> and revalidates docs-content.
 // Client soft-refresh via startTransition+router.refresh() coalesced 800ms (Set-Cookie commit race guard).
 
 // Exit Preview button inside Kit
@@ -182,26 +202,30 @@ const main    = await wildwood.docs.findMany({ ref: "main" });
 const feature = await wildwood.docs.findMany({ ref: "feature/rewrite" });
 ```
 
-### Guard mutations (authorize)
+### Guard mutations (authenticate vs authorize)
 
-`auth.authorize` in `createClient({ auth: { github, authorize } })` is called by the git-service router. Return `true` to allow, `false` or a custom `Response` to block.
+`authenticate` gates who may have a session at all (sign-in + sign-up, not distinguished):
 
 ```ts
-const wildwood = createClient({
-  config, database,
-  auth: {
-    github: { type:"app", app:{ appId, privateKey } },
-    betterAuth: betterAuthInstance,
-    authorize(ctx) {
-      // prevent pushes from non-editors, allow branch creation for editors etc.
-      if (ctx.action.type === "git.push" && !isEditor(ctx.user)) return false;
-      return true;
-    },
-  },
-});
+authenticate: async ({ user, request, provider }) => {
+  // userland allow-list — no ALLOWED_EMAILS split inside wildwood
+  const allow = ["you@example.com", "teammate@example.com"];
+  if (provider === "github") return allow.includes(user.email?.toLowerCase() ?? "");
+  return !!user.email;
+}
 ```
 
-Caller actor is resolved via `betterAuth` (session via `api.getSession`) or custom `getUser(req)`.
+`authorize` gates what a signed-in user may do. `createClient({ auth: { github, authorize } })` is the low-level client gate; `createWildwoodRoute({ auth: { authenticate, authorize } })` is the Next route gate that also enforces `authenticate` on github/git endpoints + capabilities preflight:
+
+```ts
+authorize: async ({ user, action }) => {
+  if (action.type === "content.update" && action.path === "docs/intro.md") return false;
+  if (action.type === "git.commit" && action.ref === "main") return !!user;
+  return true;
+}
+```
+
+Caller actor is resolved via `authenticate` → session via `better-auth` `api.getSession` or custom `getUser(req)`. `getUser` takes precedence when you supply it.
 
 ### Dark mode
 
@@ -242,10 +266,10 @@ const docs = navRes.items[0]?.children ?? [];
 
 ### Deploying
 
-- Use `WILDWOOD_DOCS_DATABASE_URL=libsql://...` Turso on Vercel (or `file:` relative only in preview/dev).
-- In build, `.git` present → `NativeRemote` indexes to that Turso (build prefetch).
-- Runtime on Vercel has no `.git` → reads only Turso. Cold miss fails fast with actionable message vs cryptic `Missing schema`.
-- `.env.example` in repo root lists full contract: `WILDWOOD_GITHUB_ORG/REPO`, `WILDWOOD_DOCS_REF`(or `VERCEL_GIT_COMMIT_SHA`), `TR33_DOCS_DATABASE_{URL,AUTH_TOKEN}`, `GITHUB_APP_*`, `WILDWOOD_DOCS_SOURCE` override.
+- `TURSO_DATABASE_URL=libsql://…` via Vercel marketplace — canonical. No `WILDWOOD_DOCS_DATABASE_URL` / `LIBSQL_URL` fallback inside wildwood; host maps env explicitly. `file:` fallback only local dev.
+- In build, `.git` present → `NativeRemote` indexes to Turso (prefetch). Runtime on Vercel has no `.git` → reads Turso. Cold miss fails fast.
+- Auth: `BETTER_AUTH_SECRET` + `GITHUB_CLIENT_ID/SECRET` (same App = OAuth + git) + `authenticate` callback (replaces `allowedEmails`). `baseURL` / `trustedOrigins` omitted → autodetected from Request — no `NEXT_PUBLIC_ORIGIN` / `BETTER_AUTH_TRUSTED_ORIGINS` env needed.
+- `.env.example` lists: `TURSO_*`, `GITHUB_APP_*` 5-var single set, `BETTER_AUTH_SECRET`, `ALLOWED_EMAILS` (parsed in YOUR `authenticate`, not wildwood) — no `WILDWOOD_GITHUB_ORG/REPO` or `WILDWOOD_DOCS_REF` fallbacks; pass explicit `org`/`repo`/`ref` in `defineConfig` if you need override.
 
 ## 6. Common failures
 

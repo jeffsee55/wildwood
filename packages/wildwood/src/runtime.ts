@@ -21,7 +21,9 @@ export function isProdRuntime(): boolean {
 
 export function shouldAutoUseLocal(): boolean {
   if (isProdRuntime()) return false;
-  if (process.env.WILDWOOD_DOCS_SOURCE === "github") return false;
-  if (process.env.WILDWOOD_DOCS_SOURCE === "local") return true;
+  // Single env to force GitHub remote in dev (e.g. when testing GitHubRemote locally).
+  // No fallback cascade — set explicitly if you need it.
+  if (process.env.WILDWOOD_SOURCE === "github") return false;
+  if (process.env.WILDWOOD_SOURCE === "local") return true;
   return true;
 }

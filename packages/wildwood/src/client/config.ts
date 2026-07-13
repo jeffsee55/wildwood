@@ -19,10 +19,7 @@ import { zodVisitor } from "@/zod/visitor";
  * or null. Used when `localPath` is omitted for zero-config dev.
  */
 export function resolveLocalGitRoot(start = process.cwd()): string | null {
-  const override =
-    process.env.WILDWOOD_DOCS_REPO_PATH?.trim() ||
-    process.env.WILDWOOD_PLAYGROUND_LOCAL_ROOT?.trim() ||
-    "";
+  const override = process.env[WILDWOOD_LOCAL_PATH_ENV]?.trim() || "";
   if (override) {
     const abs = isAbsolute(override) ? normalize(override) : resolve(start, override);
     return existsSync(abs) ? abs : null;
@@ -97,6 +94,10 @@ export const collectionSchema = z.object({
   basePath: z.string().optional(),
   schema: z.custom<z.core.$ZodType>(),
 });
+
+// Local path resolution override — single env name for explicit local repo root.
+// No fallback cascade. If you don't set it, we auto-detect .git in dev.
+const WILDWOOD_LOCAL_PATH_ENV = "WILDWOOD_LOCAL_PATH";
 
 // TS-level collection – schema is any Zod type so literals are preserved via `T`.
 export type Collection = {

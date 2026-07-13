@@ -16,8 +16,8 @@ export default defineConfig([
       "src/nextjs/draft.ts",
       "src/nextjs/kit.ts",
       "src/nextjs/resolve-active-ref.ts",
-      // isolated — has heavy / native deps, must not be imported by docs
-      "src/nextjs/play-auth.ts",
+      // internal — lazy-loaded by route.ts for /api/auth/*, not a public entrypoint
+      "src/nextjs/auth.ts",
       "src/react/index.tsx",
       "src/react/markdown.tsx",
     ],

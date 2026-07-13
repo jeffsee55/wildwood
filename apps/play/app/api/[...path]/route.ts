@@ -1,81 +1,39 @@
-import {
-  activeRefSetCookieHeader,
-  cookiesFromCookieHeader,
-  handle,
-} from "wildwood/nextjs";
-
+import { createWildwoodRoute } from "wildwood/nextjs/route";
 import { getPlaygroundWildwood } from "@/lib/wildwood";
+import { cookiesFromCookieHeader } from "wildwood/nextjs/branch";
 
 /**
- * Play reuses the same `wildwood-active-ref` cookie name for consistency with docs.
- * You can pick any cookie — active-ref lives entirely in host app glue now.
+ * Single route for play — request-aware because org/repo comes from config cookie.
+ *
+ * New API:
+ * - DB is NOT configured here — auth reuses the DB from `getPlaygroundWildwood()` / wildwood client.
+ * - `github: true` enables OAuth via same App; creds from GITHUB_CLIENT_ID/SECRET (same App as git).
+ * - `baseURL`/`trustedOrigins` omitted → autodetected from Request.
+ * - No WILDWOOD_GITHUB_* / TURSO_* fallbacks here — host maps in lib/wildwood.ts only.
  */
-const REVALIDATE_HINT = "playground-content" as const;
-void REVALIDATE_HINT;
+export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createWildwoodRoute(
+  (req?: Request) => {
+    const cookieHeader = req?.headers.get("cookie") ?? null;
+    return getPlaygroundWildwood(cookiesFromCookieHeader(cookieHeader));
+  },
+  {
+    requestAware: true,
+    auth: {
+      secret: process.env.BETTER_AUTH_SECRET,
+      github: true,
 
-async function wildwoodHandlerFor(request: Request): Promise<Response> {
-  const url = new URL(request.url);
-  const pathname = url.pathname;
-
-  // Exit preview — clear the cookie on our side
-  if (request.method === "POST" && pathname.endsWith("/wildwood/preview")) {
-    // NextResponse not available from pure H3, so we craft a redirect-style response
-    // that the browser will accept for cookie clearing. Host should delete its own cookie.
-    return new Response(JSON.stringify({ ok: true }), {
-      headers: {
-        "content-type": "application/json",
-        "Set-Cookie": `${"wildwood-active-ref"}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
+      authenticate: async ({ user }) => {
+        const raw = process.env.ALLOWED_EMAILS ?? "";
+        const allow = raw
+          .split(",")
+          .map((s) => s.trim().toLowerCase())
+          .filter(Boolean);
+        if (allow.length === 0) {
+          if (process.env.NODE_ENV === "production") return false;
+          return !!user.email;
+        }
+        return allow.includes(user.email?.toLowerCase() ?? "");
       },
-    });
-  }
-
-  const wildwood = getPlaygroundWildwood(cookiesFromCookieHeader(request.headers.get("cookie")));
-  const api = handle(wildwood);
-
-  let createBranchNameFromRequest: string | undefined;
-  if (request.method === "POST" && /\/git\/create-branch\/?$/.test(pathname)) {
-    try {
-      const b = (await request.clone().json()) as { name?: string };
-      const n = typeof b.name === "string" ? b.name.trim() : "";
-      if (n) createBranchNameFromRequest = n;
-    } catch {}
-  }
-
-  const upstream = await api(request);
-
-  // Track branch name for Set-Cookie after success
-  let branch: string | undefined;
-  if (request.method === "POST" && /\/git\/create-branch\/?$/.test(pathname)) {
-    if (createBranchNameFromRequest) branch = createBranchNameFromRequest;
-    else {
-      try {
-        const data = (await upstream.clone().json()) as { ref?: string };
-        if (typeof data.ref === "string" && data.ref.trim()) branch = data.ref.trim();
-      } catch {}
-    }
-  } else if (request.method === "POST" && /\/git\/switch-branch\/?$/.test(pathname)) {
-    try {
-      const data = (await upstream.clone().json()) as { ref?: string };
-      if (typeof data.ref === "string" && data.ref.trim()) branch = data.ref.trim();
-    } catch {}
-  } else {
-    return upstream;
-  }
-
-  if (!branch) return upstream;
-
-  const headers = new Headers(upstream.headers);
-  headers.delete("set-cookie");
-  headers.append("Set-Cookie", activeRefSetCookieHeader(branch));
-  return new Response(upstream.body, {
-    status: upstream.status,
-    statusText: upstream.statusText,
-    headers,
-  });
-}
-
-export const GET = wildwoodHandlerFor;
-export const HEAD = wildwoodHandlerFor;
-export const OPTIONS = wildwoodHandlerFor;
-/** Git mutations and other Wildwood APIs use POST; Next only forwards exported methods. */
-export const POST = wildwoodHandlerFor;
+    },
+  },
+);

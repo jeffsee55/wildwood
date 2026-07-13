@@ -1,11 +1,10 @@
 import { type PlaygroundConfig } from "./playground-config";
-import {
-  playDebug,
-  playFailureHeadline,
-  playInfo,
-} from "./playground-log";
-import { playgroundDatabaseUrl } from "./playground-database-url";
+import { playDebug, playFailureHeadline, playInfo } from "./playground-log";
 import { buildPlaygroundWildwood } from "./wildwood";
+
+function playgroundDatabaseUrl(): string {
+  return process.env.TURSO_DATABASE_URL?.trim() || "file:./wildwood.db";
+}
 
 /**
  * Fetches the `page` collection for the playground. Not wrapped in `"use cache"` or

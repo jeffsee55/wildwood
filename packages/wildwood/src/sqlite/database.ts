@@ -63,7 +63,12 @@ function dedupeRefVersions(versions: string[]): string[] {
 export type { Cache } from "@/types";
 
 export class LibsqlDatabase {
+  /** Raw libsql client — reused for better-auth dialect so we don't configure DB twice. */
   client: LibsqlClient;
+  /** Alias for `client` for auth wiring readability — same object. */
+  get libsqlClient(): LibsqlClient {
+    return this.client;
+  }
   config: Config;
   drizzle: ReturnType<typeof createDrizzle>;
   schema = schema;

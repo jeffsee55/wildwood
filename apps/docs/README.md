@@ -1,108 +1,113 @@
 # docs app — production setup
 
-This is the Wildwood docs site (`content/docs/**/*.md` → `wildwood.docs.findMany()`). It doubles as the reference deployment for how Wildwood should run in production: **Turso + GitHub App + Vercel, preview via branches, no separate preview infra.**
+Reference deployment for **Turso + GitHub App + Vercel, preview via branches, no separate preview infra.** Zero env fallbacks inside wildwood — host maps env → explicit options.
 
 ## How it runs
 
-- **Build**: Next build has a `.git` checkout, so `wildwood` uses `NativeRemote` and pre-indexes your `content/` into LibSQL during `findMany` (cold-cache self-heal via `Git.switch`).
-- **Prefetch target**: When `WILDWOOD_DOCS_DATABASE_URL=libsql://…` (Turso), the build writes straight to Turso. When `file:./wildwood-docs.db`, it stays local — you need a separate step to push to Turso or a seed job.
-- **Runtime on Vercel**: No checkout. `resolvedLocalPath` undefined (prod guard), GitHub remote selected unless forced. Reads only Turso. Cold miss fails fast with "Re-run `next build` with checkout" instead of cryptic schema error.
-- **Preview**: Any branch switch/create sets `x-wildwood-branch` cookie + enables `draftMode()`. Next bypasses `"use cache"` per-user (`__prerender_bypass`), so enabling preview for one editor doesn't purge prod cache. Real mutations (`commit`, `merge`, `create-branch` etc) call `revalidateTag(WILDWOOD_CACHE_TAG)`.
+- **Build**: `.git` checkout → `NativeRemote` pre-indexes `content/` into LibSQL during `findMany`.
+- **Prefetch**: `TURSO_DATABASE_URL=libsql://…` → build writes straight to Turso. `file:…` stays local.
+- **Runtime**: No checkout, GitHub remote or DB-only. Reads Turso. Cold miss fails fast.
+- **Preview**: Branch switch/create sets `x-wildwood-branch` cookie + `draftMode()`. Mutations call `revalidateTag(WILDWOOD_CACHE_TAG)`.
 
-## Environment variables (opinionated production)
+## Env — explicit host mapping, no fallbacks in lib
 
-This app owns the singleton in `lib/wildwood.ts`. Copy `.env.example` → `.env.local` for dev, then set these in Vercel for production.
+Copy `.env.example` → `.env.local` for dev. Wildwood itself reads zero `WILDWOOD_*`/`GITHUB_*` fallbacks except Vercel System Envs for org/repo identity + better-auth autodetect via `Request`.
 
-### Required
+### Identity — zero-config on Vercel
+
+`defineConfig({ collections })` alone works when System Envs enabled:
+
+- `org` → `VERCEL_GIT_REPO_OWNER` → git remote (dev)
+- `repo` → `VERCEL_GIT_REPO_SLUG` → git remote (dev)
+- `ref`  → `VERCEL_GIT_COMMIT_REF` / `SHA` → `main`
+- `origin` → `VERCEL_PROJECT_PRODUCTION_URL` / `BRANCH_URL` / `URL`
+
+### Database — Turso integration canonical
 
 ```
-# Identity — namespaces the index DB; change requires re-index or version bump
-WILDWOOD_GITHUB_ORG=jeffsee55
-WILDWOOD_GITHUB_REPO=wildwood
+TURSO_DATABASE_URL=libsql://…          # auto-injected by Vercel integration
+TURSO_AUTH_TOKEN=…
+# dev only: file:./wildwood-docs.db when TURSO_ missing
 ```
 
-### Required on Vercel (build + runtime)
+### GitHub App — git writes + OAuth (single app)
 
 ```
-# Where the derived index lives. Local file in dev, Turso in prod.
-# Build writes here; runtime reads here.
-WILDWOOD_DOCS_DATABASE_URL=libsql://<db>.turso.io
-WILDWOOD_DOCS_DATABASE_AUTH_TOKEN=<turso-token>
-
-# Pins queries to the deployed commit. Vercel sets VERCEL_GIT_COMMIT_SHA automatically.
-# TR33_DOCS_REF removed — use WILDWOOD_DOCS_REF, or just rely on VERCEL_GIT_COMMIT_SHA.
-# Fallback order: WILDWOOD_DOCS_REF → VERCEL_GIT_COMMIT_SHA → config.ref
-WILDWOOD_DOCS_REF=main   # or leave unset and let VERCEL_GIT_COMMIT_SHA win
-
-# GitHub App — powers /api/git writes, worktrees/B.Y.O clone via editor, PR ops.
-# Private bits never leave server. Public slug/name are used only for install links.
 GITHUB_APP_ID=<numeric>
-GITHUB_PRIVATE_KEY=<PEM, \n escapes OK>
-# Optional — skips GET /repos/{owner}/{repo}/installation lookup on each request
-GITHUB_APP_INSTALLATION_ID=<numeric>
-# Public slug/name for install links. If missing, Kit stays usable (content still
-# renders); editing is visually disabled and a setup entrypoint is shown inline.
-# No throw — enforce writes server-side in /api/wildwood/github/* if you need it.
-GITHUB_APP_SLUG=wildwood
+GITHUB_PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----…
+GITHUB_APP_INSTALLATION_ID=<numeric>   # optional
+GITHUB_APP_SLUG=wildwood               # public, install-link UI only
 GITHUB_APP_NAME=Wildwood
+GITHUB_CLIENT_ID=<same App>
+GITHUB_CLIENT_SECRET=<same App>        # App doubles as OAuth — no second app
 ```
 
-Use `pnpm dlx` or Vercel env UI to store `GITHUB_PRIVATE_KEY` — keep literal newlines or `\n` escaped; `defineConfig` / `wildwood` runner normalizes both.
+Store `GITHUB_PRIVATE_KEY` via Vercel env UI — wildwood normalizes `\n` or literal newlines.
+
+### Auth — `BETTER_AUTH_SECRET` + callbacks
+
+```
+BETTER_AUTH_SECRET=…                   # openssl rand -base64 32
+ALLOWED_EMAILS=you@example.com,other@example.com   # parsed in userland, not wildwood
+```
+
+Route (`app/api/[...path]/route.ts`):
+
+```ts
+createWildwoodRoute(() => wildwood, {
+  auth: {
+    database: { url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN },
+    secret: process.env.BETTER_AUTH_SECRET,
+    // baseURL omitted → autodetected from Request (x-forwarded-host/proto + origin)
+    // Works for localhost, *.vercel.app previews, custom domains — no NEXT_PUBLIC_ORIGIN needed.
+    // trustedOrigins omitted → defaults to derived origin. Map in userland if cross-domain:
+    // trustedOrigins: (req) => [new URL(req!.url).origin, "https://studio.myapp.com"]
+    github: { clientId: process.env.GITHUB_CLIENT_ID!, clientSecret: process.env.GITHUB_CLIENT_SECRET! },
+
+    authenticate: async ({ user }) => {
+      const allow = (process.env.ALLOWED_EMAILS ?? "").split(",").map(s=>s.trim().toLowerCase()).filter(Boolean);
+      if (!allow.length) return process.env.NODE_ENV !== "production" ? !!user.email : false;
+      return allow.includes(user.email?.toLowerCase() ?? "");
+    },
+    authorize: async ({ user }) => !!user,
+  },
+});
+```
+
+- `authenticate` = can this identity create a session? (sign-in/sign-up, not distinguished; inspect `provider` if you need different rules)
+- `authorize`    = can this session perform this action? (`git.commit`, `content.update`, …)
 
 ### Optional / dev-only
 
 ```
-WILDWOOD_DOCS_SOURCE=local|github          # force remote selection, else auto-detect via cwd → .git
-WILDWOOD_DOCS_REPO_PATH=/abs/to/repo       # override local checkout path (CI, non-standard layout)
-WILDWOOD_PLAYGROUND_LOCAL_ROOT=/abs/to/…   # play app honours same override via this alias
+WILDWOOD_DOCS_SOURCE=local|github
+WILDWOOD_DOCS_REPO_PATH=/abs/to/repo
+WILDWOOD_PLAYGROUND_LOCAL_ROOT=/abs/to/…
 
-# Pin VS Code web CDN commit (air-gapped builds). Unset → resolveVscodeWebCdn() fetches latest stable.
 WILDWOOD_VSCODE_WEB_COMMIT=<sha>
 WILDWOOD_VSCODE_WEB_VERSION=<semver>
-
-# Silence git API logs
 WILDWOOD_GIT_API_LOG=0
-
-# Public better-auth instance is wired via lib/auth.ts in this app — when present,
-# authorize() gates /api/git/* by session. Unset = authorize: () => true (owner only via GitHub App).
-# BETTER_AUTH_URL, BETTER_AUTH_SECRET, etc live in lib/auth.ts, not here.
 ```
 
 ## Local dev
 
-```bash
-# from repo root
-pnpm run dev:docs        # turbo watch:deps + next:dev + studio:play (docs DB at apps/docs/wildwood-docs.db)
-
-# or this app only
-pnpm --filter docs run dev   # next dev, relies on wildwood core auto-detecting .git checkout
+```sh
+pnpm run dev:docs        # turbo watch:deps + next:dev + studio:play
+pnpm --filter docs run dev
 ```
 
-No env needed for local read path — `WILDWOOD_DOCS_DATABASE_URL` defaults to `file:./wildwood-docs.db` and `WILDWOOD_DOCS_SOURCE` autodetects `NativeRemote`. Add `.env.local` only if you want to test with Turso / GitHub App.
+No env needed for local read path — defaults to `file:./wildwood-docs.db` + `.git` auto-detect. Add `.env.local` only for Turso / GitHub App testing.
 
 ## Production checklist (Vercel)
 
-1. `turso db create wildwood-docs` + `turso db tokens create wildwood-docs`
-2. Set `WILDWOOD_DOCS_DATABASE_URL`, `WILDWOOD_DOCS_DATABASE_AUTH_TOKEN` in Vercel (Build + Runtime).
-3. Create GitHub App (Settings → Developer settings → GitHub Apps): permissions `Contents: Read & write`, `Pull requests: Read & write`, `Metadata: Read`. Install on `jeffsee55/wildwood`. Copy App ID + private key, derive slug/name.
-4. Set `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`, `GITHUB_APP_SLUG`, `GITHUB_APP_NAME` in Vercel. Optional `GITHUB_APP_INSTALLATION_ID` for perf.
-5. Leave `WILDWOOD_DOCS_REF` unset to use `VERCEL_GIT_COMMIT_SHA` auto-pin, or set explicitly to `main` if you prefer branch pointer deploy.
-6. Deploy. Build populates Turso. Runtime reads Turso. Branch previews work via cookie (`/api/wildwood/draft` + `GET /api/wildwood/preview` to exit). Toolbar auto-resolves active ref via `getBranch(wildwood)` → `await cookies()` internally.
+1. Turso: `vercel integration add tursocloud/database` (injects `TURSO_*`) or manual `turso db create` + tokens.
+2. Enable System Environment Variables in project settings.
+3. GitHub App: create App (Contents Read & write, PRs Read & write, Metadata Read), install on repo, save 5 vars (`GITHUB_APP_ID`, `PRIVATE_KEY`, `CLIENT_ID`, `CLIENT_SECRET`, `APP_SLUG`), redeploy.
+4. Auth: set `BETTER_AUTH_SECRET`, `ALLOWED_EMAILS` (parsed in your `authenticate` callback — not inside wildwood), optional `GITHUB_CLIENT_ID/SECRET` already from App.
+5. Deploy — `baseURL`/`trustedOrigins` autodetect, preview branches work via cookie + `draftMode()`.
 
-## Verifying
-
-```sh
-# Simulate prod DB-only reader — no checkout, read from Turso (fail-fast message if seed missing)
-WILDWOOD_DOCS_SOURCE=github WILDWOOD_DOCS_DATABASE_URL=$WILDWOOD_DOCS_DATABASE_URL \
-  pnpm --filter docs next build
-
-# Stage + cutover SHA pattern
-VERCEL_GIT_COMMIT_SHA=$NEW_SHA pnpm --filter docs build
-# then deploy; runtime env reads WILDWOOD_DOCS_REF=$NEW_SHA or VERCEL_GIT_COMMIT_SHA automatically
-```
-
-If `findMany` says "Wildwood index missing for ref X", you missed DB seed or version bump — it tells you whether `WILDWOOD_DOCS_DATABASE_URL` / `TURSO_*` was set.
+No `WILDWOOD_GITHUB_ORG/REPO`, `NEXT_PUBLIC_ORIGIN`, `BETTER_AUTH_TRUSTED_ORIGINS`, or `WILDWOOD_*` fallback cascade needed.
 
 ## Legacy
 
-`TR33_*` env names still accepted at runtime as fallback aliases (see `shared` constants + `lib/wildwood.ts` bridge), but docs and all new code should use `WILDWOOD_*`. `x-tr33-branch` / `tr33-active-ref` cookie fallbacks still read, cleared on draft exit. New writes always use `x-wildwood-branch`.
+`TR33_*` env and `x-tr33-branch`/`tr33-active-ref` cookies still read as fallback, cleared on exit. New writes always use `x-wildwood-branch`. `allowedEmails` / `isAllowed` still accepted as deprecated for one minor — use `authenticate` callback instead.
