@@ -118,13 +118,74 @@ export class GitHubRemote extends Remote {
     return this.githubClientPromise;
   }
 
+  private getNormalizedAuth(): { type?: string; token?: string; app?: { appId?: string | number; privateKey?: string; installationId?: string | number } } | undefined {
+    const raw = this.provider?.github;
+    if (!raw) return undefined;
+
+    const trim = (v: unknown): string | undefined => {
+      if (typeof v !== "string") return v == null ? undefined : String(v).trim() || undefined;
+      const t = v.trim();
+      return t ? t : undefined;
+    };
+    const trimSN = (v: unknown): string | number | undefined => {
+      if (v == null) return undefined;
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+      if (typeof v === "string") {
+        const t = v.trim();
+        return t ? t : undefined;
+      }
+      return undefined;
+    };
+
+    // `raw` is already WildwoodGitHubAuth (resilient shape) — no casts needed.
+    const type = raw.type?.trim() as "app" | "token" | "default" | undefined;
+
+    if (type === "token") {
+      const token = trim(raw.token);
+      if (!token) return undefined;
+      return { type: "token", token };
+    }
+    if (type === "default") return { type: "default" };
+
+    // app wrapper: { app: { appId, privateKey, installationId } }
+    if (raw.app) {
+      const appId = trimSN(raw.app.appId);
+      const privateKey = trim(raw.app.privateKey);
+      const installationId = trimSN(raw.app.installationId);
+      if (!appId && !privateKey && !installationId && type !== "app") return undefined;
+      return {
+        type: "app",
+        app: {
+          ...(appId !== undefined ? { appId } : {}),
+          ...(privateKey !== undefined ? { privateKey } : {}),
+          ...(installationId !== undefined ? { installationId } : {}),
+        },
+      };
+    }
+
+    // shorthand: { appId, privateKey, installationId } (no wrapper)
+    if (raw.appId != null || raw.privateKey != null || raw.installationId != null) {
+      const appId = trimSN(raw.appId);
+      const privateKey = trim(raw.privateKey);
+      const installationId = trimSN(raw.installationId);
+      if (!appId && !privateKey && !installationId) return undefined;
+      return {
+        type: "app",
+        app: {
+          ...(appId !== undefined ? { appId } : {}),
+          ...(privateKey !== undefined ? { privateKey } : {}),
+          ...(installationId !== undefined ? { installationId } : {}),
+        },
+      };
+    }
+
+    return undefined;
+  }
+
   private async getAuthToken(): Promise<string> {
-    const githubAuth = this.provider?.github as
-      | { type?: string; token?: string; app?: { appId?: string | number; privateKey?: string; installationId?: string | number } }
-      | undefined
-      | null;
+    const githubAuth = this.getNormalizedAuth();
     if (githubAuth?.type === "token" && githubAuth.token) {
-      return githubAuth.token as string;
+      return githubAuth.token;
     }
     if (githubAuth?.type === "app" && githubAuth.app?.appId && githubAuth.app?.privateKey) {
       const appAuth = createAppAuth({
@@ -149,10 +210,7 @@ export class GitHubRemote extends Remote {
     | { status: "not_installed" }
     | { status: "not_configured" }
   > {
-    const githubAuth = this.provider?.github as
-      | { type?: string; app?: { appId?: string | number; privateKey?: string; installationId?: string | number } }
-      | undefined
-      | null;
+    const githubAuth = this.getNormalizedAuth();
     if (githubAuth?.type !== "app" || !githubAuth?.app?.appId || !githubAuth?.app?.privateKey) {
       return { status: "not_configured" };
     }

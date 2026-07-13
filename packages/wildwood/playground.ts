@@ -82,6 +82,6 @@ process.once("unhandledRejection", (reason) => {
   })();
 });
 
-export default createHandler(client, {
+export default createHandler(client as unknown as Parameters<typeof createHandler>[0], {
   currentRef: scenario.metadata.ref,
 });

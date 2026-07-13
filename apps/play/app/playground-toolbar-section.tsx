@@ -23,16 +23,18 @@ export async function PlaygroundToolbarSection({
     return <PlaygroundDataError title="Wildwood toolbar error" message={message} />;
   }
 
-  // Single credential set happy path:
-  // The GitHub App manifest conversion returns GITHUB_APP_ID, GITHUB_PRIVATE_KEY,
-  // GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_APP_SLUG — all from one App.
-  // GITHUB_CLIENT_ID/SECRET *are* the App's own OAuth credentials (GitHub Apps ARE OAuth apps).
-  // No separate OAuth App needed. Additional providers remain pluggable via oauth.providers.
-  const appSlug = process.env.GITHUB_APP_SLUG?.trim();
-  const appId = process.env.GITHUB_APP_ID?.trim();
-  const privateKey = process.env.GITHUB_PRIVATE_KEY?.trim();
-  const clientId = process.env.GITHUB_CLIENT_ID?.trim();
-  const clientSecret = process.env.GITHUB_CLIENT_SECRET?.trim();
+  const trimEnv = (k: string) => {
+    const v = process.env[k];
+    if (typeof v !== "string") return undefined;
+    const t = v.trim();
+    return t ? t : undefined;
+  };
+
+  const appSlug = trimEnv("GITHUB_APP_SLUG");
+  const appId = trimEnv("GITHUB_APP_ID");
+  const privateKey = trimEnv("GITHUB_PRIVATE_KEY");
+  const clientId = trimEnv("GITHUB_CLIENT_ID");
+  const clientSecret = trimEnv("GITHUB_CLIENT_SECRET");
 
   const hasSingleAppCreds = !!(appId && privateKey);
   const hasOAuthViaApp = !!(clientId && clientSecret);
@@ -65,13 +67,12 @@ export async function PlaygroundToolbarSection({
           ],
         },
         githubApp: {
-          appSlug,
+          appSlug: appSlug ?? undefined,
           name: "Wildwood Play Dev",
-          origin: process.env.NEXT_PUBLIC_PLAY_ORIGIN,
+          origin: trimEnv("NEXT_PUBLIC_PLAY_ORIGIN"),
           configured: hasSingleAppCreds ? true : appSlug ? undefined : false,
-          // App doubles as OAuth app — no second GitHub OAuth app needed.
           providesOAuth: true,
-        },
+        } as never,
       }}
     />
   );

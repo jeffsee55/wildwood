@@ -79,14 +79,25 @@ export function deriveSlug(
   return p;
 }
 
+function trimOptString(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const t = v.trim();
+  return t ? t : undefined;
+}
+function normalizeInputString(v: unknown): string | undefined {
+  // Accept string | undefined | null, trim, drop empty
+  if (v == null) return undefined;
+  if (typeof v !== "string") return undefined;
+  const t = v.trim();
+  return t ? t : undefined;
+}
+
 /**
  * Runtime validation still uses a loose schema. The TS type for collections
  * is intentionally broad (`schema: $ZodType`) so that `defineConfig` can
- * capture the literal schema shape via `T extends ConfigInput`. If we typed
- * `Collection["schema"]` as `ZodCodec<ZodString, ZodObject>` (or via
- * `z.infer<typeof collectionSchema>`), we erase the inner frontmatter shape and
- * lose `FindTypes` information for `with`/`where` join inference, especially
- * after `dist` `.d.ts` emit (where `_zod.def.shape` widens to `LooseShape`).
+ * capture the literal shape via `T extends ConfigInput`. If we typed
+ * `Collection["schema"]` as `ZodCodec<...>`, we erase inner frontmatter and
+ * lose `FindTypes` for `with`/`where` join inference after `.d.ts` emit.
  */
 export const collectionSchema = z.object({
   name: z.string(),
@@ -125,8 +136,6 @@ export type Collection = {
  */
 export const variantsConfigSchema = z.object({
   options: z.array(z.string()),
-  // Default option does not need to match the path
-  // modifier. It can, but it's optional
   default: z.string().optional(),
   pathModifier: z
     .discriminatedUnion("type", [
@@ -135,7 +144,6 @@ export const variantsConfigSchema = z.object({
     ])
     .optional(),
 });
-// export const variantsSchema = z.record(z.string(), variantsConfigSchema);
 
 export const configInputSchema = z.object({
   org: z.string().optional(),
@@ -149,67 +157,74 @@ export const configInputSchema = z.object({
 });
 
 export const configOutputSchema = z.object({
-  org: z.string().optional().nullable(),
-  repo: z.string().optional().nullable(),
-  ref: z.string().optional().nullable(),
-  origin: z.string().optional().nullable(),
-  localPath: z.string().optional().nullable(),
-  version: z.string().optional().nullable(),
-  variants: z.record(z.string(), variantsConfigSchema).optional().nullable(),
-  collections: z.record(z.string(), collectionSchema).optional().nullable(),
+  org: z.string().optional(),
+  repo: z.string().optional(),
+  ref: z.string().optional(),
+  origin: z.string().optional(),
+  localPath: z.string().optional(),
+  version: z.string().optional(),
+  variants: z.record(z.string(), variantsConfigSchema).optional(),
+  collections: z.record(z.string(), collectionSchema).optional(),
 });
 
-// Resolved shapes (after env inference) — used by callers that care about
-// verified presence of org/repo. Input schema is intentionally optional so
-// `defineConfig({ collections })` works on Vercel / local git.
 export type ConfigInputLoose = z.infer<typeof configInputSchema>;
-
-// Normalized, always-present.
 export type ConfigOutputResolved = z.infer<typeof configOutputSchema>;
 
-export const configSchema = z.codec(configInputSchema, configOutputSchema, {
-  decode: (value) => {
-    // All optional / tolerant — don't throw or require anything during scaffolding/typecheck.
-    const v = (value ?? {}) as {
-      org?: string | null | undefined;
-      repo?: string | null | undefined;
-      ref?: string | null | undefined;
-      origin?: string | null | undefined;
-      version?: string | null | undefined;
-      collections?: Record<string, unknown> | null | undefined;
-      variants?: Record<string, unknown> | null | undefined;
-      localPath?: string | null | undefined;
-    };
-    const explicitOrg = typeof v.org === "string" ? v.org.trim() || undefined : undefined;
-    const explicitRepo = typeof v.repo === "string" ? v.repo.trim() || undefined : undefined;
-    const org = envResolveOrg(explicitOrg);
-    const repo = envResolveRepo(explicitRepo);
-    return {
-      collections: (v.collections ?? {}) as never,
-      variants: (v.variants ?? undefined) as never,
-      localPath: typeof v.localPath === "string" ? v.localPath : undefined,
-      org: org ?? undefined,
-      repo: repo ?? undefined,
-      ref: envResolveRef(typeof v.ref === "string" ? v.ref.trim() || undefined : undefined) || (typeof v.ref === "string" ? v.ref.trim() : "") || "main",
-      origin: envResolveOrigin(typeof v.origin === "string" ? v.origin.trim() || undefined : undefined),
-      version: envResolveVersion(typeof v.version === "string" ? v.version.trim() || undefined : undefined) || (typeof v.version === "string" ? v.version.trim() : "") || "0",
-    } as never;
-  },
-  encode: (value) => value as never,
+function trimInput(v: unknown): string | undefined {
+  if (v == null) return undefined;
+  if (typeof v !== "string") return undefined;
+  const t = v.trim();
+  return t ? t : undefined;
+}
+
+// Internal resolver — no Zod codec needed for trimming. We trim here directly
+// and merge with env resolution, preserving literal collection types via generics.
+function resolveConfigObject(rawInput: unknown): ConfigObject {
+  const r = (rawInput ?? {}) as Record<string, unknown>;
+  const orgIn = trimInput(r.org);
+  const repoIn = trimInput(r.repo);
+  const refIn = trimInput(r.ref);
+  const originIn = trimInput(r.origin);
+  const localPathIn = trimInput(r.localPath);
+  const versionIn = trimInput(r.version);
+
+  const org = envResolveOrg(orgIn);
+  const repo = envResolveRepo(repoIn);
+
+  return {
+    collections: (r.collections as AnyCollections) ?? ({} as AnyCollections),
+    variants: r.variants as ConfigObject["variants"],
+    localPath: localPathIn,
+    org: org ?? "",
+    repo: repo ?? "",
+    ref: envResolveRef(refIn) || refIn || "main",
+    origin: envResolveOrigin(originIn),
+    version: envResolveVersion(versionIn) || versionIn || "0",
+  };
+}
+
+// Keep `configSchema` for backward compat but as a simple passthrough;
+// actual trimming is done in `resolveConfigObject` above.
+export const configSchema = z.object({
+  org: z.string().optional(),
+  repo: z.string().optional(),
+  ref: z.string().optional(),
+  origin: z.string().optional(),
+  localPath: z.string().optional(),
+  version: z.string().optional(),
+  collections: z.record(z.string(), collectionSchema).optional(),
+  variants: z.record(z.string(), variantsConfigSchema).optional(),
 });
 
 export class Config<Colls extends AnyCollections = AnyCollections> {
   configObject: ConfigObject;
   configInput: DefineConfigInput<Colls>;
-  /** Auto-detected git root when `localPath` was omitted and we're in dev/build. */
   private _autoLocalPath: string | null | undefined = undefined;
 
   constructor(config: DefineConfigInput<Colls>) {
-    // store as generic to preserve literal shapes
-    this.configInput = config as unknown as DefineConfigInput<Colls>;
-    // runtime validation: safe because schema is loose
-    const parsed = configSchema.decode(config as unknown as z.infer<typeof configInputSchema>);
-    this.configObject = parsed as unknown as ConfigObject;
+    // Preserve literal `Colls` for type inference; runtime resolution trims internally.
+    this.configInput = config;
+    this.configObject = resolveConfigObject(config);
   }
 
   get org() {
@@ -913,29 +928,28 @@ export type AnyCollection = {
 
 export type AnyCollections = Record<string, AnyCollection>;
 
-// All identity fields are optional at input time — they are auto-resolved from
-// Vercel system envs (VERCEL_GIT_REPO_OWNER/SLUG/REF) or local git remote in dev.
-// This lets `defineConfig({ collections })` work with zero env on Vercel.
+// All identity fields optional, accept string | null | undefined (env passthrough).
+// Internal codec trims, so callers do NOT need to call `.trim()` themselves.
+type OptionalTrimmedStringInput = string | null | undefined;
+
 export type DefineConfigInput<Colls extends AnyCollections = AnyCollections> = {
-  org?: string;
-  repo?: string;
-  ref?: string;
-  origin?: string;
-  localPath?: string;
-  version?: string;
+  org?: OptionalTrimmedStringInput;
+  repo?: OptionalTrimmedStringInput;
+  ref?: OptionalTrimmedStringInput;
+  origin?: OptionalTrimmedStringInput;
+  localPath?: OptionalTrimmedStringInput;
+  version?: OptionalTrimmedStringInput;
   collections: Colls;
   variants?: Record<string, z.infer<typeof variantsConfigSchema>>;
 };
 
-// For backwards compat, `ConfigInput` stays as the erased runtime type,
-// but `defineConfig` is now generic over `Colls` preserving shapes.
 export type ConfigInput = {
-  org?: string;
-  repo?: string;
-  ref?: string;
-  origin?: string;
-  localPath?: string;
-  version?: string;
+  org?: string | undefined;
+  repo?: string | undefined;
+  ref?: string | undefined;
+  origin?: string | undefined;
+  localPath?: string | undefined;
+  version?: string | undefined;
   collections: AnyCollections;
   variants?: Record<string, z.infer<typeof variantsConfigSchema>>;
 };
@@ -951,8 +965,7 @@ export type ConfigObject = {
   collections: AnyCollections;
 };
 
-export const defineConfig = <const Colls extends AnyCollections>(
-  config: DefineConfigInput<Colls>,
-) => {
-  return new Config<Colls>(config as unknown as ConfigInput & { collections: Colls });
+export const defineConfig = <const Colls extends AnyCollections>(config: DefineConfigInput<Colls>) => {
+  // Trimming is internal to Config ctor via resolveConfigObject — callers pass env raw.
+  return new Config<Colls>(config);
 };

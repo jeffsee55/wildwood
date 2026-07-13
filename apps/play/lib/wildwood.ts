@@ -1,70 +1,55 @@
 import { createClient as libsqlCreateClient } from "@libsql/client";
-import { createClient, defineConfig, type WildwoodClient, type WildwoodProviderConfig, z } from "wildwood";
+import { createClient, defineConfig, z } from "wildwood";
 
 import { type PlaygroundConfig, parsePlaygroundConfig } from "./playground-config";
 
-// Only envs that should exist (per cleanup):
-// TURSO_DATABASE_URL / TURSO_AUTH_TOKEN (Turso integration)
-// GITHUB_CLIENT_ID / SECRET + GITHUB_APP_ID/PRIVATE_KEY etc (same App)
-// BETTER_AUTH_SECRET, ALLOWED_EMAILS (route authenticate)
 const libsqlClient = libsqlCreateClient({
-  url: process.env.TURSO_DATABASE_URL?.trim() || "file:./wildwood.db",
-  authToken: process.env.TURSO_AUTH_TOKEN?.trim() || "",
+  url: process.env.TURSO_DATABASE_URL || "file:./wildwood.db",
+  authToken: process.env.TURSO_AUTH_TOKEN || "",
 });
 
-function githubAppProvider(): WildwoodProviderConfig["github"] | undefined {
-  const appId = process.env.GITHUB_APP_ID?.trim();
-  const privateKey = process.env.GITHUB_PRIVATE_KEY?.trim();
-  // undefined = not configured → remote falls back to default (gh CLI in dev, error in prod)
-  if (!appId || !privateKey) return undefined;
-  return {
-    type: "app",
-    app: {
-      appId,
-      privateKey,
-      installationId: process.env.GITHUB_APP_INSTALLATION_ID?.trim() || undefined,
-    },
-  };
-}
-
-export function buildPlaygroundWildwood(config: PlaygroundConfig): WildwoodClient {
+export function buildPlaygroundWildwood(pg: PlaygroundConfig) {
   const page = z.collection({
     name: "page",
-    match: config.match,
-    schema: config.contentType === "md" ? z.markdown() : z.json({}),
+    match: pg.match,
+    schema: pg.contentType === "md" ? z.markdown() : z.json({}),
   });
 
-  // All optional config surfaces — defineConfig tolerates missing org/repo during scaffolding/typecheck
+  // No `.trim()` needed — `defineConfig` and provider normalizers trim internally.
   const wildwoodConfig =
-    config.source === "github"
-      ? defineConfig({
-          org: config.org as string | undefined,
-          repo: config.repo as string | undefined,
-          ref: (config as { ref?: string | undefined }).ref,
-          version: "0",
-          collections: { page },
-        } as never)
+    pg.source === "github"
+      ? defineConfig({ org: pg.org, repo: pg.repo, ref: pg.ref, version: "0", collections: { page } })
       : defineConfig({
-          org: config.org as string | undefined,
-          repo: config.repo as string | undefined,
-          ref: (config as { ref?: string | undefined }).ref,
-          localPath: (config as { localPath?: string | undefined }).localPath?.trim() ? (config as { localPath: string }).localPath.trim() : undefined,
+          org: pg.org,
+          repo: pg.repo,
+          ref: pg.ref,
+          localPath: pg.localPath,
           version: "0",
           collections: { page },
-        } as never);
+        });
 
-  const gh = githubAppProvider();
-
+  // Return inferred client type — preserves `OrmConfig<Mapped>` so `wildwood.page.findMany` keeps
+  // full `FindTypes` inference for `with`/`where`. Avoid `WildwoodClient` structural cast which
+  // would erase generics via `(args?: unknown)` index signature.
   return createClient({
-    // provider = transport only. `undefined` inside means not configured — no ternary needed.
-    // route's `auth.authenticate` / `auth.authorize` owns all authz.
-    provider: { github: gh as never },
-    config: wildwoodConfig as never,
-    database: libsqlClient as never,
+    provider: {
+      github: {
+        type: "app",
+        app: {
+          appId: process.env.GITHUB_APP_ID,
+          privateKey: process.env.GITHUB_PRIVATE_KEY,
+          installationId: process.env.GITHUB_APP_INSTALLATION_ID,
+        },
+      },
+    },
+    config: wildwoodConfig,
+    database: libsqlClient,
   });
 }
 
-export function getPlaygroundWildwood(cookies: { get(name: string): { value: string } | undefined }): WildwoodClient {
+export type PlaygroundWildwoodClient = ReturnType<typeof buildPlaygroundWildwood>;
+
+export function getPlaygroundWildwood(cookies: { get(name: string): { value: string } | undefined }): PlaygroundWildwoodClient {
   return buildPlaygroundWildwood(parsePlaygroundConfig(cookies));
 }
 

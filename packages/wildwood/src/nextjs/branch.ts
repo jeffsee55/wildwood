@@ -103,7 +103,15 @@ export function cookiesFromCookieHeader(
 // ── resolver ───────────────────────────────────────────────────────────────
 
 export type WildwoodForBranch = {
-  _: { config: { ref?: string | undefined | null } & Record<string, unknown> };
+  // Permissive — accepts Config, Config stub, or plain object with optional ref/org/repo.
+  // Internally we trim, so callers don't need `.trim()`.
+  _?: {
+    config?: {
+      ref?: string | undefined;
+      org?: string | undefined;
+      repo?: string | undefined;
+    } | undefined;
+  } | undefined;
 };
 
 /**
@@ -111,14 +119,9 @@ export type WildwoodForBranch = {
  *
  * Search order:
  *   1. `WILDWOOD_BRANCH_COOKIE`            — canonical (`x-wildwood-branch`)
- *   2. `WILDWOOD_BRANCH_COOKIE_FALLBACKS` — `x-tr33-branch`, `x-content-branch`, `wildwood-active-ref`, `tr33-active-ref`
+ *   2. `WILDWOOD_BRANCH_COOKIE_FALLBACKS` — legacy fallbacks
  *
- * Falls back to `wildwood._.config.ref`.
- *
- * This function is framework-agnostic: you supply `cookies` (e.g. from
- * `next/headers` or `cookiesFromCookieHeader`). For Next.js App Router
- * convenience where you don't want to call `cookies()` yourself, use
- * `getBranch(wildwood)` which does the `await cookies()` internally.
+ * Falls back to `wildwood._.config.ref`, trimmed internally — callers don't need `.trim()`.
  */
 export function resolveBranch(args: {
   wildwood: WildwoodForBranch;
@@ -138,11 +141,13 @@ export function resolveBranch(args: {
     const trimmed = raw.trim();
     if (trimmed) return trimmed;
   }
-  return args.wildwood._?.config?.ref?.trim() || "main";
-}
-
-function withFallbackRef(r: string | undefined | null): string {
-  return r && typeof r === "string" && r.trim() ? r.trim() : "main";
+  // `ref` may be string | null | undefined from optional input; trim internally.
+  const rawRef = args.wildwood?._?.config?.ref;
+  if (typeof rawRef === "string") {
+    const t = rawRef.trim();
+    if (t) return t;
+  }
+  return "main";
 }
 
 /**
@@ -207,7 +212,12 @@ export async function getBranch(
       draftModeEnabled: opts?.draftModeEnabled,
     });
   } catch {
-    return (wildwood._?.config?.ref as string | undefined)?.trim() || "main";
+    const fallback = wildwood?._?.config?.ref;
+    if (typeof fallback === "string") {
+      const t = fallback.trim();
+      if (t) return t;
+    }
+    return "main";
   }
 }
 
