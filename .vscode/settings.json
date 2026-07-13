@@ -5,6 +5,12 @@
   "editor.defaultFormatter": "oxc.oxc-vscode",
   "editor.formatOnSave": true,
   "editor.codeActionsOnSave": {},
+
+  // Tailwind CSS IntelliSense lint: `suggestCanonicalClasses` is a noisy v4 rule
+  // that flags non-canonical forms like `[&_[cmdk-group-heading]]:text-muted`.
+  // Disable it — we format with oxfmt, not Tailwind's canonical rewrite.
+  "tailwindCSS.lint.suggestCanonicalClasses": "ignore",
+
   "[typescript]": {
     "editor.defaultFormatter": "oxc.oxc-vscode"
   },

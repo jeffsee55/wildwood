@@ -10,6 +10,22 @@
   },
   "remove_trailing_whitespace_on_save": false,
   "ensure_final_newline_on_save": false,
+
+  // Tailwind CSS language server settings.
+  // `suggestCanonicalClasses` is a noisy Tailwind v4 lint that flags non-canonical
+  // forms like `[&_[cmdk-group-heading]]:text-muted` → canonical rewrite. Disable it.
+  "lsp": {
+    "tailwindcss-language-server": {
+      "settings": {
+        "tailwindCSS": {
+          "lint": {
+            "suggestCanonicalClasses": "ignore"
+          }
+        }
+      }
+    }
+  },
+
   "languages": {
     "TypeScript": {
       "format_on_save": "on",
