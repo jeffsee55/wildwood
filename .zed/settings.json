@@ -12,10 +12,30 @@
   "ensure_final_newline_on_save": false,
 
   // Tailwind CSS language server settings.
-  // `suggestCanonicalClasses` is a noisy Tailwind v4 lint that flags non-canonical
-  // forms like `[&_[cmdk-group-heading]]:text-muted` → canonical rewrite. Disable it.
+  // `suggestCanonicalClasses` is a noisy Tailwind v4 lint (default: warning) that flags
+  // non-canonical forms like `!border-0` → `border-0!` or `[&_.foo]:bar` rewrites.
+  // Disable it everywhere — we format with oxfmt, not Tailwind's canonical rewrite.
+  // Zed runs two different Tailwind servers depending on filetype / version, so cover all ids.
   "lsp": {
     "tailwindcss-language-server": {
+      "settings": {
+        "tailwindCSS": {
+          "lint": {
+            "suggestCanonicalClasses": "ignore"
+          }
+        }
+      }
+    },
+    "tailwindcss-intellisense": {
+      "settings": {
+        "tailwindCSS": {
+          "lint": {
+            "suggestCanonicalClasses": "ignore"
+          }
+        }
+      }
+    },
+    "tailwindcss-intellisense-css": {
       "settings": {
         "tailwindCSS": {
           "lint": {
