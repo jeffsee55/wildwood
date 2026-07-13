@@ -10,6 +10,7 @@ import {
   resolveVersion as envResolveVersion,
   requireOrgRepo as envRequireOrgRepo,
 } from "@/env";
+import { shouldAutoUseLocal as runtimeShouldAutoUseLocal } from "@/runtime";
 import type { Cache, Entry, Namespace } from "@/types";
 import { zodVisitor } from "@/zod/visitor";
 
@@ -49,14 +50,7 @@ export function normalizeLocalPath(p: string, cwd = process.cwd()): string {
 }
 
 function shouldAutoUseLocal(): boolean {
-  // In production (Vercel etc) there is no checkout — don't auto-select native.
-  if (process.env.NODE_ENV === "production" && process.env.NEXT_PHASE !== "phase-production-build") {
-    return false;
-  }
-  if (process.env.WILDWOOD_DOCS_SOURCE === "github") return false;
-  if (process.env.WILDWOOD_DOCS_SOURCE === "local") return true;
-  // Dev / build prefetch: auto-use local if we can find a git root.
-  return true;
+  return runtimeShouldAutoUseLocal();
 }
 
 export function fixedPrefixFromMatch(match: string): string {

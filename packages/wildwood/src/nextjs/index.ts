@@ -101,6 +101,8 @@ export {
 export { createGitHubAppManifestRouter } from "./handlers/github-app-manifest-router";
 export { WildwoodGitHubAppSetup } from "./github-app-setup";
 
+export { isNextBuildPhase, isProdRuntime, shouldAutoUseLocal } from "@/runtime";
+
 // `createWildwoodPlayAuth` is intentionally NOT re-exported from the main barrel.
 // It has heavy native deps (`better-sqlite3`, `node:fs`, etc) and must only be
 // imported via `wildwood/nextjs/play-auth` to keep `wildwood/nextjs` / `wildwood/react`

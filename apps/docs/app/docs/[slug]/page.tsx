@@ -13,14 +13,8 @@ function resolveHref(href: string): string {
 }
 
 export async function generateStaticParams() {
-  try {
-    const res = await wildwood.docs.findMany({});
-    return res.items.map((d) => ({ slug: (d as { slug: string }).slug }));
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[docs:generateStaticParams] failed, returning empty (build will still static-gen via dynamic routes at runtime): ${msg.slice(0, 600)}`);
-    return [];
-  }
+  const res = await wildwood.docs.findMany({});
+  return res.items.map(({slug}) => ({slug}))
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {

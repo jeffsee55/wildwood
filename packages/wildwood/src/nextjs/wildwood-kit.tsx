@@ -20,6 +20,7 @@ import type { KitAuthConfig, Theme } from "wildwood-kit";
 import { type ReactNode } from "react";
 import type { WildwoodForActiveRef } from "./resolve-active-ref";
 import { resolveOrigin } from "@/env";
+import { isNextBuildPhase } from "@/runtime";
 import { getBranch } from "./branch";
 import { resolveVscodeWebCdn } from "./vscode-web-cdn";
 // Keep client-boundary as a static import so tsdown can emit a proper chunk.
@@ -191,9 +192,7 @@ export async function WildwoodKit({
 
   async function safeVscodeCommit(): Promise<string> {
     if (vscodeCommit) return vscodeCommit;
-    // During static prerender / build, network may be throttled or blocked.
-    // Don't let VS Code CDN fetch crash /_not-found.
-    if (process.env.NEXT_PHASE === "phase-production-build") {
+    if (isNextBuildPhase()) {
       return process.env.WILDWOOD_VSCODE_WEB_COMMIT?.trim() || "8a1aaed389a7bc6a8f2d9dbc2b34635633cf8ff2";
     }
     try {
@@ -212,7 +211,7 @@ export async function WildwoodKit({
       return await getBranch(wildwood, cookieName ? { cookieName } : undefined);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (process.env.NEXT_PHASE === "phase-production-build") {
+      if (isNextBuildPhase()) {
         console.warn(`[wildwood:kit] getBranch failed during build, falling back to config ref: ${msg.slice(0, 400)}`);
         return wildwood._.config.ref;
       }

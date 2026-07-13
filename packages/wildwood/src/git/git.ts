@@ -8,6 +8,7 @@ import {
 } from "wildwood-store";
 import type { Config } from "@/client/config";
 import { type PrInput, type Remote, resolvePrField } from "@/git/remote";
+import { isProdRuntime } from "@/runtime";
 import { isMissingSchemaError, type LibsqlDatabase } from "@/sqlite/database";
 import {
   type Commit,
@@ -408,9 +409,7 @@ export class Git implements Gitable {
         // If DB has no index and we can't fetch from GitHub (no creds),
         // short-circuit with the actionable DB-missing error instead of
         // attempting `switch()` -> `fetchCommit()` -> `gh auth token` -> 500.
-        const isProdRuntime =
-          process.env.NODE_ENV === "production" && !process.env.NEXT_PHASE;
-        if (isProdRuntime) {
+        if (isProdRuntime()) {
           const hasGithubCreds =
             !!process.env.GITHUB_TOKEN ||
             (!!process.env.GITHUB_APP_ID && !!process.env.GITHUB_PRIVATE_KEY);

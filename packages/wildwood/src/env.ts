@@ -34,6 +34,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { isProdRuntime } from "@/runtime";
 
 function trimEnv(name: string): string | undefined {
   const v = process.env[name];
@@ -239,8 +240,7 @@ function getCachedGitRemote(): { org: string; repo: string } | null {
   // Only attempt in non-production (dev / build) to avoid fs reads in serverless
   // unless explicitly allowed via WILDWOOD_INFER_GIT_REMOTE=1
   const allowInProd = trimEnv("WILDWOOD_INFER_GIT_REMOTE") === "1";
-  const isProdRuntime = process.env.NODE_ENV === "production" && !process.env.NEXT_PHASE;
-  if (isProdRuntime && !allowInProd) {
+  if (isProdRuntime() && !allowInProd) {
     cachedGitRemote = null;
     return null;
   }

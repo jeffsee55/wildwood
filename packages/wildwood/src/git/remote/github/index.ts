@@ -3,6 +3,7 @@ import { graphql } from "@octokit/graphql";
 import { createAppAuth } from "@octokit/auth-app";
 import { Octokit } from "@octokit/rest";
 import { getVercelSystemEnv } from "@/env";
+import { isProdRuntime } from "@/runtime";
 import {
   type CreatePrArgs,
   type MergePrArgs,
@@ -45,9 +46,7 @@ function getGitHubToken(): string {
 
   // In production (Vercel, etc) `gh` CLI never exists.
   // Don't spawn at runtime — go straight to the installable error, with Vercel hints.
-  const isProdServer =
-    process.env.NODE_ENV === "production" && !process.env.NEXT_PHASE;
-  if (isProdServer) {
+  if (isProdRuntime()) {
     const hint = inferVercelOidcContext();
     throw new Error(
       "Failed to get GitHub token. In production there is no `gh` CLI — " +

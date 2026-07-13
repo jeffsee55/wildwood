@@ -18,26 +18,7 @@ export const metadata: Metadata = {
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  let navRes: { items: unknown[] } | null = null;
-  try {
-    navRes = await wildwood.nav.findMany({ with: { children: true } });
-  } catch (e) {
-    // Build-time prerender (/_not-found etc) runs inside a worker that may
-    // lack network egress to Turso / VS Code CDN. Don't crash the whole
-    // build — render with empty nav; runtime will self-heal from Turso.
-    const msg = e instanceof Error ? e.message : String(e);
-    if (
-      process.env.NEXT_PHASE === "phase-production-build" ||
-      msg.includes("ETIMEDOUT") ||
-      msg.includes("fetch failed") ||
-      msg.includes("Failed to fetch") ||
-      msg.includes("LibsqlError")
-    ) {
-      console.warn(`[docs:layout] nav.findMany failed during build, continuing with empty nav: ${msg.slice(0, 600)}`);
-    } else {
-      throw e;
-    }
-  }
+  const navRes = await wildwood.nav.findMany({ with: { children: true } });
   const nav = (navRes?.items?.[0] as {
     label?: string;
     children?: Array<{
