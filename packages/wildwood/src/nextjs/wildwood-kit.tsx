@@ -28,9 +28,11 @@ import { resolveVscodeWebCdn } from "./vscode-web-cdn";
 import { ClientKitBoundary } from "./client-boundary";
 
 /** Any `createClient()` instance satisfies this umbrella shape. */
-export type WildwoodKitHostClient = WildwoodForActiveRef;
+export type WildwoodKitHostClient = WildwoodForActiveRef & {
+  _?: { config?: { org?: string | undefined; repo?: string | undefined; ref?: string | undefined } | undefined } | undefined;
+};
 
-function resolveKitAuthFromEnv(wildwood?: WildwoodKitHostClient): KitAuthConfig | undefined {
+function resolveKitAuthFromEnv(wildwood?: WildwoodKitHostClient | null | undefined): KitAuthConfig | undefined {
   // Vercel-first origin: covers NEXT_PUBLIC_ORIGIN > VERCEL_PROJECT_PRODUCTION_URL > VERCEL_BRANCH_URL > VERCEL_URL
   const vercelOrigin = resolveOrigin();
 
@@ -234,13 +236,16 @@ export async function WildwoodKit({
 
   async function safeBranch(): Promise<string> {
     if (activeRefProp != null) return activeRefProp as string;
+    const fallbackRef =
+      (wildwood as { _?: { config?: { ref?: string | undefined } | undefined } | undefined })?._?.config?.ref?.trim() ||
+      "main";
     try {
       return await getBranch(wildwood, cookieName ? { cookieName } : undefined);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (isNextBuildPhase()) {
         console.warn(`[wildwood:kit] getBranch failed during build, falling back to config ref: ${msg.slice(0, 400)}`);
-        return wildwood._.config.ref;
+        return fallbackRef;
       }
       throw e;
     }
@@ -248,7 +253,10 @@ export async function WildwoodKit({
 
   const [commit, resolvedRef] = await Promise.all([safeVscodeCommit(), safeBranch()]);
 
-  const activeRef = resolvedRef ?? wildwood._.config.ref;
+  const cfgRef =
+    (wildwood as { _?: { config?: { ref?: string | undefined } | undefined } | undefined })?._?.config?.ref?.trim() ||
+    "main";
+  const activeRef = (resolvedRef?.trim() || cfgRef) as string;
   // Server-derived default so `<Toolbar wildwood={wildwood} />` is enough in most hosts.
   // App-supplied `auth` wins (shallow + githubApp merge). Pass wildwood so we can read org/repo
   // for repo-scoped install links (avoids generic picker UX).
@@ -258,7 +266,7 @@ export async function WildwoodKit({
   return (
     <ClientKitBoundary
       apiBase={apiBase}
-      configRef={wildwood._.config.ref}
+      configRef={cfgRef}
       activeRef={activeRef}
       vscodeCommit={commit}
       theme={theme}
@@ -282,6 +290,13 @@ const defaultToolbarFallback = (
 
 // Self-sufficient — the host no longer needs to call `cookies()` / `resolveBranch`.
 // `activeRef` is optional and auto-resolved from cookies when omitted.
-export function Toolbar({ fallback: _fallback = defaultToolbarFallback, ...kitProps }: ToolbarProps) {
-  return <WildwoodKit {...kitProps} />;
+// Note: `WildwoodKit` returns `Promise<Element>` — `Toolbar` is a sync wrapper so it
+// can be used as `JSX` without requiring `async` boundary at callsite.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function Toolbar(props: ToolbarProps): any {
+  // Cast via `any` to allow async server component `WildwoodKit` in JSX position
+  // without tsc complaining `Promise<Element>` is not valid JSX element type.
+  // Next.js runtime supports it.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (WildwoodKit as any)(props) as any;
 }

@@ -1,12 +1,42 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import {
   getExtensionJsBytes,
   getExtensionNlsJsonBytes,
   getExtensionPackageJsonBytes,
   getWildwoodDarkThemeBytes,
 } from "@/nextjs/bundled-extension-bytes.gen";
+
+function resolveWildwoodPackageRootFallback(): string | undefined {
+  try {
+    const req = createRequire(import.meta.url);
+    const pkgJson = req.resolve("wildwood/package.json");
+    return dirname(pkgJson);
+  } catch {
+    return undefined;
+  }
+}
+
+export function getWildwoodPackageRoot(): string {
+  // Prefer monorepo cwd detection, then node_modules resolution, then relative.
+  const cwd = process.cwd();
+  for (const candidate of [
+    join(cwd, "packages", "wildwood"),
+    join(cwd, "node_modules", "wildwood"),
+    join(cwd, "..", "..", "packages", "wildwood"),
+  ]) {
+    try {
+      if (existsSync(join(candidate, "package.json"))) return candidate;
+    } catch {}
+  }
+  const fromRequire = resolveWildwoodPackageRootFallback();
+  if (fromRequire) return fromRequire;
+  // Last resort: relative to this file's compiled location.
+  // tsdown preserves src/ structure, so go up heuristically.
+  return join(cwd, "packages", "wildwood");
+}
 
 // Optional full-manifest export that only exists after `scripts/copy-bundled-extension.mjs`
 // has been re-run. The on-disk `bundled-extension-bytes.gen.ts` in the repo is currently

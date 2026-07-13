@@ -50,7 +50,7 @@ function getGitHubToken(): string {
     throw new Error(
       "Failed to get GitHub token. In production there is no `gh` CLI — " +
         "pass `provider: { github: { type: \"app\", app: { appId, privateKey } } }` " +
-        "via createClient (preferred, will become `provider`) or PAT via `provider: { github: { type: \"token\" } }`. " +
+        "or PAT via `provider: { github: { type: \"token\", token } }`. " +
         (hint ? hint + " " : "") +
         "For read-only docs, ensure the Turso DB (TURSO_DATABASE_URL/_TOKEN) is populated at build time so no GitHub fetch is needed at runtime.",
     );
@@ -94,7 +94,7 @@ export class GitHubRemote extends Remote {
   }
 
   override hasCredentials(): boolean {
-    return Boolean(this.auth?.github);
+    return Boolean(this.provider?.github);
   }
 
   private async getGitHubClient(): Promise<{
@@ -119,17 +119,20 @@ export class GitHubRemote extends Remote {
   }
 
   private async getAuthToken(): Promise<string> {
-    const githubAuth = this.auth?.github;
-    if (githubAuth?.type === "token") {
-      return githubAuth.token;
+    const githubAuth = this.provider?.github as
+      | { type?: string; token?: string; app?: { appId?: string | number; privateKey?: string; installationId?: string | number } }
+      | undefined
+      | null;
+    if (githubAuth?.type === "token" && githubAuth.token) {
+      return githubAuth.token as string;
     }
-    if (githubAuth?.type === "app") {
+    if (githubAuth?.type === "app" && githubAuth.app?.appId && githubAuth.app?.privateKey) {
       const appAuth = createAppAuth({
-        appId: githubAuth.app.appId,
-        privateKey: normalizePrivateKey(githubAuth.app.privateKey),
+        appId: String(githubAuth.app.appId),
+        privateKey: normalizePrivateKey(String(githubAuth.app.privateKey)),
       });
       const installationId =
-        githubAuth.app.installationId ??
+        (githubAuth.app.installationId as string | number | undefined) ??
         (await this.resolveInstallationId(appAuth));
       const installation = await appAuth({
         type: "installation",
@@ -146,13 +149,16 @@ export class GitHubRemote extends Remote {
     | { status: "not_installed" }
     | { status: "not_configured" }
   > {
-    const githubAuth = this.auth?.github;
-    if (githubAuth?.type !== "app") {
+    const githubAuth = this.provider?.github as
+      | { type?: string; app?: { appId?: string | number; privateKey?: string; installationId?: string | number } }
+      | undefined
+      | null;
+    if (githubAuth?.type !== "app" || !githubAuth?.app?.appId || !githubAuth?.app?.privateKey) {
       return { status: "not_configured" };
     }
     const appAuth = createAppAuth({
-      appId: githubAuth.app.appId,
-      privateKey: normalizePrivateKey(githubAuth.app.privateKey),
+      appId: String(githubAuth.app.appId),
+      privateKey: normalizePrivateKey(String(githubAuth.app.privateKey)),
     });
     if (githubAuth.app.installationId) {
       return {

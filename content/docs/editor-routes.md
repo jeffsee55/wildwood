@@ -62,7 +62,11 @@ Thin wrapper for GitHub endpoints not under `/git/pr` (e.g. `GET /api/github/acc
 
 ## Auth model in the handler
 
-- Before the router matches mutations, `authorizeGitAction(context)` runs (from `nextjs/handlers/auth`). `context` shape (in `WildwoodAuthConfig`'s `authorize` doc): `{ action, config, request, user }`. `user` from `betterAuth` / `getUser`.
+- Only `createWildwoodRoute({ auth: { authenticate, authorize } })` owns authz. `createClient({ provider })` is transport-only — no `authorize`/`authenticate` there.
+- Route resolves session user via better-auth (lazy-loaded, reuses same Turso DB), then:
+  1. `authenticate` gate — can this identity sign in at all? (allowlist). Enforced on `/api/auth/*` + on every git endpoint for already-signed-in sessions.
+  2. `authorize(req, action)` gate — can this session do `{ type: "git.commit", ref, ... }` / `content.update`? Return `false` or `Response` to deny.
+- H3 git handlers (`createGitServiceRouter`, `createGitHubAppManifestRouter`) accept an injected `authorize: (req, action) => Promise<Response|null>` from the route — they don't import auth or read `client._.provider._`.
 - `isNativeRemoteNotImplementedError(e)` distinguishes "not implemented by native remote" from actual GitHub failures so PR endpoints can return a clear 405 / 501 rather than 500.
 - On deny: `{ error: "Forbidden" }` or custom `Response` from `authorize`.
 

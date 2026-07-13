@@ -3,8 +3,10 @@ import { Markdown } from "wildwood/react/markdown";
 import { wildwood } from "@/lib/wildwood";
 
 export default async function Home() {
-  const r = await wildwood.docs.findMany({});
-  const current = r.items.toSorted((a, b) => a.title.localeCompare(b.title))[0] ?? null;
+  const r = (await wildwood.docs.findMany({})) as { items: Array<{ title: string; body: unknown }> };
+  const current = (r.items as Array<{ title: string; body: unknown }>)
+    .toSorted((a, b) => (a.title as string).localeCompare((b as { title: string }).title as string))[0] ?? null;
+  const mdRoot = (current as { body?: unknown } | null)?.body as never as never;
 
   return (
     <div className="typeset typeset-man">
@@ -42,7 +44,7 @@ export default async function Home() {
         <h2>description</h2>
         {current ? (
           <div className="typeset typeset-docs max-w-none border-t border-border pt-6">
-            <Markdown root={current.body} />
+            <Markdown root={mdRoot} />
           </div>
         ) : (
           <p className="border border-dashed border-border p-4 font-mono text-[11px] text-muted-foreground">

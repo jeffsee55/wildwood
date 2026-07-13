@@ -103,7 +103,7 @@ export function cookiesFromCookieHeader(
 // ── resolver ───────────────────────────────────────────────────────────────
 
 export type WildwoodForBranch = {
-  _: { config: { ref: string } };
+  _: { config: { ref?: string | undefined | null } & Record<string, unknown> };
 };
 
 /**
@@ -138,7 +138,11 @@ export function resolveBranch(args: {
     const trimmed = raw.trim();
     if (trimmed) return trimmed;
   }
-  return args.wildwood._.config.ref;
+  return args.wildwood._?.config?.ref?.trim() || "main";
+}
+
+function withFallbackRef(r: string | undefined | null): string {
+  return r && typeof r === "string" && r.trim() ? r.trim() : "main";
 }
 
 /**
@@ -203,7 +207,7 @@ export async function getBranch(
       draftModeEnabled: opts?.draftModeEnabled,
     });
   } catch {
-    return wildwood._.config.ref;
+    return (wildwood._?.config?.ref as string | undefined)?.trim() || "main";
   }
 }
 

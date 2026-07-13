@@ -215,17 +215,25 @@ authenticate: async ({ user, request, provider }) => {
 }
 ```
 
-`authorize` gates what a signed-in user may do. `createClient({ auth: { github, authorize } })` is the low-level client gate; `createWildwoodRoute({ auth: { authenticate, authorize } })` is the Next route gate that also enforces `authenticate` on github/git endpoints + capabilities preflight:
+`authorize` gates what a signed-in user may do. It lives **only** on `createWildwoodRoute({ auth })` — `createClient({ provider })` is transport-only, no authz:
 
 ```ts
-authorize: async ({ user, action }) => {
-  if (action.type === "content.update" && action.path === "docs/intro.md") return false;
-  if (action.type === "git.commit" && action.ref === "main") return !!user;
-  return true;
-}
+// app/api/[...path]/route.ts — only place authorize/authenticate live
+createWildwoodRoute(() => wildwood, {
+  auth: {
+    secret: process.env.BETTER_AUTH_SECRET!,
+    github: true,
+    authenticate: async ({ user }) => allowList.has(user.email?.toLowerCase() ?? ""),
+    authorize: async ({ user, action }) => {
+      if (action.type === "content.update" && action.path === "docs/intro.md") return false;
+      if (action.type === "git.commit" && action.ref === "main") return !!user;
+      return true;
+    },
+  },
+});
 ```
 
-Caller actor is resolved via `authenticate` → session via `better-auth` `api.getSession` or custom `getUser(req)`. `getUser` takes precedence when you supply it.
+Route resolves session via better-auth (lazy, same Turso DB) before calling either callback. This is also how capabilities preflight (`/api/wildwood/auth/capabilities`) and H3 git mutations are gated — route injects the same `authorize` fn into the H3 handlers.
 
 ### Dark mode
 

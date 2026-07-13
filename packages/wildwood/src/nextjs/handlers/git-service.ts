@@ -2,7 +2,8 @@ import { H3 } from "h3";
 import { z } from "zod/v4";
 import type { WildwoodClient } from "@/client/index";
 import { gitObjectCacheHeaders } from "@/nextjs/vscode-embed-csp";
-import { authorizeGitAction, isNativeRemoteNotImplementedError } from "./auth";
+import type { WildwoodAuthAction } from "@/nextjs/auth";
+import { isNativeRemoteNotImplementedError } from "./auth";
 import { routeParamString } from "./util";
 
 /* eslint-disable no-console */
@@ -11,7 +12,23 @@ const wildwoodGitApiLog = (...args: unknown[]) => {
   console.info("[wildwood:git-api]", ...args);
 };
 
-export function createGitServiceRouter(client: WildwoodClient): H3 {
+/**
+ * Route-injected authorizer. H3 handler owns no session — route layer
+ * resolves user + calls `authorize`.
+ */
+export type GitServiceAuthorizeFn = (
+  req: Request,
+  action: WildwoodAuthAction,
+) => Promise<Response | null>;
+
+type GitServiceRouterOptions = {
+  authorize?: GitServiceAuthorizeFn;
+};
+
+export function createGitServiceRouter(
+  client: WildwoodClient,
+  options: GitServiceRouterOptions = {},
+): H3 {
   const git = client._.git;
   const remote = git.remote;
   const configRef = git.config.ref;
@@ -121,8 +138,10 @@ export function createGitServiceRouter(client: WildwoodClient): H3 {
       const { ref: refParam } = z.object({ ref: z.string() }).parse(await event.req.json());
       const refName = refParam.trim();
       if (!refName) return new Response("ref is required", { status: 400 });
-      const authError = await authorizeGitAction(client, event.req, { type: "git.switchRef", ref: refName });
-      if (authError) return authError;
+      if (options.authorize) {
+        const authError = await options.authorize(event.req as unknown as Request, { type: "git.switchRef", ref: refName });
+        if (authError) return authError;
+      }
       const exists = await git.db.refs.get({ ref: refName });
       if (!exists) return new Response(`Ref "${refName}" not found`, { status: 404 });
       console.info(`[wildwood:switch-branch] ref=${refName} ${Date.now() - started}ms`);
@@ -138,8 +157,10 @@ export function createGitServiceRouter(client: WildwoodClient): H3 {
       const parsed = z.object({ name: z.string(), baseRef: z.string().optional(), base: z.string().optional() }).parse(await event.req.json());
       const base = (parsed.baseRef ?? parsed.base)?.trim();
       if (!base) return new Response("Missing base ref: send `baseRef` or `base`", { status: 400 });
-      const authError = await authorizeGitAction(client, event.req, { type: "git.createBranch", name: parsed.name, baseRef: base });
-      if (authError) return authError;
+      if (options.authorize) {
+        const authError = await options.authorize(event.req as unknown as Request, { type: "git.createBranch", name: parsed.name, baseRef: base });
+        if (authError) return authError;
+      }
       await git.createBranch({ name: parsed.name, base });
       return Response.json({ ok: true, ref: parsed.name });
     } catch (e) {
@@ -157,8 +178,10 @@ export function createGitServiceRouter(client: WildwoodClient): H3 {
     try {
       const refName = decodeURIComponent(refParam);
       wildwoodGitApiLog("GET /worktrees/:ref", { ref: refName, org, repo, url: event.url?.href ?? refParam });
-      const authError = await authorizeGitAction(client, event.req, { type: "git.switchRef", ref: refName });
-      if (authError) return authError;
+      if (options.authorize) {
+        const authError = await options.authorize(event.req as unknown as Request, { type: "git.switchRef", ref: refName });
+        if (authError) return authError;
+      }
       await client._.db.init();
       const resolved = await git.resolveWorktreeForApi({ ref: refName });
       wildwoodGitApiLog("GET /worktrees — ok (read)", { ref: refName, commitTree: resolved.commit.treeOid.slice(0, 7), hasRootTree: Boolean(resolved.rootTreeOid) });
@@ -269,8 +292,10 @@ export function createGitServiceRouter(client: WildwoodClient): H3 {
         if (typeof content === "string") files[filePath] = content;
         else files[filePath] = Uint8Array.from(atob(content.base64), (c) => c.charCodeAt(0));
       }
-      const authError = await authorizeGitAction(client, event.req, { type: "git.add", ref: refParam, paths: Object.keys(files) });
-      if (authError) return authError;
+      if (options.authorize) {
+        const authError = await options.authorize(event.req as unknown as Request, { type: "git.add", ref: refParam, paths: Object.keys(files) });
+        if (authError) return authError;
+      }
 
       if (streamProgress) {
         const encoder = new TextEncoder();
@@ -304,11 +329,14 @@ export function createGitServiceRouter(client: WildwoodClient): H3 {
         changedFiles: z.array(z.object({ path: z.string(), oid: z.string(), content: z.string() })).default([]),
         trees: z.array(z.object({ oid: z.string(), entries: z.record(z.string(), gitTreeEntrySchema) })).default([]),
       }).parse(await event.req.json());
-      const authError = await authorizeGitAction(client, event.req, {
-        type: "git.patchWorktree", ref: parsed.ref,
-        paths: parsed.changedFiles.length > 0 ? parsed.changedFiles.map((f) => f.path) : ["."],
-      });
-      if (authError) return authError;
+      if (options.authorize) {
+        const authError = await options.authorize(event.req as unknown as Request, {
+          type: "git.patchWorktree",
+          ref: parsed.ref,
+          paths: parsed.changedFiles.length > 0 ? parsed.changedFiles.map((f) => f.path) : ["."],
+        });
+        if (authError) return authError;
+      }
       const result = await client._.git.patchWorktree({ ref: parsed.ref, rootTreeOid: parsed.rootTreeOid, trees: parsed.trees, changedFiles: parsed.changedFiles } as never);
       return Response.json(result);
     } catch (e) {
@@ -322,8 +350,10 @@ export function createGitServiceRouter(client: WildwoodClient): H3 {
       const { ref: refParam, message, author } = z.object({
         ref: z.string(), message: z.string(), author: z.object({ name: z.string(), email: z.string() }),
       }).parse(await event.req.json());
-      const authError = await authorizeGitAction(client, event.req, { type: "git.commit", ref: refParam, message });
-      if (authError) return authError;
+      if (options.authorize) {
+        const authError = await options.authorize(event.req as unknown as Request, { type: "git.commit", ref: refParam, message });
+        if (authError) return authError;
+      }
       const commit = await git.commit({ ref: refParam, commit: { message, author } });
       return Response.json(commit);
     } catch (e) {
@@ -335,8 +365,10 @@ export function createGitServiceRouter(client: WildwoodClient): H3 {
   router.post("/discard", async (event) => {
     try {
       const { ref: refParam } = z.object({ ref: z.string() }).parse(await event.req.json());
-      const authError = await authorizeGitAction(client, event.req, { type: "git.discard", ref: refParam });
-      if (authError) return authError;
+      if (options.authorize) {
+        const authError = await options.authorize(event.req as unknown as Request, { type: "git.discard", ref: refParam });
+        if (authError) return authError;
+      }
       await git.discard({ ref: refParam });
       return Response.json({ ok: true });
     } catch (e) {
@@ -348,8 +380,10 @@ export function createGitServiceRouter(client: WildwoodClient): H3 {
   router.post("/push", async (event) => {
     try {
       const { ref: refParam } = z.object({ ref: z.string() }).parse(await event.req.json());
-      const authError = await authorizeGitAction(client, event.req, { type: "git.push", ref: refParam });
-      if (authError) return authError;
+      if (options.authorize) {
+        const authError = await options.authorize(event.req as unknown as Request, { type: "git.push", ref: refParam });
+        if (authError) return authError;
+      }
       const result = await git.push({ ref: refParam });
       return Response.json({ ok: true, commitOid: result.commitOid });
     } catch (e) {
@@ -361,8 +395,10 @@ export function createGitServiceRouter(client: WildwoodClient): H3 {
   router.post("/pull", async (event) => {
     try {
       const { ref: refParam } = z.object({ ref: z.string() }).parse(await event.req.json());
-      const authError = await authorizeGitAction(client, event.req, { type: "git.pull", ref: refParam });
-      if (authError) return authError;
+      if (options.authorize) {
+        const authError = await options.authorize(event.req as unknown as Request, { type: "git.pull", ref: refParam });
+        if (authError) return authError;
+      }
       const pullResult = await git.pull({ ref: refParam });
       if ((pullResult as { type: string }).type === "conflict") return new Response("Pull resulted in merge conflicts", { status: 409 });
       const successResult = pullResult as { commit: { treeOid: string } };
@@ -378,8 +414,10 @@ export function createGitServiceRouter(client: WildwoodClient): H3 {
   router.post("/merge", async (event) => {
     try {
       const { ref: refParam, message: messageParam } = z.object({ ref: z.string(), message: z.string().optional() }).parse(await event.req.json());
-      const authError = await authorizeGitAction(client, event.req, { type: "git.merge", ref: refParam, message: messageParam });
-      if (authError) return authError;
+      if (options.authorize) {
+        const authError = await options.authorize(event.req as unknown as Request, { type: "git.merge", ref: refParam, message: messageParam });
+        if (authError) return authError;
+      }
       if (refParam === configRef) {
         return Response.json({ ok: true, pr: null, commitOid: null, message: `Already on ${configRef}; nothing to merge.` });
       }
@@ -421,8 +459,10 @@ export function createGitServiceRouter(client: WildwoodClient): H3 {
   router.post("/create-pr", async (event) => {
     try {
       const { ref: refParam, title: titleParam, body: bodyParam } = z.object({ ref: z.string(), title: z.string().optional(), body: z.string().optional() }).parse(await event.req.json());
-      const authError = await authorizeGitAction(client, event.req, { type: "git.createPr", ref: refParam, title: titleParam, body: bodyParam });
-      if (authError) return authError;
+      if (options.authorize) {
+        const authError = await options.authorize(event.req as unknown as Request, { type: "git.createPr", ref: refParam, title: titleParam, body: bodyParam });
+        if (authError) return authError;
+      }
       let pr = await remote.findPr({ head: refParam, base: configRef });
       if (!pr) {
         const defaultTitle = `Merge ${refParam} into ${configRef}`;

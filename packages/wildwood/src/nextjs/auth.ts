@@ -8,11 +8,49 @@
  * `packages/wildwood/`. At runtime on Vercel λ, node_modules has it.
  */
 
-import type { WildwoodAuthUser } from "@/client/auth";
-// Keep BetterAuthOptions import lazy via dynamic import type to avoid static dep in dist
-// but we need the type for our option shape. Local type only — not re-exported as BetterAuthOptions.
-import type { BetterAuthOptions as BetterAuthOptionsType } from "better-auth";
-type BetterAuthOptions = BetterAuthOptionsType;
+// Keep BetterAuthOptions import lazy — type is optional at build time.
+// We mirror only what we need so missing `better-auth` doesn't break tsc during scaffolding.
+// At runtime we dynamic-import it (see loadBetterAuthDeps).
+type BetterAuthSocialProviders = Record<string, unknown>;
+type BetterAuthOptions = {
+  appName?: string;
+  secret?: string;
+  baseURL?: unknown;
+  trustedOrigins?: unknown;
+  database?: unknown;
+  emailAndPassword?: { enabled: boolean };
+  socialProviders?: BetterAuthSocialProviders;
+  databaseHooks?: unknown;
+  plugins?: unknown[];
+};
+
+// ── route-owned auth identity + action types ────────────────────────────
+// These used to live in `client/auth.ts` but `provider` (client) is now
+// transport-only — all `authenticate` / `authorize` lives on the route.
+// Moving them here makes the ownership obvious and breaks the client→route
+// import cycle.
+
+/** Stable user shape surfaced from better-auth / custom getUser. */
+export type WildwoodAuthUser = {
+  id?: string;
+  email?: string;
+  name?: string;
+  image?: string | null;
+};
+
+export type WildwoodAuthAction =
+  | { type: "git.switchRef"; ref: string }
+  | { type: "git.createBranch"; name: string; baseRef?: string }
+  | { type: "git.add"; ref: string; paths: string[] }
+  | { type: "git.patchWorktree"; ref: string; paths: string[] }
+  | { type: "git.commit"; ref: string; message: string }
+  | { type: "git.discard"; ref: string }
+  | { type: "git.push"; ref: string }
+  | { type: "git.pull"; ref: string }
+  | { type: "git.merge"; ref: string; message?: string }
+  | { type: "git.createPr"; ref: string; title?: string; body?: string }
+  | { type: "content.update"; path: string }
+  | { type: "content.delete"; path: string };
 
 // Inlined schema — avoids fs at runtime, no NFT file.
 const BETTER_AUTH_SCHEMA_SQL = `
@@ -45,7 +83,7 @@ export type WildwoodAuthenticateFn = (
 
 export type WildwoodAuthorizeContext = {
   user: WildwoodAuthUser | null;
-  action: import("@/client/auth").WildwoodAuthAction | { type: "content.update"; path: string };
+  action: WildwoodAuthAction;
   request: Request;
 };
 
@@ -75,69 +113,41 @@ export type WildwoodTrustedOrigins =
  * Future: `gitlab`, `google`, etc.
  */
 export type WildwoodAuthProviders = {
-  github?: boolean | { clientId: string; clientSecret: string };
-  socialProviders?: BetterAuthOptions["socialProviders"];
-  emailAndPassword?: boolean;
+  github?: boolean | { clientId?: string | undefined; clientSecret?: string | undefined } | undefined | null;
+  socialProviders?: BetterAuthSocialProviders | undefined | null;
+  emailAndPassword?: boolean | undefined;
 };
 
 export type WildwoodRouteAuthOptions = {
   /**
    * DB is intentionally NOT here — wildwood reuses the LibSQL client from
    * `createClient({ database })`. Auth tables live in the same Turso DB.
-   * We accept the already-constructed client / dialect at runtime via `getOrCreateAuth`.
    */
-  /** If omitted, better-auth env fallback applies; in prod you should set BETTER_AUTH_SECRET. */
-  secret?: string;
-  /**
-   * Optional — autodetected from request when omitted.
-   * Omit for zero-config: works on localhost, Vercel preview (*.vercel.app), custom domains.
-   * Only set explicitly if you need a fixed callback origin.
-   * Accepts string or better-auth's dynamic form `{ allowedHosts, fallback?, protocol? }`.
-   */
-  baseURL?: WildwoodBaseURL | undefined;
-  /**
-   * Optional — defaults to derived baseURL origin.
-   * Accepts static string[] or async function `(request?) => string[]` for userland mapping.
-   * No fallbacks inside wildwood — if you need cross-domain origins, map them here.
-   */
-  trustedOrigins?: WildwoodTrustedOrigins | undefined;
-  appName?: string;
+  /** Optional — better-auth env fallback applies; set BETTER_AUTH_SECRET in prod. */
+  secret?: string | undefined | null;
+  /** Optional — autodetected from request when omitted. */
+  baseURL?: WildwoodBaseURL | undefined | null;
+  /** Optional — defaults to derived baseURL origin. */
+  trustedOrigins?: WildwoodTrustedOrigins | undefined | null;
+  appName?: string | undefined | null;
 
-  // Providers — current convenience keys (preferred is `providers.github`)
-  github?: WildwoodAuthProviders["github"];
-  providers?: WildwoodAuthProviders;
+  // Providers — all optional, may be omitted, null, or false to disable.
+  github?: WildwoodAuthProviders["github"] | undefined | null;
+  providers?: WildwoodAuthProviders | undefined | null;
 
-  /**
-   * Who may sign in / sign up at all. Runs after the OAuth / credential user
-   * is resolved but before the session is treated as authenticated.
-   *
-   * Return `false` to deny, `true`/void to allow, or a `Response` to customize.
-   * Use this instead of an `allowedEmails` array.
-   *
-   * Example:
-   * ```ts
-   * authenticate: async ({ user }) =>
-   *   ["you@example.com"].includes(user.email?.toLowerCase() ?? "")
-   * ```
-   *
-   * Not confusing with `authorize`:
-   *  - `authenticate` = can this identity create a session? (sign-in/sign-up gate)
-   *  - `authorize`    = can this (already authenticated) session perform this action?
-   */
-  authenticate?: WildwoodAuthenticateFn;
+  /** Who may sign in at all. All optional — omit for open sign-in. */
+  authenticate?: WildwoodAuthenticateFn | undefined | null;
 
-  /**
-   * What an authenticated user may do — git, content gates.
-   */
-  authorize?: WildwoodAuthorizeFn;
+  /** What an authenticated user may do — optional. */
+  authorize?: WildwoodAuthorizeFn | undefined | null;
 
-  // ── legacy compat (removed surface; still accepted as deprecated for one minor) ──
+  // ── legacy compat (still tolerated at type level) ──
   /** @deprecated use `authenticate` callback instead */
-  allowedEmails?: string[];
+  allowedEmails?: string[] | undefined | null;
   /** @deprecated use `authenticate` callback instead */
-  isAllowed?: (ctx: { user: WildwoodAuthUser | null; request: Request }) => boolean | Promise<boolean>;
-  /** @deprecated DB now comes from createClient — not configured here */
-  database?: { url: string; authToken?: string };
+  isAllowed?: ((ctx: { user: WildwoodAuthUser | null; request: Request }) => boolean | Promise<boolean>) | undefined | null;
+  /** @deprecated DB now comes from createClient */
+  database?: { url?: string | undefined | null; authToken?: string | undefined | null } | undefined | null;
 };
 
 // ── internal ────────────────────────────────────────────────────────────────
@@ -166,9 +176,13 @@ async function loadBetterAuthDeps() {
 
 type LibsqlClientLike = { execute(s: string): Promise<unknown>; close?(): void };
 
-function resolveLibsqlClient(
-  db?: { libsqlClient?: LibsqlClientLike; client?: LibsqlClientLike },
-): LibsqlClientLike | null {
+export type WildwoodAuthDbInput =
+  | LibsqlClientLike
+  | { libsqlClient?: LibsqlClientLike | null | undefined; client?: LibsqlClientLike | null | undefined }
+  | null
+  | undefined;
+
+function resolveLibsqlClient(db?: WildwoodAuthDbInput): LibsqlClientLike | null {
   if (!db) return null;
   // LibsqlDatabase has `_client` or `client`; apps pass raw libsql client too
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -179,21 +193,23 @@ function resolveLibsqlClient(
 function normalizeGithubProvider(
   opts: WildwoodRouteAuthOptions,
 ): { clientId: string; clientSecret: string } | undefined {
-  // precedence: providers.github > top-level github
-  const raw = opts.providers?.github ?? opts.github;
-  if (!raw || raw === false) return undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const anyOpts = opts as any;
+  const raw: unknown = anyOpts?.providers?.github ?? anyOpts?.github;
+  if (!raw) return undefined;
+  // `false` explicitly disables — check via `any` to allow false even if type is optional
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if ((raw as any) === false) return undefined;
   if (raw === true) {
-    // true => reuse from same GitHub App creds used for git.
-    // Host is expected to have GITHUB_CLIENT_ID/SECRET from app manifest.
-    // If host hasn't mapped them explicitly we fall back to env here as last resort
-    // only for the OAuth client pair (not for DB). This keeps `github: true`
-    // working zero-config on Vercel.
     const cid = process.env.GITHUB_CLIENT_ID?.trim();
     const csec = process.env.GITHUB_CLIENT_SECRET?.trim();
     if (!cid || !csec) return undefined;
     return { clientId: cid, clientSecret: csec };
   }
-  return { clientId: raw.clientId, clientSecret: raw.clientSecret };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const r = raw as { clientId?: string | undefined; clientSecret?: string | undefined };
+  if (!r?.clientId || !r?.clientSecret) return undefined;
+  return { clientId: r.clientId, clientSecret: r.clientSecret };
 }
 
 let cachedAuth: { key: string; instance: WildwoodAuthInstance; ensurePromise: Promise<void> | null } | null = null;
@@ -221,7 +237,8 @@ async function ensureAuthTables(client: LibsqlClientLike): Promise<void> {
 
 function buildAuthenticateHook(
   authenticate: WildwoodAuthenticateFn,
-): NonNullable<BetterAuthOptions["databaseHooks"]>["user"] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any {
   const wrap =
     (providerFromCtx: (ctx: unknown) => string | undefined) =>
     async (rawUser: unknown, ctx: unknown): Promise<false | void | { data: unknown }> => {
@@ -265,28 +282,31 @@ function buildAuthenticateHook(
 }
 
 /**
- * Internal factory.
- * - DB is supplied by caller (client._.db / raw libsql client) — no `opts.database`.
- * - baseURL: optional — autodetected from Request when omitted.
- * - github: boolean | { clientId, clientSecret } where `true` reuses App creds.
+ * Internal factory — all fields optional. DB may be null/undefined at type level;
+ * runtime throws only if we actually need auth and no client is present.
  */
 export async function getOrCreateAuth(opts: {
-  auth: WildwoodRouteAuthOptions;
-  db: { libsqlClient?: LibsqlClientLike; client?: LibsqlClientLike } | LibsqlClientLike;
+  auth: WildwoodRouteAuthOptions | undefined | null;
+  db: WildwoodAuthDbInput;
 }): Promise<{
   auth: WildwoodAuthInstance;
   ensureAuthSchema: () => Promise<void>;
 }> {
-  const { auth: authOpts, db } = opts;
-  const libsqlClient = resolveLibsqlClient(db as never);
-  if (!libsqlClient) throw new Error("Wildwood auth requires a libsql client — pass createClient({ database }) and forward its db.");
+  const authOpts: WildwoodRouteAuthOptions = (opts.auth ?? {}) as WildwoodRouteAuthOptions;
+  const { db } = opts;
+  // Resolve once, assert non-null after guard — tsc can't infer control-flow narrowing through function return | null
+  const libsqlClientResolved = resolveLibsqlClient(db as never);
+  if (!libsqlClientResolved) throw new Error("Wildwood auth requires a libsql client — pass createClient({ database }) and forward its db.");
+  const libsqlClient: LibsqlClientLike = libsqlClientResolved as LibsqlClientLike;
 
   const key = cacheKey(authOpts);
   if (cachedAuth && cachedAuth.key === key) {
+    // libsqlClient is stable — reuse cached ensuring same client; safe to capture here.
+    const lc: LibsqlClientLike = libsqlClient;
     return {
       auth: cachedAuth.instance,
       ensureAuthSchema: () => {
-        if (!cachedAuth!.ensurePromise) cachedAuth!.ensurePromise = ensureAuthTables(libsqlClient);
+        if (!cachedAuth!.ensurePromise) cachedAuth!.ensurePromise = ensureAuthTables(lc);
         return cachedAuth!.ensurePromise;
       },
     };
@@ -296,49 +316,54 @@ export async function getOrCreateAuth(opts: {
 
   const githubPair = normalizeGithubProvider(authOpts);
   const github = githubPair ? { github: githubPair } : undefined;
-  const providersFromOpts = authOpts.providers?.socialProviders ?? authOpts.providers ?? {};
-  // socialProviders kept as escape hatch, but `github` shorthand wins for github key
-  const rawSocial = (authOpts as { socialProviders?: BetterAuthOptions["socialProviders"] }).socialProviders;
-  const socialProviders = github || rawSocial ? { ...(rawSocial ?? {}), ...(github ?? {}) } : undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rawSocial = (authOpts as any)?.socialProviders as BetterAuthSocialProviders | undefined;
+  const socialProviders = github || rawSocial ? ({ ...(rawSocial ?? {}), ...(github ?? {}) } as BetterAuthSocialProviders) : undefined;
 
   const emailAndPasswordEnabled = Boolean(
     authOpts.providers?.emailAndPassword ?? (authOpts as { emailAndPassword?: boolean }).emailAndPassword,
   );
 
-  // Back-compat shim: allowedEmails / isAllowed → authenticate.
-  let authenticate = authOpts.authenticate;
-  if (!authenticate && (authOpts.allowedEmails || authOpts.isAllowed)) {
-    const allowedEmails = authOpts.allowedEmails;
-    const isAllowed = authOpts.isAllowed;
-    authenticate = async ({ user, request }) => {
-      if (isAllowed) {
-        const r = await isAllowed({ user, request });
-        if (!r) return false;
-      }
-      if (allowedEmails) {
-        const lower = user.email?.toLowerCase() ?? "";
-        if (!lower) return false;
-        if (allowedEmails.length === 0) return true;
-        return allowedEmails.some((e) => e.toLowerCase() === lower);
-      }
-      return true;
-    };
+  // Back-compat shim: allowedEmails / isAllowed → authenticate — all nullable.
+  let authenticate: WildwoodAuthenticateFn | undefined | null = authOpts.authenticate ?? undefined;
+  {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyOpts = authOpts as any;
+    const legacyAllowed = anyOpts?.allowedEmails as string[] | undefined | null;
+    const legacyIsAllowed = anyOpts?.isAllowed as
+      | ((ctx: { user: WildwoodAuthUser | null; request: Request }) => boolean | Promise<boolean>)
+      | undefined
+      | null;
+    if (!authenticate && (legacyAllowed || legacyIsAllowed)) {
+      const allowedEmails = legacyAllowed;
+      const isAllowed = legacyIsAllowed;
+      authenticate = async ({ user, request }) => {
+        if (isAllowed) {
+          const r = await isAllowed({ user: user ?? null, request });
+          if (!r) return false;
+        }
+        if (allowedEmails) {
+          const lower = user.email?.toLowerCase() ?? "";
+          if (!lower) return false;
+          if (allowedEmails.length === 0) return true;
+          return allowedEmails.some((e) => e.toLowerCase() === lower);
+        }
+        return true;
+      };
+    }
   }
 
-  const databaseHooks = authenticate ? buildAuthenticateHook(authenticate) : undefined;
+  const databaseHooks = authenticate ? buildAuthenticateHook(authenticate as WildwoodAuthenticateFn) : undefined;
 
-  // LibsqlDialect accepts either { url, authToken } OR { client }.
-  // Since we already have the client, prefer { client } — one connection, no double config.
-  // The `kysely-libsql` type `LibsqlDialectConfig = { client } | Config` — see
-  // node_modules/@libsql/kysely-libsql/lib-esm/index.d.ts.
+  // Guard already performed above; libsqlClient is non-null here.;
   const baOpts: BetterAuthOptions = {
-    appName: authOpts.appName ?? "Wildwood",
-    ...(authOpts.secret ? { secret: authOpts.secret } : {}),
+    appName: (authOpts.appName ?? "Wildwood") as string,
+    ...((authOpts as { secret?: string | undefined | null }).secret ? { secret: (authOpts as { secret?: string | undefined | null }).secret as string } : {}),
     ...(authOpts.baseURL ? { baseURL: authOpts.baseURL as BetterAuthOptions["baseURL"] } : {}),
     ...(authOpts.trustedOrigins ? { trustedOrigins: authOpts.trustedOrigins as BetterAuthOptions["trustedOrigins"] } : {}),
     database: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      dialect: new (LibsqlDialect as any)({ client: libsqlClient }),
+      dialect: new (LibsqlDialect as any)({ client: libsqlClient as NonNullable<typeof libsqlClient> }),
       type: "sqlite" as const,
     },
     emailAndPassword: emailAndPasswordEnabled ? { enabled: true } : { enabled: false },

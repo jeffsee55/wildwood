@@ -13,26 +13,35 @@ function resolveHref(href: string): string {
 }
 
 export async function generateStaticParams() {
-  const res = await wildwood.docs.findMany({});
-  return res.items.map(({slug}) => ({slug}))
+  const res = (await wildwood.docs.findMany({})) as { items: Array<{ slug: string }> };
+  return res.items.map(({ slug }) => ({ slug }));
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
-  const res = await wildwood.docs.findFirst({
+  const res = (await wildwood.docs.findFirst({
     where: { slug },
     with: { author: true },
-  });
+  })) as { value: { title: string; description?: string } | null };
   if (!res.value) return { title: "not found — wildwood(1)" };
   return { title: `${res.value.title} — wildwood(1)`, description: res.value.description };
 }
 
 export default async function DocsPage({ params }: PageProps) {
   const { slug } = await params;
-  const res = await wildwood.docs.findFirst({
+  const res = (await wildwood.docs.findFirst({
     where: { slug },
     with: { author: true },
-  });
+  })) as {
+    value: {
+      title: string;
+      description?: string;
+      body: unknown;
+      author?: { name?: string };
+      _meta?: { path?: string };
+      slug?: string;
+    } | null;
+  };
   const doc = res.value;
   if (!doc) notFound();
 
@@ -42,11 +51,11 @@ export default async function DocsPage({ params }: PageProps) {
       <header className="border-b border-border pb-8">
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
           <span>wildwood(1)</span>
-          {doc.author?.name ? <span>by {doc.author.name.toLowerCase()}</span> : <span>manual</span>}
-          <span className="ml-auto tabular-nums">{doc._meta?.path ?? `${slug}.md`}</span>
+          {doc.author?.name ? <span>by {(doc.author.name as string).toLowerCase()}</span> : <span>manual</span>}
+          <span className="ml-auto tabular-nums">{(doc as { _meta?: { path?: string } })._meta?.path ?? `${slug}.md`}</span>
         </div>
 
-        <h1 className="!mt-5 !border-0 !pt-0 !text-[26px] !normal-case !tracking-[-0.02em]">{doc.title.toLowerCase()}</h1>
+        <h1 className="!mt-5 !border-0 !pt-0 !text-[26px] !normal-case !tracking-[-0.02em]">{(doc.title as string).toLowerCase()}</h1>
 
         {doc.description ? (
           <p className="!mt-3 max-w-[60ch] !text-[12.5px] !leading-[1.95] text-muted-foreground">{doc.description}</p>
@@ -55,7 +64,7 @@ export default async function DocsPage({ params }: PageProps) {
 
       {/* typeset owns all rich-text rhythm — no per-element classNames needed */}
       <Markdown
-        root={doc.body}
+        root={doc.body as never}
         components={{
           a: ({ href, children, ...rest }) => (
             <Link

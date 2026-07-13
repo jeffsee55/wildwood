@@ -1,5 +1,5 @@
 import type { Config } from "@/client/config";
-import type { WildwoodAuthConfig } from "@/client/auth";
+import type { WildwoodProviderConfig } from "@/client/auth";
 import type { Commit } from "@/types";
 
 export type PushResult = {
@@ -60,15 +60,15 @@ export function resolvePrField<T>(value: PrFieldValue<T>, prev: T): T {
 
 export abstract class Remote {
   config: Config;
-  auth?: WildwoodAuthConfig;
-  constructor(args: { auth?: WildwoodAuthConfig; config: Config }) {
+  provider?: WildwoodProviderConfig;
+  constructor(args: { provider?: WildwoodProviderConfig; config: Config }) {
     this.config = args.config;
-    this.auth = args.auth;
+    this.provider = args.provider;
   }
 
   /** Whether this remote has enough credentials to fetch without local git. Used for error hinting only. */
   hasCredentials?(): boolean {
-    return Boolean(this.auth?.github);
+    return Boolean(this.provider?.github);
   }
 
   abstract listBranches(): Promise<string[]>;

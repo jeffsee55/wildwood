@@ -144,19 +144,19 @@ export const configInputSchema = z.object({
   origin: z.string().optional(),
   localPath: z.string().optional(),
   version: z.string().optional(),
-  collections: z.record(z.string(), collectionSchema),
+  collections: z.record(z.string(), collectionSchema).optional(),
   variants: z.record(z.string(), variantsConfigSchema).optional(),
 });
 
 export const configOutputSchema = z.object({
-  org: z.string(),
-  repo: z.string(),
-  ref: z.string(),
-  origin: z.string().optional(),
-  localPath: z.string().optional(),
-  version: z.string(),
-  variants: z.record(z.string(), variantsConfigSchema).optional(),
-  collections: z.record(z.string(), collectionSchema),
+  org: z.string().optional().nullable(),
+  repo: z.string().optional().nullable(),
+  ref: z.string().optional().nullable(),
+  origin: z.string().optional().nullable(),
+  localPath: z.string().optional().nullable(),
+  version: z.string().optional().nullable(),
+  variants: z.record(z.string(), variantsConfigSchema).optional().nullable(),
+  collections: z.record(z.string(), collectionSchema).optional().nullable(),
 });
 
 // Resolved shapes (after env inference) — used by callers that care about
@@ -169,21 +169,33 @@ export type ConfigOutputResolved = z.infer<typeof configOutputSchema>;
 
 export const configSchema = z.codec(configInputSchema, configOutputSchema, {
   decode: (value) => {
-    const explicitOrg = value.org?.trim() || undefined;
-    const explicitRepo = value.repo?.trim() || undefined;
+    // All optional / tolerant — don't throw or require anything during scaffolding/typecheck.
+    const v = (value ?? {}) as {
+      org?: string | null | undefined;
+      repo?: string | null | undefined;
+      ref?: string | null | undefined;
+      origin?: string | null | undefined;
+      version?: string | null | undefined;
+      collections?: Record<string, unknown> | null | undefined;
+      variants?: Record<string, unknown> | null | undefined;
+      localPath?: string | null | undefined;
+    };
+    const explicitOrg = typeof v.org === "string" ? v.org.trim() || undefined : undefined;
+    const explicitRepo = typeof v.repo === "string" ? v.repo.trim() || undefined : undefined;
     const org = envResolveOrg(explicitOrg);
     const repo = envResolveRepo(explicitRepo);
-    const required = envRequireOrgRepo(org, repo);
     return {
-      ...value,
-      org: required.org,
-      repo: required.repo,
-      ref: envResolveRef(value.ref?.trim() || undefined),
-      origin: envResolveOrigin(value.origin?.trim() || undefined),
-      version: envResolveVersion(value.version?.trim() || undefined),
-    };
+      collections: (v.collections ?? {}) as never,
+      variants: (v.variants ?? undefined) as never,
+      localPath: typeof v.localPath === "string" ? v.localPath : undefined,
+      org: org ?? undefined,
+      repo: repo ?? undefined,
+      ref: envResolveRef(typeof v.ref === "string" ? v.ref.trim() || undefined : undefined) || (typeof v.ref === "string" ? v.ref.trim() : "") || "main",
+      origin: envResolveOrigin(typeof v.origin === "string" ? v.origin.trim() || undefined : undefined),
+      version: envResolveVersion(typeof v.version === "string" ? v.version.trim() || undefined : undefined) || (typeof v.version === "string" ? v.version.trim() : "") || "0",
+    } as never;
   },
-  encode: (value) => value,
+  encode: (value) => value as never,
 });
 
 export class Config<Colls extends AnyCollections = AnyCollections> {

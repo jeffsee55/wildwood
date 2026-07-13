@@ -18,15 +18,24 @@ export {
   type DefineConfigInput,
 } from "@/client/config";
 export { createClient, type WildwoodClient } from "@/client/index";
+// Provider / git transport types (transport-only, no authz)
 export type {
-  WildwoodAuthAction,
-  WildwoodAuthConfig,
-  WildwoodAuthUser,
-  WildwoodAuthorizeContext,
-  WildwoodBetterAuthLike,
   WildwoodGitHubAppAuth,
   WildwoodGitHubAuth,
+  WildwoodProviderConfig,
 } from "@/client/auth";
+// Route-owned authz types — provider is transport-only; these live on `createWildwoodRoute({ auth })`
+export type {
+  WildwoodAuthAction,
+  WildwoodAuthenticateContext,
+  WildwoodAuthenticateFn,
+  WildwoodAuthUser,
+  WildwoodAuthorizeContext,
+  WildwoodAuthorizeFn,
+  WildwoodBaseURL,
+  WildwoodRouteAuthOptions,
+  WildwoodTrustedOrigins,
+} from "@/nextjs/auth";
 export {
   getVercelSystemEnv,
   isVercel,

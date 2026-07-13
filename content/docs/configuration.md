@@ -98,35 +98,32 @@ Build indexes locally then syncs Turso for prod. `VERCEL_GIT_COMMIT_SHA` pins qu
 Wildwood's Next.js route owns better-auth. No `database` field — auth tables live in the same Turso DB as content.
 
 ```ts
-// lib/wildwood.ts — git creds (single source of truth for App auth)
+// lib/wildwood.ts — git transport only (no authz)
 export const wildwood = createClient({
   config,
-  database, // Turso
-  provider: { // preferred name; `auth` still works as alias
+  database, // Turso — single DB for content + auth tables
+  provider: {
     github: { type: "app", app: { appId: process.env.GITHUB_APP_ID!, privateKey: process.env.GITHUB_PRIVATE_KEY! } },
-    authorize: () => true,
   },
 });
 
-// app/api/[...path]/route.ts — sign-in, reuses same App
+// app/api/[...path]/route.ts — owns all authz: sign-in + action gates
 export const { GET, POST, ... } = createWildwoodRoute(() => wildwood, {
   auth: {
     secret: process.env.BETTER_AUTH_SECRET!,
-    github: true, // ← true = enable GitHub OAuth, reuse App's GITHUB_CLIENT_ID/SECRET
-    // or explicit if sign-in creds differ: github: { clientId, clientSecret }
+    github: true, // true = enable GitHub OAuth, reuse App's GITHUB_CLIENT_ID/SECRET
 
+    // authenticate = who may sign in at all; authorize = what may they do once signed in
     authenticate: async ({ user }) => allowList.has(user.email?.toLowerCase() ?? ""),
     authorize: async ({ user, action }) => !!user,
   },
 });
 ```
 
-- `github: boolean | { clientId, clientSecret }` — `true` enables OAuth and reuses the App creds already configured for git (via `provider.github` / manifest conversion). No separate `WILDWOOD_GITHUB_*` or `GITHUB_TOKEN` needed in userland.
-- Future: `providers: { gitlab: true }`, `google`, etc — `auth` → `provider` rename in `createClient` is forward-compatible; `auth` remains as deprecated alias for one minor.
-- `baseURL` / `trustedOrigins` omitted → autodetected from Request (works for localhost, `*.vercel.app`, custom domains).
-- `authenticate` = who may create a session? (sign-in gate) vs `authorize` = what may they do? (action gate). `authenticate` replaces `allowedEmails`.
-
-For client layer (`createClient({ provider })`), `provider.github` = GitHub App / PAT for remote, `provider.authorize` gates git actions.
+- `createClient({ provider })` = transport only: `{ github: { type: "app" | "token" | "default" } }`. No `authenticate` / `authorize` here.
+- `createWildwoodRoute({ auth })` = **only place authz lives**. `auth.github: true` enables GitHub OAuth reusing the same App's `GITHUB_CLIENT_ID` / `SECRET` (from manifest). Pass `{ clientId, clientSecret }` only if sign-in creds differ from git App.
+- `baseURL` / `trustedOrigins` omitted → autodetected from Request (localhost, `*.vercel.app`, custom domains).
+- Future providers: `auth: { providers: { gitlab: true, google: true } }`.
 
 ## Env overview
 

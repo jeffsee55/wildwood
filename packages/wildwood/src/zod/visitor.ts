@@ -194,13 +194,18 @@ export const zodVisitor = (args: ZodVisitorArgs): unknown => {
         }
       }
       // If the union options are connections, append their collection
-      // names to the path as a discriminant
+      // names to the path as a discriminant — all optional, never required.
       if (option?._zod.def.type === "custom") {
-        // @ts-expect-error - we know this is a collection
-        field.push(
-          option._zod.def?.params?.__wildwoodConnection ??
-            option._zod.def?.params?.__tr33Connection,
-        );
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const anyOpt = option as any;
+        const name =
+          (anyOpt?._zod?.def?.params?.__wildwoodConnection as string | undefined) ??
+          (anyOpt?._zod?.def?.params?.__tr33Connection as string | undefined) ??
+          (anyOpt?._zod?.def?.params as { __wildwoodConnection?: string; __tr33Connection?: string } | undefined)
+            ?.__wildwoodConnection ??
+          (anyOpt?._zod?.def?.params as { __wildwoodConnection?: string; __tr33Connection?: string } | undefined)
+            ?.__tr33Connection;
+        if (name) field.push(name as unknown as string);
       }
       if (option) {
         return zodVisitor({

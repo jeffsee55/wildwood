@@ -12,13 +12,16 @@ const libsqlClient = libsqlCreateClient({
   authToken: process.env.TURSO_AUTH_TOKEN?.trim() || "",
 });
 
-function githubAppProvider(): WildwoodProviderConfig["github"] {
-  if (!process.env.GITHUB_APP_ID || !process.env.GITHUB_PRIVATE_KEY) return { type: "default" };
+function githubAppProvider(): WildwoodProviderConfig["github"] | undefined {
+  const appId = process.env.GITHUB_APP_ID?.trim();
+  const privateKey = process.env.GITHUB_PRIVATE_KEY?.trim();
+  // undefined = not configured → remote falls back to default (gh CLI in dev, error in prod)
+  if (!appId || !privateKey) return undefined;
   return {
     type: "app",
     app: {
-      appId: process.env.GITHUB_APP_ID,
-      privateKey: process.env.GITHUB_PRIVATE_KEY,
+      appId,
+      privateKey,
       installationId: process.env.GITHUB_APP_INSTALLATION_ID?.trim() || undefined,
     },
   };
@@ -31,22 +34,33 @@ export function buildPlaygroundWildwood(config: PlaygroundConfig): WildwoodClien
     schema: config.contentType === "md" ? z.markdown() : z.json({}),
   });
 
+  // All optional config surfaces — defineConfig tolerates missing org/repo during scaffolding/typecheck
   const wildwoodConfig =
     config.source === "github"
-      ? defineConfig({ org: config.org, repo: config.repo, ref: config.ref, version: "0", collections: { page } })
-      : defineConfig({
-          org: config.org,
-          repo: config.repo,
-          ref: config.ref,
-          localPath: config.localPath?.trim() ? config.localPath.trim() : undefined,
+      ? defineConfig({
+          org: config.org as string | undefined,
+          repo: config.repo as string | undefined,
+          ref: (config as { ref?: string | undefined }).ref,
           version: "0",
           collections: { page },
-        });
+        } as never)
+      : defineConfig({
+          org: config.org as string | undefined,
+          repo: config.repo as string | undefined,
+          ref: (config as { ref?: string | undefined }).ref,
+          localPath: (config as { localPath?: string | undefined }).localPath?.trim() ? (config as { localPath: string }).localPath.trim() : undefined,
+          version: "0",
+          collections: { page },
+        } as never);
+
+  const gh = githubAppProvider();
 
   return createClient({
-    provider: { github: githubAppProvider(), authorize: () => true },
-    config: wildwoodConfig,
-    database: libsqlClient,
+    // provider = transport only. `undefined` inside means not configured — no ternary needed.
+    // route's `auth.authenticate` / `auth.authorize` owns all authz.
+    provider: { github: gh as never },
+    config: wildwoodConfig as never,
+    database: libsqlClient as never,
   });
 }
 

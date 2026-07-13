@@ -18,12 +18,15 @@ export const metadata: Metadata = {
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const navRes = await wildwood.nav.findMany({ with: { children: true } });
-  const nav = navRes?.items?.[0]
+  // `wildwood` is `any` — avoid `never`/type inference issues from optional config.
+  const navRes = (await wildwood.nav.findMany({ with: { children: true } })) as {
+    items?: Array<{ label?: string; children?: Array<{ slug?: string; title?: string; _meta?: { path?: string } }> }>;
+  };
+  const nav = navRes?.items?.[0] as { label?: string; children?: Array<{ slug: string; title: string; _meta: { path: string } }> } | undefined;
   if (!nav) {
-    return null
+    return null;
   }
-  const docs = nav.children
+  const docs = (nav.children ?? []) as Array<{ slug: string; title: string; _meta: { path: string } }>;
 
   return (
     // suppressHydrationWarning — color-scheme is driven by prefers-color-scheme,

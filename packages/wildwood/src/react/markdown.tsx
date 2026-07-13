@@ -112,7 +112,7 @@ type NodeType =
 // ── public props ───────────────────────────────────────────────────────────
 
 export type MarkdownClassNames = Partial<
-  Record<NodeType | "ul" | "ol" | "h1" | "h2" | "h3" | "h4" | "a" | "p" | "code" | "pre" | "blockquote" | "li", string>
+  Record<NodeType | "ul" | "ol" | "h1" | "h2" | "h3" | "h4" | "a" | "p" | "code" | "pre" | "blockquote" | "li" | "img" | "image", string>
 >;
 
 export type MarkdownComponents = {

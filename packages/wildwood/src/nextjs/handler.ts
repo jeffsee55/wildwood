@@ -1,30 +1,51 @@
 /**
- * Framework-agnostic H3 handler — the part `apps/docs` actually uses.
+ * Framework-agnostic H3 handler — owns /api/wildwood/* sub-routers.
  * Zero deps on @wildwood/kit, better-auth, or next/*.
+ *
+ * Authz note: handlers are transport-only. Route layer (`createWildwoodRoute`)
+ * resolves the session user + owns `authenticate` / `authorize` and injects
+ * an authorizer here. `provider` / client has no `authorize`.
  */
 
 import { H3 } from "h3";
 import type { WildwoodClient } from "@/client/index";
 import { vscodeEmbedCorsHeaders, withVscodeEmbedCors } from "@/nextjs/vscode-embed-csp";
-import { createGitServiceRouter } from "@/nextjs/handlers/git-service";
+import type { WildwoodAuthAction } from "@/nextjs/auth";
+import { createGitServiceRouter, type GitServiceAuthorizeFn } from "@/nextjs/handlers/git-service";
 import { createGitHubRouter } from "@/nextjs/handlers/github-router";
+import { createGitHubAppManifestRouter } from "@/nextjs/handlers/github-app-manifest-router";
 import { createVscodeRouter } from "@/nextjs/handlers/vscode-router";
 
-export type CreateHandlerOptions = { currentRef?: string };
+export type CreateHandlerOptions = {
+  currentRef?: string;
+  /**
+   * Optional authorizer — injected by `createWildwoodRoute`.
+   * Called before git mutations. Return `Response` / `false` to deny.
+   * `client` / provider never owns this; it's route-owned.
+   */
+  authorize?: GitServiceAuthorizeFn;
+  /** Same gate for GitHub App manifest routes that need git-write-level authz. */
+  authorizeAppManifest?: (req: Request, action: WildwoodAuthAction) => Promise<Response | null>;
+};
 
-export function createHandler(client: WildwoodClient, _options?: CreateHandlerOptions) {
+export function createHandler(client: WildwoodClient, options?: CreateHandlerOptions) {
   const base = new H3();
   const api = new H3();
   const wildwoodNs = new H3();
 
-  // Singletons — H3 router instances are stateless — reuse same sub-routers for both namespaces.
-  const gitRouter = createGitServiceRouter(client);
+  // Injector is optional — when absent (tests / direct usage without route),
+  // git routes allow (route layer still gates at Next boundary when configured).
+  const gitRouter = createGitServiceRouter(client, { authorize: options?.authorize });
   const githubRouter = createGitHubRouter(client);
+  const appManifestRouter = createGitHubAppManifestRouter(client, {
+    authorize: options?.authorize as never,
+  });
   const vscodeRouter = createVscodeRouter(client);
 
   // Canonical: /api/wildwood/*
   wildwoodNs.mount("/git", gitRouter);
   wildwoodNs.mount("/github", githubRouter);
+  wildwoodNs.mount("/github/app-manifest", appManifestRouter);
   wildwoodNs.mount("/vscode", vscodeRouter);
 
   api.mount("/wildwood", wildwoodNs);
@@ -67,7 +88,7 @@ export function createHandler(client: WildwoodClient, _options?: CreateHandlerOp
 
 /**
  * `Request → Response`. Same signature as Next's catch-all route; no next/* inside.
- * Host owns cookie + revalidateTag — see `apps/docs/app/api/[...path]/route.ts`.
+ * Host owns cookie + revalidateTag + auth — see `apps/docs/app/api/[...path]/route.ts`.
  */
 export function handle(client: WildwoodClient, options?: CreateHandlerOptions) {
   const app = createHandler(client, options);

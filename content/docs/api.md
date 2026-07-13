@@ -106,22 +106,34 @@ class Config<Colls extends AnyCollections> {
 - `fixedPrefixFromMatch(match)`.
 - `resolveLocalGitRoot(start)` / `normalizeLocalPath` / `shouldAutoUseLocal` private helpers.
 
-## Auth (`client/auth.ts`)
+## Client provider (transport-only) — `client/auth.ts`
 
 ```ts
-type WildwoodAuthConfig = {
-  github?: Tr33GitHubAuth;    // {type:"app",app:{appId,privateKey,installationId?}} | {type:"token",token} | {type:"default"}
-  betterAuth?: Tr33BetterAuthLike; // { api:{ getSession(args:{headers:Headers}) } }
-  getUser?: (req: Request)=>Promise<WildwoodAuthUser|null>;
-  authorize?: (ctx: WildwoodAuthorizeContext) => boolean|void|Response|Promise<...>;
+type WildwoodProviderConfig = {
+  github?: { type:"app", app:{appId,privateKey,installationId?}} | {type:"token",token} | {type:"default"}
+};
+// createClient({ provider }) — no authorize/authenticate here
+```
+
+## Auth (route-owned) — `nextjs/auth.ts`, re-exported from `nextjs/route.ts`
+
+```ts
+type WildwoodRouteAuthOptions = {
+  secret?: string;
+  baseURL?: string | { allowedHosts, fallback?, protocol? }; // omitted → autodetected
+  trustedOrigins?: string[] | ((req?)=>string[]|Promise<string[]>);
+  github?: boolean | { clientId, clientSecret }; // true = reuse App's GITHUB_CLIENT_ID/SECRET
+  providers?: { github?: ..., emailAndPassword?: boolean; socialProviders? };
+  authenticate?: (ctx:{user,request,provider?})=>boolean|void|Response|Promise<...>; // sign-in gate
+  authorize?: (ctx:{user,action,request})=>boolean|void|Response|Promise<...>;      // action gate
 };
 
 type WildwoodAuthUser = { id?, email?, name?, image?: string|null };
-type WildwoodAuthAction = { type:"git.switchRef",ref } | { type:"git.createBranch",name,baseRef? } | { type:"git.add",ref,paths } | { type:"git.patchWorktree",ref,paths } | { type:"git.commit",ref,message } | { type:"git.discard",ref } | { type:"git.push",ref } | { type:"git.pull",ref } | { type:"git.merge",ref,message? } | { type:"git.createPr",ref,title?,body? };
-type WildwoodAuthorizeContext = { action: WildwoodAuthAction; config: Config; request: Request; user: WildwoodAuthUser|null };
+type WildwoodAuthAction = { type:"git.switchRef",ref } | { type:"git.createBranch",name,baseRef? } | { type:"git.add",ref,paths } | { type:"git.patchWorktree",ref,paths } | { type:"git.commit",ref,message } | { type:"git.discard",ref } | { type:"git.push",ref } | { type:"git.pull",ref } | { type:"git.merge",ref,message? } | { type:"git.createPr",ref,title?,body? } | { type:"content.update",path } | { type:"content.delete",path };
+type WildwoodAuthorizeContext = { user: WildwoodAuthUser|null; action: WildwoodAuthAction; request: Request };
 ```
 
-- `getUser` wins over `betterAuth`; `userFromUnknownSession(session)` extracts `WildwoodAuthUser` from `{ user?:... }`.
+- Only `createWildwoodRoute({ auth: { authenticate, authorize } })` owns authz. Route resolves session via better-auth (same Turso DB, lazy) then injects `authorize` into H3 git/App-manifest handlers. Client/provider never reads authz.
 
 ## Git (`git/git.ts`)
 

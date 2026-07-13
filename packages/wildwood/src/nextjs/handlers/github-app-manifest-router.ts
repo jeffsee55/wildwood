@@ -30,8 +30,13 @@ import {
   formatEnvFileContent,
   type GitHubPermissionLevel,
 } from "@/nextjs/github-app-manifest";
-import { authorizeGitAction } from "./auth";
+import type { WildwoodAuthAction } from "@/nextjs/auth";
 import { resolveEventOrigin } from "./util";
+
+export type GitHubAppManifestAuthorizeFn = (
+  req: Request,
+  action: WildwoodAuthAction,
+) => Promise<Response | null>;
 
 const STATE_COOKIE = "__wildwood_github_app_state";
 const STATE_MAX_AGE_SEC = 10 * 60;
@@ -205,7 +210,10 @@ type StartBody = {
   description?: string;
 };
 
-export function createGitHubAppManifestRouter(client: WildwoodClient): H3 {
+export function createGitHubAppManifestRouter(
+  client: WildwoodClient,
+  opts: { authorize?: GitHubAppManifestAuthorizeFn } = {},
+): H3 {
   const router = new H3();
 
   function resolveOrigin(event: { url: URL; req: { headers: { get(n: string): string | null } } }): string {
@@ -725,9 +733,14 @@ ${stepScript}
 
   // ── POST /conversions — JSON API, gated by authorize (same policy as git writes) ──
   router.post("/conversions", async (event) => {
-    // Gate via same authz used for git mutations.
-    const forbidden = await authorizeGitAction(client, event.req, { type: "git.createBranch", name: "__github_app_manifest__" });
-    if (forbidden) return forbidden;
+    // Gate via same authz used for git mutations — injected from route layer.
+    if (opts.authorize) {
+      const forbidden = await opts.authorize(event.req as unknown as Request, {
+        type: "git.createBranch",
+        name: "__github_app_manifest__",
+      });
+      if (forbidden) return forbidden;
+    }
 
     let code = "";
     const ct = event.req.headers.get("content-type") ?? "";
@@ -782,8 +795,13 @@ ${stepScript}
     if (process.env.NODE_ENV === "production") {
       return jsonResponse({ error: "Not available in production" }, { status: 403 });
     }
-    const forbidden = await authorizeGitAction(client, event.req, { type: "git.createBranch", name: "__github_app_manifest__" });
-    if (forbidden) return forbidden;
+    if (opts.authorize) {
+      const forbidden = await opts.authorize(event.req as unknown as Request, {
+        type: "git.createBranch",
+        name: "__github_app_manifest__",
+      });
+      if (forbidden) return forbidden;
+    }
 
     let envMap: Record<string, string> | null = null;
     try {

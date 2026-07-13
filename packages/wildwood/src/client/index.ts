@@ -1,9 +1,5 @@
 import type { Client as LibsqlClient } from "@libsql/client";
-import type {
-  WildwoodAuthConfig,
-  WildwoodClientAuthInput,
-  WildwoodProviderConfig,
-} from "@/client/auth";
+import type { WildwoodProviderConfig } from "@/client/auth";
 import type { AnyCollections, Config } from "@/client/config";
 import type { OrmConfig } from "@/client/types";
 import { Git } from "@/git/git";
@@ -14,66 +10,99 @@ import { LibsqlDatabase } from "@/sqlite/database";
 import type { FindWorktreeEntriesArgs } from "@/types";
 
 /**
- * `createClient` now captures `Colls` literally from `Config<Colls>` so that
- * `FindTypes` can infer connections / filters from `z.lazy(() => z.connect(...)).optional()`
- * without being erased by `dist` declaration emit. Previously `C extends Config<ConfigInput>`
- * where `ConfigInput["collections"]` was `Record<string, Collection>` with
- * `Collection["schema"] = ZodCodec<ZodString, ZodObject>` lost inner shape → `with` became `never`.
- *
- * `provider` is the new preferred name for `auth` — `provider.github` holds the
- * GitHub App creds used by GitHubRemote. Route-level `createWildwoodRoute({ auth: { github: true } })`
- * reuses those same creds for OAuth sign-in (no duplicate env mapping). `auth` is still accepted as
- * deprecated alias.
+ * `createClient` captures `Colls` literally from `Config<Colls>` so `FindTypes`
+ * can infer connections/filters. Everything optional where possible — no required
+ * fields that block scaffolding. `provider` is git transport only — no authz.
+ * All `authenticate`/`authorize` lives on `createWildwoodRoute({ auth })`.
  */
-export const createClient = <Colls extends AnyCollections>(args: {
-  auth?: WildwoodAuthConfig;
-  provider?: WildwoodProviderConfig;
-  config: Config<Colls>;
-  database: LibsqlClient;
-}) => {
-  // provider is preferred; auth is deprecated alias — both map to same internal shape
-  const rawAuth = (args.provider ?? args.auth) as WildwoodClientAuthInput | undefined;
-  const auth: WildwoodAuthConfig | undefined = rawAuth as WildwoodAuthConfig | undefined;
-  const { config, database } = args;
-  if (!database) {
-    throw new Error(
-      "createClient requires a LibSQL database client. Pass createClient({ config, database }).",
-    );
+export type WildwoodCreateClientArgs<Colls extends AnyCollections> = {
+  provider?: WildwoodProviderConfig | undefined | null;
+  /** Optional — `defineConfig` output. When omitted we use an empty collections shell. */
+  config?: Config<Colls> | undefined | null;
+  /** Optional — libsql client. When omitted, DB-backed reads are unavailable until client is provided. */
+  database?: LibsqlClient | undefined | null;
+};
+
+export const createClient = <Colls extends AnyCollections = AnyCollections>(
+  args: WildwoodCreateClientArgs<Colls> = {},
+) => {
+  const provider = args.provider ?? undefined;
+  const config = (args.config ?? null) as Config<Colls> | null;
+  const database = (args.database ?? null) as LibsqlClient | null;
+
+  // config may be omitted during scaffolding / typecheck — use resilient fallback.
+  const effectiveConfig = (config ??
+    ({
+      collections: [],
+      org: "",
+      repo: "",
+      ref: "main",
+      version: "0",
+      resolvedLocalPath: undefined,
+      localPath: undefined,
+      wantsLocal: false,
+      getCollectionForPath: () => null,
+      slugForPath: () => "",
+      paths: [],
+      matches: () => false,
+      namespace: { orgName: "", repoName: "", version: "0" },
+      defaultVariant: () => "__",
+    } as unknown as Config<Colls>)) as Config<Colls>;
+
+  let db: LibsqlDatabase | null = null;
+  if (database) {
+    db = new LibsqlDatabase({ client: database, config: effectiveConfig as unknown as Config });
   }
-  const db = new LibsqlDatabase({ client: database, config: config as unknown as Config });
-  // Prefer `resolvedLocalPath` (explicit `localPath` or auto-detected git root in dev)
-  const useNative =
-    typeof (config as { resolvedLocalPath?: string | undefined }).resolvedLocalPath === "string"
+
+  const useNative = config
+    ? typeof (config as { resolvedLocalPath?: string | undefined }).resolvedLocalPath === "string"
       ? Boolean((config as { resolvedLocalPath?: string | undefined }).resolvedLocalPath)
-      : Boolean((config as { wantsLocal?: boolean }).wantsLocal ?? config.localPath);
+      : Boolean((config as { wantsLocal?: boolean }).wantsLocal ?? config.localPath)
+    : false;
+
   const remote = useNative
-    ? new NativeRemote({ auth, config: config as unknown as Config })
-    : new GitHubRemote({ auth, config: config as unknown as Config });
-  const git = new Git({ config: config as unknown as Config, remote, db });
+    ? new NativeRemote({ provider: provider as never, config: effectiveConfig as unknown as Config })
+    : new GitHubRemote({ provider: provider as never, config: effectiveConfig as unknown as Config });
+
+  const git = db
+    ? new Git({ config: effectiveConfig as unknown as Config, remote, db })
+    : // Lazy stub — real Git ops throw at call time if DB missing, but typecheck/construction succeeds.
+      ({
+        findMany: async () => {
+          throw new Error("wildwood: database not configured. Pass createClient({ database }).");
+        },
+        findFirst: async () => {
+          throw new Error("wildwood: database not configured. Pass createClient({ database }).");
+        },
+        // spread-safe for other Git fields accessed via `any`
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any as Git);
 
   type Mapped = {
     [K in keyof Colls as Colls[K]["name"] & string]: Colls[K];
   };
 
   const collections = {} as OrmConfig<Mapped>;
-  for (const collection of Object.values(config.collections)) {
-    (collections as Record<string, unknown>)[collection.name] = {
-      findMany: (a: Omit<FindWorktreeEntriesArgs, "collection">) =>
-        git.findMany({ ...a, collection: collection.name }),
-      findFirst: (a: Omit<FindWorktreeEntriesArgs, "collection"> = {}) =>
-        git.findFirst({ ...(a as FindWorktreeEntriesArgs), collection: collection.name }),
-    };
+  if (config?.collections) {
+    for (const collection of Object.values(config.collections)) {
+      (collections as Record<string, unknown>)[collection.name] = {
+        findMany: (a: Omit<FindWorktreeEntriesArgs, "collection">) =>
+          git.findMany({ ...a, collection: collection.name }),
+        findFirst: (a: Omit<FindWorktreeEntriesArgs, "collection"> = {}) =>
+          git.findFirst({ ...(a as FindWorktreeEntriesArgs), collection: collection.name }),
+      };
+    }
   }
+
   return {
     ...collections,
     _: {
-      config,
-      auth,
-      /** preferred — `auth` is deprecated alias */
-      provider: auth,
+      config: effectiveConfig,
+      provider: provider as WildwoodProviderConfig | undefined,
       git,
       logger: new Logger({ name: "something" }),
-      db,
+      // db may be null when `database` omitted — route/auth gracefully handles it at request time.
+      db: db as unknown as LibsqlDatabase,
     },
   };
 };
@@ -85,7 +114,7 @@ export const createClient = <Colls extends AnyCollections>(args: {
 export type WildwoodClient = {
   _: {
     config: Config;
-    auth?: WildwoodAuthConfig;
+    provider?: WildwoodProviderConfig;
     git: Git;
     logger: Logger;
     db: LibsqlDatabase;

@@ -1,31 +1,42 @@
-import { type WildwoodAuthAction, userFromUnknownSession } from "@/client/auth";
-import type { WildwoodClient } from "@/client/index";
+/**
+ * Git authz helpers — route-owned only.
+ *
+ * Provider (client) is transport-only, no authz. So handlers don't read
+ * `client._.auth` / `client._.provider` for authz. Route.ts resolves the
+ * session user and injects `authOpts` + `user` into this helper.
+ */
 
-export type AuthContext = {
-  client: WildwoodClient;
+import type { WildwoodAuthAction, WildwoodAuthUser, WildwoodRouteAuthOptions } from "@/nextjs/auth";
+
+export type AuthGate = {
+  auth?: WildwoodRouteAuthOptions;
   request: Request;
+  action: WildwoodAuthAction;
+  user: WildwoodAuthUser | null;
+  /**
+   * Optional authenticate evaluation — synthesized from route's `authenticate`
+   * so already-signed-in sessions are gated even if they were created before
+   * `authenticate` was configured.
+   */
+  evaluateAuthenticate?: (user: WildwoodAuthUser | null, request: Request) => Promise<Response | false | null>;
 };
 
-export async function resolveAuthUser(client: WildwoodClient, request: Request) {
-  if (client._.auth?.getUser) return client._.auth.getUser(request);
-  if (client._.auth?.betterAuth) {
-    const session = await client._.auth.betterAuth.api.getSession({
-      headers: request.headers,
-    });
-    return userFromUnknownSession(session);
-  }
-  return null;
-}
+export async function authorizeGitAction(gate: AuthGate): Promise<Response | null> {
+  const { auth: authOpts, action, user, request } = gate;
+  if (!authOpts) return null;
 
-export async function authorizeGitAction(
-  client: WildwoodClient,
-  request: Request,
-  action: WildwoodAuthAction,
-): Promise<Response | null> {
-  const authorize = client._.auth?.authorize;
-  if (!authorize) return null;
-  const user = await resolveAuthUser(client, request);
-  const result = await authorize({ action, config: client._.config, request, user });
+  if (gate.evaluateAuthenticate) {
+    const probe = await gate.evaluateAuthenticate(user, request);
+    if (probe) {
+      if (probe instanceof Response) return probe;
+      if (!user) return new Response("Authentication required", { status: 401 });
+      return new Response("Forbidden", { status: 403 });
+    }
+  }
+
+  if (!authOpts.authorize) return null;
+
+  const result = await authOpts.authorize({ user, action, request });
   if (result instanceof Response) return result;
   if (result === false) return new Response("Forbidden", { status: 403 });
   return null;

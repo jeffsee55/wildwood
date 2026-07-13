@@ -42,20 +42,24 @@ import {
   activeRefSetCookieHeader,
   clearBranchCookieHeader,
 } from "wildwood-shared";
-import type { WildwoodAuthAction } from "@/client/auth";
 
 export { WILDWOOD_BRANCH_COOKIE, WILDWOOD_CACHE_TAG };
 
 // --- auth types re-exported for convenience so app can import from "wildwood/nextjs/route"
+// All `authenticate` / `authorize` / identity / action types live here —
+// provider / client is transport-only, no authz.
 export type {
+  WildwoodAuthAction,
   WildwoodAuthenticateContext,
   WildwoodAuthenticateFn,
+  WildwoodAuthUser,
   WildwoodAuthorizeContext,
   WildwoodAuthorizeFn,
   WildwoodBaseURL,
   WildwoodRouteAuthOptions,
   WildwoodTrustedOrigins,
 } from "./auth";
+import type { WildwoodAuthAction } from "./auth";
 
 const DEFAULT_MUTATION_RE =
   /\/git\/(commit|discard|merge|pull|create-branch|switch-branch)\/?$/;
@@ -164,12 +168,12 @@ function synthesizeAuthenticateFromLegacy(
 ): import("./auth").WildwoodAuthenticateFn | null {
   const allowedEmails = (authOpts as { allowedEmails?: string[] }).allowedEmails;
   const isAllowedLegacy = (authOpts as {
-    isAllowed?: (ctx: { user: import("@/client/auth").WildwoodAuthUser | null; request: Request }) => boolean | Promise<boolean>;
+    isAllowed?: (ctx: { user: import("./auth").WildwoodAuthUser | null; request: Request }) => boolean | Promise<boolean>;
   }).isAllowed;
   if (!allowedEmails && !isAllowedLegacy) return null;
   return async ({ user, request }) => {
     if (isAllowedLegacy) {
-      const ok = await isAllowedLegacy({ user: user as never, request });
+      const ok = await isAllowedLegacy({ user, request });
       if (!ok) return false as const;
     }
     if (allowedEmails) {
@@ -182,8 +186,15 @@ function synthesizeAuthenticateFromLegacy(
   };
 }
 
+export type WildwoodRouteClientInput =
+  | WildwoodClient
+  | { _?: { config?: { ref?: string | undefined; org?: string | undefined; repo?: string | undefined } } & Record<string, unknown> }
+  | Record<string, unknown>;
+
 export function createWildwoodRoute(
-  getClient: ((req?: Request) => WildwoodClient | Promise<WildwoodClient>) | (() => WildwoodClient | Promise<WildwoodClient>),
+  getClient:
+    | ((req?: Request) => WildwoodRouteClientInput | Promise<WildwoodRouteClientInput>)
+    | (() => WildwoodRouteClientInput | Promise<WildwoodRouteClientInput>),
   opts: CreateWildwoodRouteOptions = {},
 ) {
   const tagName = opts.revalidateTagName ?? WILDWOOD_CACHE_TAG;
@@ -197,18 +208,67 @@ export function createWildwoodRoute(
   // we detect `getClient.length >= 1` or caller opts requestAware.
   const isRequestAware = (opts as { requestAware?: boolean }).requestAware || getClient.length >= 1;
 
+  // Shared authorizer injected into H3 git handlers — only owns authz lives here.
+  // H3 routers may not have request yet when constructed, so we build an
+  // authorize fn that closes over authOpts + per-request user resolution.
+  // If authOpts absent, authorize is undefined (allow-all, matches route gate).
+  let gitAuthorizeForH3:
+    | ((req: Request, action: WildwoodAuthAction) => Promise<Response | null>)
+    | undefined;
+
+  async function buildGitAuthorizeForRequest(
+    req: Request,
+  ): Promise<(req: Request, action: WildwoodAuthAction) => Promise<Response | null>> {
+    if (!authOpts) return async () => null;
+    return async (innerReq: Request, action: WildwoodAuthAction) => {
+      const authRes = await resolveAuthUserFromRequest(innerReq ?? req);
+      const user = authRes?.user ?? null;
+      const mod = await getAuthModule();
+
+      const authFn = authOpts.authenticate ?? synthesizeAuthenticateFromLegacy(authOpts);
+      if (authFn) {
+        const gate = await mod.evaluateAuthenticate(authFn as never, user as never, innerReq ?? req);
+        if (gate) {
+          if (!user) return new Response("Authentication required", { status: 401 });
+          if (gate instanceof Response) return gate;
+          return new Response("Forbidden", { status: 403 });
+        }
+      }
+      if (!authOpts.authorize) return null;
+      const result = await authOpts.authorize({ user: user as never, action: action as never, request: innerReq ?? req });
+      if (result instanceof Response) return result;
+      if (result === false) return new Response("Forbidden", { status: 403 });
+      return null;
+    };
+  }
+
   let staticHandlerPromise: Promise<LazyHandler> | null = null;
 
   function getHandlerFor(req?: Request): Promise<LazyHandler> {
     if (isRequestAware && req) {
-      return Promise.resolve((getClient as (r?: Request) => WildwoodClient | Promise<WildwoodClient>)(req)).then((c) =>
-        createNextHandle(c as WildwoodForBranch as unknown as WildwoodClient),
-      );
+      // Per-request client (play) — need per-request authorize that can resolve user for this req.
+      return (async () => {
+        const client = (await (getClient as (r?: Request) => WildwoodRouteClientInput | Promise<WildwoodRouteClientInput>)(req)) as WildwoodClient;
+        const authorize = await buildGitAuthorizeForRequest(req);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return createNextHandle(client as unknown as WildwoodForBranch as unknown as WildwoodClient, { authorize: authorize as any });
+      })();
     }
     if (!staticHandlerPromise) {
-      staticHandlerPromise = Promise.resolve((getClient as () => WildwoodClient | Promise<WildwoodClient>)()).then((c) =>
-        createNextHandle(c as WildwoodForBranch as unknown as WildwoodClient),
-      );
+      staticHandlerPromise = (async () => {
+        const client = (await (getClient as () => WildwoodRouteClientInput | Promise<WildwoodRouteClientInput>)()) as WildwoodClient;
+        // Static case — lazily init authorize once; it still resolves user per-request via its own arg.
+        if (!gitAuthorizeForH3) {
+          // Placeholder that will self-initialize on first call then memoize inner fn.
+          // We can't know req here, so build a wrapper that builds real fn per req.
+          gitAuthorizeForH3 = async (innerReq: Request, action: WildwoodAuthAction) => {
+            const fn = await buildGitAuthorizeForRequest(innerReq);
+            return fn(innerReq, action);
+          };
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return createNextHandle(client as unknown as WildwoodForBranch as unknown as WildwoodClient, { authorize: gitAuthorizeForH3 as any });
+      })();
     }
     return staticHandlerPromise;
   }
@@ -233,20 +293,20 @@ export function createWildwoodRoute(
     return authModulePromise;
   }
 
-  let authInstancePromise: Promise<ReturnType<AuthBundle["getOrCreateAuth"]>> | null = null;
+  // getOrCreateAuth is async — unwrap to avoid Promise<Promise<>>.
+  let authInstancePromise: Promise<Awaited<ReturnType<AuthBundle["getOrCreateAuth"]>>> | null = null;
   let dbForAuthPromise: Promise<unknown> | null = null;
 
   function getDbForAuth(): Promise<unknown> {
     if (dbForAuthPromise) return dbForAuthPromise;
     dbForAuthPromise = (async () => {
-      // Resolve client once — don't go via H3 handler wrapper
-      const maybeWithReq = getClient as unknown as (
-        r?: Request,
-      ) => import("@/client/index").WildwoodClient | Promise<import("@/client/index").WildwoodClient>;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const maybeWithReq = getClient as unknown as (r?: Request | undefined) => any;
       const c = await maybeWithReq();
       const rawDb =
-        (c as { _: { db?: { client?: unknown; libsqlClient?: unknown } } })._?.db ??
-        (c as { _: { db?: unknown } })._?.db;
+        (c as { _?: { db?: { client?: unknown; libsqlClient?: unknown } | unknown } })?._?.db ??
+        (c as { db?: unknown })?.db ??
+        null;
       return rawDb ?? null;
     })();
     return dbForAuthPromise;
@@ -258,7 +318,8 @@ export function createWildwoodRoute(
       authInstancePromise = (async () => {
         const [mod, db] = await Promise.all([getAuthModule(), getDbForAuth()]);
         if (!db) throw new Error("Auth requires a database — ensure createClient({ database }) is configured.");
-        return mod.getOrCreateAuth({ auth: authOpts, db: db as never });
+        // getOrCreateAuth itself is async
+        return await mod.getOrCreateAuth({ auth: authOpts, db: db as never });
       })();
     }
     return authInstancePromise;
