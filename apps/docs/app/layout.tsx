@@ -72,7 +72,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
 
             <div className="mt-12 border-t border-border pt-8 font-mono text-[11px] leading-[1.9] text-muted-foreground">
               <div className="uppercase tracking-[0.12em]">source</div>
-              <div className="mt-2 normal-case tracking-[-01em]">
+              <div className="mt-2 normal-case tracking-[-0.01em]">
                 <code className="rounded border border-border bg-card px-1 py-0.5 text-[11px]">
                   content/
                 </code>{" "}
@@ -106,7 +106,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
 
           {/* main — whitespace-first, measure constrained */}
           <main className="min-w-0 py-10 pl-0 md:pl-10">
-            <div className="max-w-[var(--content-measure)]">{children}</div>
+            <div className="max-w-(--content-measure)">{children}</div>
           </main>
         </div>
 
