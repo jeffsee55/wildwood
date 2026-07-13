@@ -13,6 +13,15 @@ import type { NextConfig } from "next";
  * `vercel.json` already sets `rootDirectory: "apps/docs"` in prod, so Next's
  * default `process.cwd()` tracing root is correct.
  */
-const nextConfig: NextConfig = {};
+const nextConfig: NextConfig = {
+  // Wildwood ships prebuilt ESM (dist/) that contains bare imports like
+  // `import { betterAuth } from "better-auth"`. On Vercel with Turbopack,
+  // those dist files are traced as opaque "unexpected file in NFT list"
+  // and their bare imports aren't resolved from the app's node_modules.
+  // Transpiling the package from source lets Next's resolver see the
+  // dependencies correctly (and the imported heavy auth code stays isolated
+  // in the /api/auth route anyway).
+  transpilePackages: ["wildwood", "wildwood-kit", "wildwood-shared", "wildwood-store"],
+};
 
 export default nextConfig;
