@@ -169,8 +169,9 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
       const form = document.createElement("form");
       form.method = "POST";
       form.action = startData.action;
-      // Open in same tab preserves state cookie best (redirect goes back to our origin).
-      form.target = "_self";
+      // Open in new tab so the docs site stays open; state cookie is SameSite=Lax + scoped to origin so it's shared across tabs.
+      form.target = "_blank";
+      form.rel = "noopener";
 
       const mf = document.createElement("input");
       mf.type = "hidden";
@@ -186,7 +187,9 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
 
       document.body.appendChild(form);
       form.submit();
-      // Navigation will leave page — no need to clean up.
+      // New-tab flow — keep this tab alive and reset busy state for re-try / copy.
+      setCreating(false);
+      return;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setCreating(false);

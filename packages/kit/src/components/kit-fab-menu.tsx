@@ -1021,7 +1021,8 @@ export function KitFabMenu({
                               const form = document.createElement("form");
                               form.method = "POST";
                               form.action = data.action;
-                              form.target = "_self";
+                              form.target = "_blank";
+                              (form as HTMLFormElement & { rel?: string }).rel = "noopener";
                               const mf = document.createElement("input");
                               mf.type = "hidden";
                               mf.name = "manifest";

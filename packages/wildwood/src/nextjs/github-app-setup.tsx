@@ -78,7 +78,8 @@ export function WildwoodGitHubAppSetup({
       const form = document.createElement("form");
       form.method = "POST";
       form.action = data.action;
-      form.target = "_self";
+      form.target = "_blank";
+      form.rel = "noopener";
       const m = document.createElement("input");
       m.type = "hidden";
       m.name = "manifest";
@@ -91,6 +92,8 @@ export function WildwoodGitHubAppSetup({
       form.appendChild(s);
       document.body.appendChild(form);
       form.submit();
+      setBusy(false);
+      return;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setBusy(false);
