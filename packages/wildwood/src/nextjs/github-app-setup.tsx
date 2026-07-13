@@ -104,25 +104,37 @@ export function WildwoodGitHubAppSetup({
     <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
       <h2 className="text-base font-semibold">GitHub App setup</h2>
       <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-        Creates a GitHub App via Manifest flow. Redirects to the bundled callback <code>/api/wildwood/github/app-manifest/callback</code> which
-        exchanges the code and shows Vercel CLI + <code>.env.local</code> snippets. No webhook by default — app creation works from any
-        deployment including protected previews.
+        Creates a GitHub App via Manifest flow. Redirects to the bundled callback{" "}
+        <code>/api/wildwood/github/app-manifest/callback</code> which exchanges the code and shows
+        Vercel CLI + <code>.env.local</code> snippets. No webhook by default — app creation works
+        from any deployment including protected previews.
       </p>
 
       <div className="mt-4 grid gap-3">
         <label className="grid gap-1 text-sm">
           <span className="text-zinc-600 dark:text-zinc-400">App name</span>
-          <input className="h-9 rounded border px-2" value={name} onChange={(e) => setName(e.target.value)} />
+          <input
+            className="h-9 rounded border px-2"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
         </label>
         <label className="grid gap-1 text-sm">
           <span className="text-zinc-600 dark:text-zinc-400">Origin (homepage + webhook base)</span>
-          <input className="h-9 rounded border px-2 font-mono text-xs" value={origin} onChange={(e) => setOrigin(e.target.value)} placeholder="https://your-app.vercel.app" />
+          <input
+            className="h-9 rounded border px-2 font-mono text-xs"
+            value={origin}
+            onChange={(e) => setOrigin(e.target.value)}
+            placeholder="https://your-app.vercel.app"
+          />
         </label>
       </div>
 
       <details className="mt-4">
         <summary className="cursor-pointer text-sm text-zinc-600">Preview manifest JSON</summary>
-        <pre className="mt-2 max-h-64 overflow-auto rounded border bg-zinc-50 p-3 text-xs dark:bg-zinc-900">{manifestJson}</pre>
+        <pre className="mt-2 max-h-64 overflow-auto rounded border bg-zinc-50 p-3 text-xs dark:bg-zinc-900">
+          {manifestJson}
+        </pre>
       </details>
 
       <div className="mt-4 flex gap-2">
@@ -140,7 +152,9 @@ export function WildwoodGitHubAppSetup({
       </div>
 
       {error ? (
-        <p className="mt-3 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">{error}</p>
+        <p className="mt-3 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
+          {error}
+        </p>
       ) : null}
     </section>
   );

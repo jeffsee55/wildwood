@@ -38,10 +38,7 @@ import {
 } from "./branch";
 import { handle as createNextHandle } from "./handler";
 import type { WildwoodClient } from "@/client/index";
-import {
-  activeRefSetCookieHeader,
-  clearBranchCookieHeader,
-} from "wildwood-shared";
+import { activeRefSetCookieHeader, clearBranchCookieHeader } from "wildwood-shared";
 
 export { WILDWOOD_BRANCH_COOKIE, WILDWOOD_CACHE_TAG };
 
@@ -61,8 +58,7 @@ export type {
 } from "./auth";
 import type { WildwoodAuthAction } from "./auth";
 
-const DEFAULT_MUTATION_RE =
-  /\/git\/(commit|discard|merge|pull|create-branch|switch-branch)\/?$/;
+const DEFAULT_MUTATION_RE = /\/git\/(commit|discard|merge|pull|create-branch|switch-branch)\/?$/;
 
 export type CreateWildwoodRouteOptions = {
   revalidateTagName?: string;
@@ -131,11 +127,17 @@ function isAuthPath(pathname: string): boolean {
 }
 
 function isCapabilitiesPath(pathname: string): boolean {
-  return pathname.endsWith("/auth/capabilities") || pathname.endsWith("/wildwood/auth/capabilities");
+  return (
+    pathname.endsWith("/auth/capabilities") || pathname.endsWith("/wildwood/auth/capabilities")
+  );
 }
 
 function isDraftPath(pathname: string): boolean {
-  return pathname.endsWith("/wildwood/draft") || pathname.endsWith("/tr33/draft") || pathname.endsWith("/draft");
+  return (
+    pathname.endsWith("/wildwood/draft") ||
+    pathname.endsWith("/tr33/draft") ||
+    pathname.endsWith("/draft")
+  );
 }
 
 function isExitPreviewPath(pathname: string): boolean {
@@ -147,18 +149,35 @@ function gitActionFromPathname(pathname: string, bodyHint?: unknown): WildwoodAu
   if (!m) return null;
   const op = m[1]!;
   const b = bodyHint as Record<string, unknown> | undefined;
-  const ref = typeof b?.ref === "string" ? b.ref : (typeof b?.name === "string" ? b.name : "main");
+  const ref = typeof b?.ref === "string" ? b.ref : typeof b?.name === "string" ? b.name : "main";
   const paths = Array.isArray(b?.paths) ? (b!.paths as string[]) : [];
   switch (op) {
-    case "switch-branch": return { type: "git.switchRef", ref };
-    case "create-branch": return { type: "git.createBranch", name: typeof b?.name === "string" ? b!.name : ref, baseRef: typeof b?.baseRef === "string" ? b.baseRef : undefined };
-    case "add": return { type: "git.add", ref, paths };
-    case "commit": return { type: "git.commit", ref, message: typeof b?.message === "string" ? b.message : "" };
-    case "discard": return { type: "git.discard", ref };
-    case "push": return { type: "git.push", ref };
-    case "pull": return { type: "git.pull", ref };
-    case "merge": return { type: "git.merge", ref, message: typeof b?.message === "string" ? b.message : undefined };
-    default: return null;
+    case "switch-branch":
+      return { type: "git.switchRef", ref };
+    case "create-branch":
+      return {
+        type: "git.createBranch",
+        name: typeof b?.name === "string" ? b!.name : ref,
+        baseRef: typeof b?.baseRef === "string" ? b.baseRef : undefined,
+      };
+    case "add":
+      return { type: "git.add", ref, paths };
+    case "commit":
+      return { type: "git.commit", ref, message: typeof b?.message === "string" ? b.message : "" };
+    case "discard":
+      return { type: "git.discard", ref };
+    case "push":
+      return { type: "git.push", ref };
+    case "pull":
+      return { type: "git.pull", ref };
+    case "merge":
+      return {
+        type: "git.merge",
+        ref,
+        message: typeof b?.message === "string" ? b.message : undefined,
+      };
+    default:
+      return null;
   }
 }
 
@@ -167,9 +186,14 @@ function synthesizeAuthenticateFromLegacy(
   authOpts: import("./auth").WildwoodRouteAuthOptions,
 ): import("./auth").WildwoodAuthenticateFn | null {
   const allowedEmails = (authOpts as { allowedEmails?: string[] }).allowedEmails;
-  const isAllowedLegacy = (authOpts as {
-    isAllowed?: (ctx: { user: import("./auth").WildwoodAuthUser | null; request: Request }) => boolean | Promise<boolean>;
-  }).isAllowed;
+  const isAllowedLegacy = (
+    authOpts as {
+      isAllowed?: (ctx: {
+        user: import("./auth").WildwoodAuthUser | null;
+        request: Request;
+      }) => boolean | Promise<boolean>;
+    }
+  ).isAllowed;
   if (!allowedEmails && !isAllowedLegacy) return null;
   return async ({ user, request }) => {
     if (isAllowedLegacy) {
@@ -188,7 +212,11 @@ function synthesizeAuthenticateFromLegacy(
 
 export type WildwoodRouteClientInput =
   | WildwoodClient
-  | { _?: { config?: { ref?: string | undefined; org?: string | undefined; repo?: string | undefined } } & Record<string, unknown> }
+  | {
+      _?: {
+        config?: { ref?: string | undefined; org?: string | undefined; repo?: string | undefined };
+      } & Record<string, unknown>;
+    }
   | Record<string, unknown>;
 
 export function createWildwoodRoute(
@@ -227,7 +255,11 @@ export function createWildwoodRoute(
 
       const authFn = authOpts.authenticate ?? synthesizeAuthenticateFromLegacy(authOpts);
       if (authFn) {
-        const gate = await mod.evaluateAuthenticate(authFn as never, user as never, innerReq ?? req);
+        const gate = await mod.evaluateAuthenticate(
+          authFn as never,
+          user as never,
+          innerReq ?? req,
+        );
         if (gate) {
           if (!user) return new Response("Authentication required", { status: 401 });
           if (gate instanceof Response) return gate;
@@ -235,7 +267,11 @@ export function createWildwoodRoute(
         }
       }
       if (!authOpts.authorize) return null;
-      const result = await authOpts.authorize({ user: user as never, action: action as never, request: innerReq ?? req });
+      const result = await authOpts.authorize({
+        user: user as never,
+        action: action as never,
+        request: innerReq ?? req,
+      });
       if (result instanceof Response) return result;
       if (result === false) return new Response("Forbidden", { status: 403 });
       return null;
@@ -248,15 +284,22 @@ export function createWildwoodRoute(
     if (isRequestAware && req) {
       // Per-request client (play) — need per-request authorize that can resolve user for this req.
       return (async () => {
-        const client = (await (getClient as (r?: Request) => WildwoodRouteClientInput | Promise<WildwoodRouteClientInput>)(req)) as WildwoodClient;
+        const client = (await (
+          getClient as (r?: Request) => WildwoodRouteClientInput | Promise<WildwoodRouteClientInput>
+        )(req)) as WildwoodClient;
         const authorize = await buildGitAuthorizeForRequest(req);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return createNextHandle(client as unknown as WildwoodForBranch as unknown as WildwoodClient, { authorize: authorize as any });
+        return createNextHandle(
+          client as unknown as WildwoodForBranch as unknown as WildwoodClient,
+          { authorize: authorize as any },
+        );
       })();
     }
     if (!staticHandlerPromise) {
       staticHandlerPromise = (async () => {
-        const client = (await (getClient as () => WildwoodRouteClientInput | Promise<WildwoodRouteClientInput>)()) as WildwoodClient;
+        const client = (await (
+          getClient as () => WildwoodRouteClientInput | Promise<WildwoodRouteClientInput>
+        )()) as WildwoodClient;
         // Static case — lazily init authorize once; it still resolves user per-request via its own arg.
         if (!gitAuthorizeForH3) {
           // Placeholder that will self-initialize on first call then memoize inner fn.
@@ -267,7 +310,10 @@ export function createWildwoodRoute(
           };
         }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return createNextHandle(client as unknown as WildwoodForBranch as unknown as WildwoodClient, { authorize: gitAuthorizeForH3 as any });
+        return createNextHandle(
+          client as unknown as WildwoodForBranch as unknown as WildwoodClient,
+          { authorize: gitAuthorizeForH3 as any },
+        );
       })();
     }
     return staticHandlerPromise;
@@ -294,7 +340,8 @@ export function createWildwoodRoute(
   }
 
   // getOrCreateAuth is async — unwrap to avoid Promise<Promise<>>.
-  let authInstancePromise: Promise<Awaited<ReturnType<AuthBundle["getOrCreateAuth"]>>> | null = null;
+  let authInstancePromise: Promise<Awaited<ReturnType<AuthBundle["getOrCreateAuth"]>>> | null =
+    null;
   let dbForAuthPromise: Promise<unknown> | null = null;
 
   function getDbForAuth(): Promise<unknown> {
@@ -317,7 +364,10 @@ export function createWildwoodRoute(
     if (!authInstancePromise) {
       authInstancePromise = (async () => {
         const [mod, db] = await Promise.all([getAuthModule(), getDbForAuth()]);
-        if (!db) throw new Error("Auth requires a database — ensure createClient({ database }) is configured.");
+        if (!db)
+          throw new Error(
+            "Auth requires a database — ensure createClient({ database }) is configured.",
+          );
         // getOrCreateAuth itself is async
         return await mod.getOrCreateAuth({ auth: authOpts, db: db as never });
       })();
@@ -354,14 +404,18 @@ export function createWildwoodRoute(
     const branch = url.searchParams.get("branch")?.trim() || "";
     try {
       if (disable) {
-        const dm = (await import("next/headers")) as unknown as { draftMode: () => Promise<{ disable: () => void }> };
+        const dm = (await import("next/headers")) as unknown as {
+          draftMode: () => Promise<{ disable: () => void }>;
+        };
         (await dm.draftMode()).disable();
         const jar = await cookies();
         await clearBranchCookies(jar);
         return NextResponse.json({ draftMode: false });
       }
       if (!branch) return NextResponse.json({ error: "Missing ?branch=" }, { status: 400 });
-      const dm = (await import("next/headers")) as unknown as { draftMode: () => Promise<{ enable: () => void }> };
+      const dm = (await import("next/headers")) as unknown as {
+        draftMode: () => Promise<{ enable: () => void }>;
+      };
       (await dm.draftMode()).enable();
       const jar = await cookies();
       jar.set(cookieName, branch, { path: "/" });
@@ -380,7 +434,9 @@ export function createWildwoodRoute(
       const jar = await cookies();
       await clearBranchCookies(jar);
       try {
-        const { draftMode } = (await import("next/headers")) as { draftMode: () => Promise<{ disable: () => void }> };
+        const { draftMode } = (await import("next/headers")) as {
+          draftMode: () => Promise<{ disable: () => void }>;
+        };
         (await draftMode()).disable();
       } catch {}
     } catch {}
@@ -421,12 +477,19 @@ export function createWildwoodRoute(
     };
     if (intent.startsWith("git.")) {
       const ref = url.searchParams.get("ref") ?? "main";
-      const maybe = gitActionFromPathname(`/api/wildwood/git/${intent.slice(4)}`, { ref, path: actionPath });
+      const maybe = gitActionFromPathname(`/api/wildwood/git/${intent.slice(4)}`, {
+        ref,
+        path: actionPath,
+      });
       if (maybe) action = maybe;
       else action = { type: "git.commit", ref, message: "" } as WildwoodAuthAction;
     }
 
-    const result = await authOpts.authorize({ user: user as never, action: action as never, request: req });
+    const result = await authOpts.authorize({
+      user: user as never,
+      action: action as never,
+      request: req,
+    });
     if (result instanceof Response) return result;
     const allowed = result !== false;
     return NextResponse.json({ allowed, capabilities: { [intent]: allowed }, user });
@@ -442,7 +505,10 @@ export function createWildwoodRoute(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
     const { toNextJsHandler } = (await dynamicImport("better-auth/next-js")) as {
-      toNextJsHandler: (a: unknown) => { GET: (r: Request) => Promise<Response>; POST: (r: Request) => Promise<Response> };
+      toNextJsHandler: (a: unknown) => {
+        GET: (r: Request) => Promise<Response>;
+        POST: (r: Request) => Promise<Response>;
+      };
     };
     const handlers = toNextJsHandler(inst.auth as never);
     if (req.method === "GET") return handlers.GET(req);
@@ -501,7 +567,11 @@ export function createWildwoodRoute(
     const gitAction = gitActionFromPathname(pathname, bodyHint);
     if (!gitAction) return null;
 
-    const result = await authOpts.authorize({ user: user as never, action: gitAction as never, request: req });
+    const result = await authOpts.authorize({
+      user: user as never,
+      action: gitAction as never,
+      request: req,
+    });
     if (result instanceof Response) return result;
     if (result === false) return new Response("Forbidden", { status: 403 });
     return null;
@@ -518,8 +588,12 @@ export function createWildwoodRoute(
     return apiFetch(req);
   }
 
-  async function HEAD(req: Request) { return apiFetch(req); }
-  async function OPTIONS(req: Request) { return apiFetch(req); }
+  async function HEAD(req: Request) {
+    return apiFetch(req);
+  }
+  async function OPTIONS(req: Request) {
+    return apiFetch(req);
+  }
 
   async function POST(req: Request) {
     const pathname = pathnameOf(req);
@@ -558,12 +632,22 @@ export function createWildwoodRoute(
     const headers = new Headers(upstream.headers);
     headers.delete("set-cookie");
     headers.append("Set-Cookie", cookieHeaderValue(cookieName, branch));
-    return new NextResponse(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers });
+    return new NextResponse(upstream.body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers,
+    });
   }
 
-  async function PUT(req: Request) { return POST(req); }
-  async function PATCH(req: Request) { return POST(req); }
-  async function DELETE(req: Request) { return POST(req); }
+  async function PUT(req: Request) {
+    return POST(req);
+  }
+  async function PATCH(req: Request) {
+    return POST(req);
+  }
+  async function DELETE(req: Request) {
+    return POST(req);
+  }
 
   return { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE, tagName, cookieName, mutationRe };
 }

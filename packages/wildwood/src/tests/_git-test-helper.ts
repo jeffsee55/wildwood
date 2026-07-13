@@ -133,9 +133,7 @@ export class GitTestHelper {
     }).trim();
 
     // Increment timestamp by 1 hour for next commit
-    this.commitTimestamp = new Date(
-      this.commitTimestamp.getTime() + 60 * 60 * 1000,
-    );
+    this.commitTimestamp = new Date(this.commitTimestamp.getTime() + 60 * 60 * 1000);
 
     return { commit: { oid: commitSha } };
   }
@@ -143,10 +141,7 @@ export class GitTestHelper {
   async addFiles(files: Record<string, string | Buffer>): Promise<void> {
     this.ensureInitialized();
     for (const filePath of Object.keys(files)) {
-      const dir = join(
-        this.repoPath,
-        filePath.split("/").slice(0, -1).join("/"),
-      );
+      const dir = join(this.repoPath, filePath.split("/").slice(0, -1).join("/"));
       if (dir !== this.repoPath) {
         await mkdir(dir, { recursive: true });
       }
@@ -164,9 +159,7 @@ export class GitTestHelper {
   /**
    * Creates a series of commits with files
    */
-  async createCommits(
-    commits: TestCommit[],
-  ): Promise<{ commit: { oid: string } }[]> {
+  async createCommits(commits: TestCommit[]): Promise<{ commit: { oid: string } }[]> {
     const results: { commit: { oid: string } }[] = [];
 
     for (const commit of commits) {
@@ -205,9 +198,7 @@ export class GitTestHelper {
     }).trim();
 
     // Increment timestamp by 1 hour for next commit
-    this.commitTimestamp = new Date(
-      this.commitTimestamp.getTime() + 60 * 60 * 1000,
-    );
+    this.commitTimestamp = new Date(this.commitTimestamp.getTime() + 60 * 60 * 1000);
 
     return { commit: { oid: commitSha } };
   }
@@ -339,9 +330,7 @@ export class GitTestHelper {
     }).trim();
 
     // Increment timestamp by 1 hour for next commit
-    this.commitTimestamp = new Date(
-      this.commitTimestamp.getTime() + 60 * 60 * 1000,
-    );
+    this.commitTimestamp = new Date(this.commitTimestamp.getTime() + 60 * 60 * 1000);
 
     return { commit: { oid: commitSha } };
   }
@@ -386,16 +375,13 @@ export async function createTestRepo(
 /**
  * Creates a simple test repository with some sample content
  */
-export async function createSampleRepo(
-  repoName: string,
-): Promise<GitTestHelper> {
+export async function createSampleRepo(repoName: string): Promise<GitTestHelper> {
   const helper = new GitTestHelper(repoName);
   await helper.createRepo();
 
   // Add some sample files
   const sampleFiles: Record<string, string> = {
-    "README.md":
-      "# Test Repository\n\nThis is a test repository for testing purposes.",
+    "README.md": "# Test Repository\n\nThis is a test repository for testing purposes.",
     "src/index.ts": "export function hello() {\n  return 'Hello, World!';\n}",
     "package.json": JSON.stringify(
       {
@@ -414,8 +400,7 @@ export async function createSampleRepo(
   await helper.createBranch("feature/new-feature");
 
   const featureFiles: Record<string, string> = {
-    "src/feature.ts":
-      "export function newFeature() {\n  return 'New feature!';\n}",
+    "src/feature.ts": "export function newFeature() {\n  return 'New feature!';\n}",
   };
 
   await helper.addFilesAndCommit(featureFiles, "Add new feature");

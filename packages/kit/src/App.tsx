@@ -1,6 +1,6 @@
-import { toast} from 'sonner'
-import { Button } from "@/components/ui/button"
-import {Toaster } from "@/components/ui/sonner"
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Toaster } from "@/components/ui/sonner";
 
 export function App() {
   return (
@@ -10,12 +10,14 @@ export function App() {
           <h1 className="font-medium">Project ready!</h1>
           <p>You may now add components and start building.</p>
           <p>We&apos;ve already added the button component for you.</p>
-          <Button className="mt-2" onClick={() => toast.success("Hello, world")}>Button</Button>
+          <Button className="mt-2" onClick={() => toast.success("Hello, world")}>
+            Button
+          </Button>
         </div>
       </div>
-      <Toaster  />
+      <Toaster />
     </div>
-  )
+  );
 }
 
-export default App
+export default App;

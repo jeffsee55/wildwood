@@ -73,13 +73,9 @@ export abstract class Remote {
 
   abstract listBranches(): Promise<string[]>;
 
-  abstract fetchCommit(
-    args: { ref: string } | { oid: string },
-  ): Promise<Commit>;
+  abstract fetchCommit(args: { ref: string } | { oid: string }): Promise<Commit>;
 
-  abstract fetchBlobs(args: {
-    oids: string[];
-  }): Promise<{ oid: string; content: string }[]>;
+  abstract fetchBlobs(args: { oids: string[] }): Promise<{ oid: string; content: string }[]>;
 
   abstract fetchTree(args: {
     oid: string;
@@ -87,9 +83,7 @@ export abstract class Remote {
 
   abstract fetchBlobRaw(args: { oid: string }): Promise<Buffer | null>;
 
-  abstract createBlob(args: {
-    content: Uint8Array;
-  }): Promise<{ oid: string }>;
+  abstract createBlob(args: { content: Uint8Array }): Promise<{ oid: string }>;
 
   abstract push(args: {
     ref: string;
@@ -107,10 +101,7 @@ export abstract class Remote {
 
   abstract updatePr(args: UpdatePrArgs): Promise<PrResult>;
 
-  abstract findPr(args: {
-    head: string;
-    base: string;
-  }): Promise<PrResult | null>;
+  abstract findPr(args: { head: string; base: string }): Promise<PrResult | null>;
 
   /** Post a comment on the PR (e.g. before merge). NativeRemote throws. */
   abstract createPrComment(args: { pr: number; body: string }): Promise<void>;

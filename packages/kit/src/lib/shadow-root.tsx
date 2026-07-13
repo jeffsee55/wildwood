@@ -38,17 +38,9 @@ export function useShadowHost(): HTMLDivElement | null {
   return React.useContext(KitShadowContext).host;
 }
 
-export function ShadowRoot({
-  css,
-  children,
-}: {
-  css: string;
-  children: React.ReactNode;
-}) {
+export function ShadowRoot({ css, children }: { css: string; children: React.ReactNode }) {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
-  const [hostElement, setHostElement] = React.useState<HTMLDivElement | null>(
-    null,
-  );
+  const [hostElement, setHostElement] = React.useState<HTMLDivElement | null>(null);
   const [shadowRoot, setShadowRoot] = React.useState<ShadowRoot | null>(null);
   const [container, setContainer] = React.useState<HTMLDivElement | null>(null);
   const fontStyleRef = React.useRef<HTMLStyleElement | null>(null);
@@ -96,8 +88,7 @@ export function ShadowRoot({
     /* Full-viewport layer inside shadow; children should use `absolute` (not `fixed`) so
      * positioning is relative to this box—`fixed` inside shadow often resolves against the
      * zero-size light-DOM host and breaks FAB placement. */
-    wrapper.style.cssText =
-      "position:fixed;inset:0;pointer-events:none;z-index:2147483647;";
+    wrapper.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647;";
     shadow.appendChild(wrapper);
 
     setShadowRoot(shadow);

@@ -1,10 +1,7 @@
 import { cookies } from "next/headers";
 import { Suspense } from "react";
 
-import {
-  type PlaygroundConfig,
-  parsePlaygroundConfig,
-} from "@/lib/playground-config";
+import { type PlaygroundConfig, parsePlaygroundConfig } from "@/lib/playground-config";
 
 import { PlaygroundAuthShell } from "./playground-auth-shell";
 import { PlaygroundJsonSection } from "./playground-json-section";

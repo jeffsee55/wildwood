@@ -5,14 +5,20 @@
 import { createClient as createLibsql } from "@libsql/client";
 
 async function getAuth() {
-  const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<Record<string, unknown>>;
+  const dynamicImport = new Function("s", "return import(s)") as (
+    s: string,
+  ) => Promise<Record<string, unknown>>;
   const { betterAuth } = (await dynamicImport("better-auth")) as {
-    betterAuth: (o: unknown) => { api: { getAccessToken(a: unknown): Promise<{ accessToken: string | null }> } };
+    betterAuth: (o: unknown) => {
+      api: { getAccessToken(a: unknown): Promise<{ accessToken: string | null }> };
+    };
   };
   const { LibsqlDialect } = (await dynamicImport("@libsql/kysely-libsql")) as {
     LibsqlDialect: new (o: unknown) => unknown;
   };
-  const { nextCookies } = (await dynamicImport("better-auth/next-js")) as { nextCookies: () => unknown };
+  const { nextCookies } = (await dynamicImport("better-auth/next-js")) as {
+    nextCookies: () => unknown;
+  };
 
   const libsql = createLibsql({
     url: process.env.TURSO_DATABASE_URL?.trim() || "file:./wildwood.db",
@@ -21,7 +27,12 @@ async function getAuth() {
 
   const github =
     process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET
-      ? { github: { clientId: process.env.GITHUB_CLIENT_ID, clientSecret: process.env.GITHUB_CLIENT_SECRET } }
+      ? {
+          github: {
+            clientId: process.env.GITHUB_CLIENT_ID,
+            clientSecret: process.env.GITHUB_CLIENT_SECRET,
+          },
+        }
       : undefined;
 
   return betterAuth({
@@ -80,8 +91,16 @@ export async function GET(request: Request) {
   const user = (await userResponse.json()) as GitHubUser;
   const orgs = (await orgsResponse.json()) as GitHubOrg[];
   const accounts = [
-    user.login ? { avatarUrl: user.avatar_url ?? null, login: user.login, type: "user" as const } : null,
-    ...orgs.filter((o) => o.login).map((o) => ({ avatarUrl: o.avatar_url ?? null, login: o.login as string, type: "org" as const })),
+    user.login
+      ? { avatarUrl: user.avatar_url ?? null, login: user.login, type: "user" as const }
+      : null,
+    ...orgs
+      .filter((o) => o.login)
+      .map((o) => ({
+        avatarUrl: o.avatar_url ?? null,
+        login: o.login as string,
+        type: "org" as const,
+      })),
   ].filter(Boolean);
 
   return Response.json({ accounts });

@@ -173,7 +173,12 @@ describe("version bump reindex", () => {
     expect(before?.versions).toContain(t.config.version);
 
     // Simulate editor save via patchWorktree (client-computed tree)
-    const oid = await t.git.add({ ref: "main", files: { "content/docs/intro.md": "---\ntitle: Intro patched\n---\n\n# patched\n" } }).then((r) => r.files["content/docs/intro.md"]);
+    const oid = await t.git
+      .add({
+        ref: "main",
+        files: { "content/docs/intro.md": "---\ntitle: Intro patched\n---\n\n# patched\n" },
+      })
+      .then((r) => r.files["content/docs/intro.md"]);
     // findMany should not think version is missing
     const after = await t.client.docs.findMany({ where: { title: { eq: "Intro patched" } } });
     expect(after.items[0]?.title).toBe("Intro patched");

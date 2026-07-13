@@ -6,13 +6,7 @@ import type { Config } from "@/client/config";
 import { buildWorktreeQuery } from "@/sqlite/query-builder";
 import { relations } from "@/sqlite/relations";
 import * as schema from "@/sqlite/schema";
-import {
-  _commits,
-  _refs,
-  _trees,
-  entries,
-  filters,
-} from "@/sqlite/schema";
+import { _commits, _refs, _trees, entries, filters } from "@/sqlite/schema";
 import sqlSchema from "@/sqlite/schema.json" with { type: "json" };
 import type { Cache, Commit, FindWorktreeEntriesArgs, Ref } from "@/types";
 import { refSchema } from "@/types";
@@ -73,10 +67,7 @@ export class LibsqlDatabase {
   drizzle: ReturnType<typeof createDrizzle>;
   schema = schema;
 
-  constructor(args: {
-    client: LibsqlClient;
-    config: Config;
-  }) {
+  constructor(args: { client: LibsqlClient; config: Config }) {
     this.client = args.client;
     this.drizzle = createDrizzle(this.client);
     this.config = args.config;
@@ -176,8 +167,7 @@ export class LibsqlDatabase {
       const canonicals = new Set(cache.entries.map((entry) => entry.canonical));
       // Derive request ref from cache entries (not this.config.ref) so
       // variant fallback copy works when indexing a non-default ref / feature branch.
-      const targetRef =
-        (cache.entries[0]?.ref as string | undefined) ?? this.config.ref;
+      const targetRef = (cache.entries[0]?.ref as string | undefined) ?? this.config.ref;
       const entries2 = await this.drizzle.query.entries.findMany({
         where: {
           path: { in: Array.from(canonicals) },
@@ -204,9 +194,7 @@ export class LibsqlDatabase {
   };
 
   trees = {
-    fromRecord: (
-      result: InferSelectModel<typeof _trees>,
-    ): { oid: string } => {
+    fromRecord: (result: InferSelectModel<typeof _trees>): { oid: string } => {
       return { oid: result.oid };
     },
     get: async (args: { oid: string }) => {
@@ -312,13 +300,9 @@ export class LibsqlDatabase {
         committerName: args.committer?.name ?? args.author.name,
         committerEmail: args.committer?.email ?? args.author.email,
         committerTimestamp: args.committer?.timestamp ?? args.author.timestamp,
-        committerTimezoneOffset:
-          args.committer?.timezoneOffset ?? args.author.timezoneOffset,
+        committerTimezoneOffset: args.committer?.timezoneOffset ?? args.author.timezoneOffset,
       };
-      await this.drizzle
-        .insert(this.schema._commits)
-        .values(payload)
-        .onConflictDoNothing();
+      await this.drizzle.insert(this.schema._commits).values(payload).onConflictDoNothing();
       return {
         orgName: this.config.org,
         repoName: this.config.repo,
@@ -374,11 +358,7 @@ export class LibsqlDatabase {
         .insert(this.schema._refs)
         .values(payload)
         .onConflictDoUpdate({
-          target: [
-            this.schema._refs.orgName,
-            this.schema._refs.repoName,
-            this.schema._refs.ref,
-          ],
+          target: [this.schema._refs.orgName, this.schema._refs.repoName, this.schema._refs.ref],
           set: {
             commitOid: args.commit.oid,
           },
@@ -386,10 +366,7 @@ export class LibsqlDatabase {
     },
     // biome-ignore lint/suspicious/noExplicitAny: Complex Drizzle return type
     findFirst: async (args: FindWorktreeEntriesArgs): Promise<any> => {
-      const { query, finalWithClause, limit, offset } = buildWorktreeQuery(
-        args,
-        this.config,
-      );
+      const { query, finalWithClause, limit, offset } = buildWorktreeQuery(args, this.config);
       const ref = args.ref || this.config.ref;
       const orderByFilter: { field: string; direction: "asc" | "desc" }[] = [];
       for (const [field, direction] of Object.entries(args.orderBy ?? {})) {
@@ -458,9 +435,7 @@ export class LibsqlDatabase {
       const versions = a.versions
         ? dedupeRefVersions(JSON.parse(a.versions) as string[])
         : undefined;
-      const rootTree = a.rootTree
-        ? this.trees.fromRecord(a.rootTree)
-        : undefined;
+      const rootTree = a.rootTree ? this.trees.fromRecord(a.rootTree) : undefined;
       return {
         ...a,
         rootTree,
@@ -510,11 +485,7 @@ export class LibsqlDatabase {
         .insert(this.schema._refs)
         .values(payload)
         .onConflictDoUpdate({
-          target: [
-            this.schema._refs.orgName,
-            this.schema._refs.repoName,
-            this.schema._refs.ref,
-          ],
+          target: [this.schema._refs.orgName, this.schema._refs.repoName, this.schema._refs.ref],
           set: {
             commitOid: args.commit.oid,
             remoteCommitOid: args.commit.oid,
@@ -522,10 +493,7 @@ export class LibsqlDatabase {
         });
       return payload;
     },
-    setRemoteCommitOid: async (args: {
-      ref: string;
-      remoteCommitOid: string;
-    }) => {
+    setRemoteCommitOid: async (args: { ref: string; remoteCommitOid: string }) => {
       await this.drizzle
         .update(this.schema._refs)
         .set({ remoteCommitOid: args.remoteCommitOid })

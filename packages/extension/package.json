@@ -1,43 +1,32 @@
 {
   "name": "wildwood-vscode",
-  "description": "Wildwood for VS Code — Git CMS editing",
   "version": "0.1.0",
-  "publisher": "jsee",
-  "license": "MIT",
-  "author": "Jeff See <jeff@wildwood.dev>",
-  "publishConfig": { "access": "public" },
-  "enabledApiProposals": [
-    "scmActionButton"
-  ],
-  "extensionKind": [
-    "web"
-  ],
-  "activationEvents": [
-    "*",
-    "onFileSystem:wildwood-vfs"
-  ],
-  "capabilities": {
-    "virtualWorkspaces": true,
-    "untrustedWorkspaces": {
-      "supported": true
-    }
-  },
-  "engines": {
-    "vscode": "^1.72.0"
-  },
+  "description": "Wildwood for VS Code — Git CMS editing",
   "categories": [
     "Other"
   ],
+  "author": "Jeff See <jeff@wildwood.dev>",
+  "license": "MIT",
+  "publisher": "jsee",
   "type": "commonjs",
-  "files": [
-    "dist",
-    "themes",
-    "package.json",
-    "package.nls.json"
-  ],
   "main": "./dist/extension.js",
   "browser": "./dist/extension.js",
   "types": "./dist/extension.d.ts",
+  "files": [
+    "dist",
+    "package.json",
+    "package.nls.json",
+    "themes"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "lib:dev": "tsdown --watch",
+    "watch:deps": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint .",
+    "format": "oxfmt ."
+  },
   "contributes": {
     "configuration": {
       "type": "object",
@@ -285,20 +274,36 @@
       ]
     }
   },
+  "activationEvents": [
+    "*",
+    "onFileSystem:wildwood-vfs"
+  ],
   "dependencies": {
+    "tsdown": "^0.15.4",
     "wildwood-shared": "workspace:*",
-    "wildwood-store": "workspace:*",
-    "tsdown": "^0.15.4"
-  },
-  "scripts": {
-    "build": "tsdown",
-    "dev": "tsdown --watch",
-    "lib:dev": "tsdown --watch",
-    "watch:deps": "tsdown --watch"
+    "wildwood-store": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.11.24",
     "@types/vscode": "1.109.0",
     "typescript": "5.5.4"
-  }
+  },
+  "extensionKind": [
+    "web"
+  ],
+  "engines": {
+    "vscode": "^1.72.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "capabilities": {
+    "virtualWorkspaces": true,
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "enabledApiProposals": [
+    "scmActionButton"
+  ]
 }

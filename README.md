@@ -83,6 +83,7 @@ export const { GET, POST, PATCH, DELETE } = createWildwoodRoute(() => wildwood);
 ```
 
 This mounts:
+
 - `/api/wildwood/query` — typed query
 - `/api/wildwood/draft` + `/api/wildwood/preview` — draft mode + branch cookie
 - `/api/git/*` + `/api/vscode/*` — worktree ops + VS Code web shell

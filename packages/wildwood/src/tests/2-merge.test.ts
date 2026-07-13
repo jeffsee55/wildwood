@@ -214,18 +214,12 @@ describe("git", () => {
 
       it("should detect modify-delete conflict", async () => {
         await t.helper.createBranch("feature");
-        await t.helper.addFilesAndCommit(
-          { "content/docs/a.md": "" },
-          "Delete a.md",
-        );
+        await t.helper.addFilesAndCommit({ "content/docs/a.md": "" }, "Delete a.md");
         const { execSync } = await import("node:child_process");
-        execSync(
-          "git rm content/docs/a.md && git commit -m 'Actually delete a.md'",
-          {
-            cwd: t.helper.getFullPath(),
-            stdio: "pipe",
-          },
-        );
+        execSync("git rm content/docs/a.md && git commit -m 'Actually delete a.md'", {
+          cwd: t.helper.getFullPath(),
+          stdio: "pipe",
+        });
 
         await t.helper.switchBranch("main");
         await t.helper.addFilesAndCommit(
@@ -257,16 +251,10 @@ describe("git", () => {
           "---\ntitle: same change\nauthor: ../authors/jeff.json\n---\n\n# Same content";
 
         await t.helper.createBranch("feature");
-        await t.helper.addFilesAndCommit(
-          { "content/docs/a.md": newContent },
-          "Modify a.md",
-        );
+        await t.helper.addFilesAndCommit({ "content/docs/a.md": newContent }, "Modify a.md");
 
         await t.helper.switchBranch("main");
-        await t.helper.addFilesAndCommit(
-          { "content/docs/a.md": newContent },
-          "Modify a.md",
-        );
+        await t.helper.addFilesAndCommit({ "content/docs/a.md": newContent }, "Modify a.md");
 
         await t.git.switch({ ref: "main" });
 
@@ -291,10 +279,7 @@ describe("git", () => {
           "line 5: original",
         ].join("\n");
 
-        await t.helper.addFilesAndCommit(
-          { "content/docs/a.md": baseContent },
-          "Initial a.md",
-        );
+        await t.helper.addFilesAndCommit({ "content/docs/a.md": baseContent }, "Initial a.md");
 
         await t.helper.createBranch("feature");
         const featureContent = [
@@ -304,10 +289,7 @@ describe("git", () => {
           "line 4: original",
           "line 5: modified by feature",
         ].join("\n");
-        await t.helper.addFilesAndCommit(
-          { "content/docs/a.md": featureContent },
-          "Modify line 5",
-        );
+        await t.helper.addFilesAndCommit({ "content/docs/a.md": featureContent }, "Modify line 5");
 
         await t.helper.switchBranch("main");
         const mainContent = [
@@ -317,10 +299,7 @@ describe("git", () => {
           "line 4: original",
           "line 5: original",
         ].join("\n");
-        await t.helper.addFilesAndCommit(
-          { "content/docs/a.md": mainContent },
-          "Modify line 1",
-        );
+        await t.helper.addFilesAndCommit({ "content/docs/a.md": mainContent }, "Modify line 1");
 
         await t.git.switch({ ref: "main" });
 

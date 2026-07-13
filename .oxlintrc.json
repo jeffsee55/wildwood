@@ -1,0 +1,81 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["import", "typescript", "react", "unicorn", "oxc"],
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2022": true
+  },
+  "settings": {
+    "react": {
+      "version": "19.0"
+    }
+  },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "rules": {
+    "no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_",
+        "destructuredArrayIgnorePattern": "^_"
+      }
+    ],
+    "no-unused-expressions": "off",
+    "no-underscore-dangle": "off",
+    "no-shadow": "off",
+    "import/no-cycle": "off",
+    "react/no-unknown-property": "off",
+    "react/react-in-jsx-scope": "off",
+    "react/no-children-prop": "off",
+    "react-hooks/exhaustive-deps": "off",
+    "unicorn/prefer-node-protocol": "warn",
+    "unicorn/no-null": "off",
+    "unicorn/no-useless-fallback-in-spread": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/no-array-sort": "off"
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/build/**",
+    "**/.next/**",
+    "**/node_modules/**",
+    "**/.turbo/**",
+    "**/.vercel/**",
+    "**/*.db",
+    "**/wildwood.db",
+    "**/tr33.db",
+    "**/.wildwood-cache/**",
+    "**/.tr33-cache/**",
+    "packages/wildwood/src/tests/fixtures/**",
+    "packages/kit/src/vscode-web/dist/**",
+    "packages/wildwood/bundled-extension/**",
+    "packages/wildwood/vendor/**",
+    "pnpm-lock.yaml"
+  ],
+  "overrides": [
+    {
+      "files": ["**/*.test.ts", "**/*.test.tsx", "**/tests/**", "**/__tests__/**"],
+      "rules": {
+        "no-console": "off",
+        "@typescript-eslint/no-explicit-any": "off"
+      }
+    },
+    {
+      "files": ["packages/extension/**"],
+      "globals": {
+        "vscode": "readonly"
+      }
+    },
+    {
+      "files": ["apps/docs/**", "apps/play/**"],
+      "rules": {
+        "import/no-cycle": "off"
+      }
+    }
+  ]
+}

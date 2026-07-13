@@ -94,7 +94,8 @@ export function buildWildwoodGitHubAppManifest(
 ): WildwoodGitHubAppManifest {
   const origin = opts.redirectUrl ? new URL(opts.redirectUrl).origin : (opts.url ?? "");
   const url = opts.url ?? origin;
-  if (!url) throw new Error("buildWildwoodGitHubAppManifest: need `url` or `redirectUrl` to infer origin");
+  if (!url)
+    throw new Error("buildWildwoodGitHubAppManifest: need `url` or `redirectUrl` to infer origin");
 
   const trimmed = (s: string) => s.trim();
   // Webhook is opt-in only — leaving it out means no long-lived server-to-server URL,
@@ -207,7 +208,9 @@ export function vercelEnvAddSnippets(values: Record<string, string>): string[] {
     lines.push(`printf '%s' ${shellSingleQuote(v)} | vercel env add ${k} production --sensitive`);
   }
   lines.push("");
-  lines.push("# Or to add to preview+development too, re-run with: --upsert && select envs interactively");
+  lines.push(
+    "# Or to add to preview+development too, re-run with: --upsert && select envs interactively",
+  );
   return lines;
 }
 
@@ -254,7 +257,12 @@ async function writeManifestEnv(options: {
   try {
     current = await fs.readFile(options.envPath, "utf8");
   } catch (err) {
-    if (!(err instanceof Error) || !("code" in err) || (err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    if (
+      !(err instanceof Error) ||
+      !("code" in err) ||
+      (err as NodeJS.ErrnoException).code !== "ENOENT"
+    )
+      throw err;
   }
 
   await fs.mkdir(path.dirname(options.envPath), { recursive: true });
@@ -292,9 +300,12 @@ export function githubAppManifestConversionCommand(code: string): string {
 export function createGitHubAppManifestConversionRoute(options?: { envPath?: string }) {
   return async function POST(request: Request) {
     if (process.env.NODE_ENV === "production") {
-      return htmlResponse("<h1>Not available in production</h1><p>Use the bundled /api/wildwood/github/app-manifest flow.</p>", {
-        status: 403,
-      });
+      return htmlResponse(
+        "<h1>Not available in production</h1><p>Use the bundled /api/wildwood/github/app-manifest flow.</p>",
+        {
+          status: 403,
+        },
+      );
     }
 
     let code = "";
@@ -324,7 +335,9 @@ export function createGitHubAppManifestConversionRoute(options?: { envPath?: str
       const conversion = await exchangeGitHubAppManifestCode(code);
       const envPath = path.resolve(options?.envPath ?? ".env.local");
       const keys = await writeManifestEnv({ conversion, envPath });
-      const appLink = conversion.html_url ? `<p><a href="${conversion.html_url}">Open GitHub App settings</a></p>` : "";
+      const appLink = conversion.html_url
+        ? `<p><a href="${conversion.html_url}">Open GitHub App settings</a></p>`
+        : "";
       return htmlResponse(`
         <h1>GitHub App credentials written</h1>
         <p>Updated <code>${envPath}</code>.</p>
@@ -339,35 +352,58 @@ export function createGitHubAppManifestConversionRoute(options?: { envPath?: str
       `);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return htmlResponse(`<h1>Could not exchange manifest code</h1><pre style="white-space: pre-wrap">${escapeHtml(message)}</pre>`, {
-        status: 500,
-      });
+      return htmlResponse(
+        `<h1>Could not exchange manifest code</h1><pre style="white-space: pre-wrap">${escapeHtml(message)}</pre>`,
+        {
+          status: 500,
+        },
+      );
     }
   };
 }
 
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 // ── callback component ──────────────────────────────────────────────────
 
-export function GitHubAppManifestCallback({ code, stateValid }: { code?: string | null; stateValid?: boolean }) {
+export function GitHubAppManifestCallback({
+  code,
+  stateValid,
+}: {
+  code?: string | null;
+  stateValid?: boolean;
+}) {
   return (
     <section className="w-full max-w-2xl rounded-xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <h1 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">GitHub App manifest callback</h1>
+      <h1 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+        GitHub App manifest callback
+      </h1>
       {stateValid === false ? (
         <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-          State mismatch — the callback <code>state</code> did not match the cookie set when you started creation. This can happen if cookies were blocked or you restarted the flow. Re-try creating the app. Code below may still work if GitHub issued it, but verification failed.
+          State mismatch — the callback <code>state</code> did not match the cookie set when you
+          started creation. This can happen if cookies were blocked or you restarted the flow.
+          Re-try creating the app. Code below may still work if GitHub issued it, but verification
+          failed.
         </div>
       ) : null}
       {code ? (
         <>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-            GitHub returned a temporary manifest code. Exchange it once (code expires in 1 hour) to get your App credentials.
+            GitHub returned a temporary manifest code. Exchange it once (code expires in 1 hour) to
+            get your App credentials.
           </p>
           <div className="mt-4 grid gap-3">
-            <form action="/api/wildwood/github/app-manifest/conversions" method="post" className="contents">
+            <form
+              action="/api/wildwood/github/app-manifest/conversions"
+              method="post"
+              className="contents"
+            >
               <input name="code" type="hidden" value={code} />
               <button
                 className="rounded bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
@@ -382,7 +418,9 @@ export function GitHubAppManifestCallback({ code, stateValid }: { code?: string 
               <p className="mt-2 text-zinc-600 dark:text-zinc-400">
                 If you still use the old isolated route:
               </p>
-              <pre className="mt-2 overflow-auto rounded bg-zinc-50 p-2 dark:bg-zinc-900">{githubAppManifestConversionCommand(code)}</pre>
+              <pre className="mt-2 overflow-auto rounded bg-zinc-50 p-2 dark:bg-zinc-900">
+                {githubAppManifestConversionCommand(code)}
+              </pre>
               <form action="/api/github-app-manifest/conversions" method="post" className="mt-2">
                 <input name="code" type="hidden" value={code} />
                 <button className="rounded border px-2 py-1 text-xs" type="submit">
@@ -394,7 +432,8 @@ export function GitHubAppManifestCallback({ code, stateValid }: { code?: string 
         </>
       ) : (
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-          No manifest code found. Start creation from the Wildwood toolbar → Auth → GitHub App (local dev).
+          No manifest code found. Start creation from the Wildwood toolbar → Auth → GitHub App
+          (local dev).
         </p>
       )}
     </section>

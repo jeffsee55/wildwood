@@ -10,28 +10,19 @@ import {
 } from "wildwood-store";
 import * as vscode from "vscode";
 import { logger } from "./extension";
-import {
-  notifyKitParentBranchChanged,
-  notifyKitParentWorkspaceChanged,
-} from "./kit-parent";
+import { notifyKitParentBranchChanged, notifyKitParentWorkspaceChanged } from "./kit-parent";
 import { writeActiveRefToStorage } from "./host-bridge";
 import { generateBranchName } from "wildwood-shared";
 import { postAddWithProgress } from "./add-with-progress";
 import { postPatchWorktree, treesForPatch } from "./patch-worktree";
-import {
-  type WildwoodExtensionContext,
-  resolveWildwoodExtensionContext,
-} from "./resolve-context";
+import { type WildwoodExtensionContext, resolveWildwoodExtensionContext } from "./resolve-context";
 
 /** Distinct from VS Code's built-in `vscode-vfs` (Remote Repositories). */
 export const SCHEME = "wildwood-vfs";
 
 export { generateBranchName };
 
-async function postSwitchBranch(
-  apiUrl: string,
-  ref: string,
-): Promise<void> {
+async function postSwitchBranch(apiUrl: string, ref: string): Promise<void> {
   const res = await fetch(`${apiUrl}/switch-branch`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -63,9 +54,7 @@ export type ScmState = {
   conflicts: { path: string; message: string }[];
 };
 
-export class WildwoodFileSystemProvider
-  implements vscode.FileSystemProvider, Gitable
-{
+export class WildwoodFileSystemProvider implements vscode.FileSystemProvider, Gitable {
   private _emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   readonly onDidChangeFile = this._emitter.event;
 
@@ -96,10 +85,7 @@ export class WildwoodFileSystemProvider
 
   private _conflictPaths = new Set<string>();
 
-  constructor(
-    extensionUri: vscode.Uri,
-    resolved?: WildwoodExtensionContext,
-  ) {
+  constructor(extensionUri: vscode.Uri, resolved?: WildwoodExtensionContext) {
     const ctx = resolved ?? resolveWildwoodExtensionContext(extensionUri);
     this.repo = ctx.repo;
     this.configRef = ctx.configRef;
@@ -123,12 +109,7 @@ export class WildwoodFileSystemProvider
       try {
         const res = await fetch(url, { credentials: "include" });
         if (!res.ok) {
-          logger(
-            "getTree HTTP error",
-            res.status,
-            url,
-            await res.text().catch(() => ""),
-          );
+          logger("getTree HTTP error", res.status, url, await res.text().catch(() => ""));
           return null;
         }
         const tree = (await res.json()) as TreeEntries;
@@ -293,10 +274,7 @@ export class WildwoodFileSystemProvider
     }
   }
 
-  async switchRef(
-    newRef: string,
-    options?: { notifyParent?: boolean },
-  ): Promise<void> {
+  async switchRef(newRef: string, options?: { notifyParent?: boolean }): Promise<void> {
     const notifyParent = options?.notifyParent !== false;
     this._switchRefQueue = this._switchRefQueue
       .catch(() => {})
@@ -304,10 +282,7 @@ export class WildwoodFileSystemProvider
     return this._switchRefQueue;
   }
 
-  private async switchRefInternal(
-    newRef: string,
-    notifyParent = true,
-  ): Promise<void> {
+  private async switchRefInternal(newRef: string, notifyParent = true): Promise<void> {
     if (newRef === this.currentRef) return;
     writeActiveRefToStorage(newRef);
     if (!this.rootTreeOid || !this.commitTreeOid) {
@@ -345,11 +320,7 @@ export class WildwoodFileSystemProvider
     };
     markEvent(rootUri, vscode.FileChangeType.Changed);
 
-    if (
-      previousRootTreeOid &&
-      nextRootTreeOid &&
-      previousRootTreeOid !== nextRootTreeOid
-    ) {
+    if (previousRootTreeOid && nextRootTreeOid && previousRootTreeOid !== nextRootTreeOid) {
       const diff = await this.trees.diff2({
         baseTreeOid: previousRootTreeOid,
         currentTreeOid: nextRootTreeOid,
@@ -411,10 +382,7 @@ export class WildwoodFileSystemProvider
     return null;
   }
 
-  private async lookupBlobOidFromTree(
-    treeOid: string,
-    uri: vscode.Uri,
-  ): Promise<string | null> {
+  private async lookupBlobOidFromTree(treeOid: string, uri: vscode.Uri): Promise<string | null> {
     const filePath = this.pathFromUri(uri);
     const entry = await this.trees.lookup(treeOid, filePath);
     return entry?.type === "blob" ? entry.oid : null;
@@ -430,11 +398,8 @@ export class WildwoodFileSystemProvider
     return this.commitTreeOid;
   }
 
-  async fetchScmState(options?: {
-    skipBranchDiff?: boolean;
-  }): Promise<ScmState> {
-    const needBranchDiff =
-      !options?.skipBranchDiff && this.currentRef !== this.configRef;
+  async fetchScmState(options?: { skipBranchDiff?: boolean }): Promise<ScmState> {
+    const needBranchDiff = !options?.skipBranchDiff && this.currentRef !== this.configRef;
 
     const currentData = await this.getRefWorktree(this.currentRef);
     this.commitTreeOid = currentData.commit.treeOid;
@@ -475,10 +440,7 @@ export class WildwoodFileSystemProvider
     if (currentData.commit.oid === configData.commit.oid) {
       mergeBaseTreeOid = this.commitTreeOid;
     } else {
-      mergeBaseTreeOid = await this.fetchMergeBase(
-        this.currentRef,
-        this.configRef,
-      );
+      mergeBaseTreeOid = await this.fetchMergeBase(this.currentRef, this.configRef);
     }
 
     const conflicts = mergeBaseTreeOid
@@ -537,10 +499,7 @@ export class WildwoodFileSystemProvider
     }
   }
 
-  async commit(
-    message: string,
-    author: { name: string; email: string },
-  ): Promise<void> {
+  async commit(message: string, author: { name: string; email: string }): Promise<void> {
     const res = await fetch(`${this.apiUrl}/commit`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -713,10 +672,7 @@ export class WildwoodFileSystemProvider
     this.worktreeCache.clear();
   }
 
-  private async fetchMergeBase(
-    ours: string,
-    theirs: string,
-  ): Promise<string | null> {
+  private async fetchMergeBase(ours: string, theirs: string): Promise<string | null> {
     try {
       const res = await fetch(
         `${this.apiUrl}/merge-base/${encodeURIComponent(ours)}/${encodeURIComponent(theirs)}`,
@@ -737,14 +693,11 @@ export class WildwoodFileSystemProvider
     const data = await this.getRefWorktree(this.currentRef);
     const nextCommitOid = data.commit.treeOid;
     const nextRootOid = data.rootTreeOid ?? data.commit.treeOid;
-    const changed =
-      this.commitTreeOid !== nextCommitOid || this.rootTreeOid !== nextRootOid;
+    const changed = this.commitTreeOid !== nextCommitOid || this.rootTreeOid !== nextRootOid;
     this.commitTreeOid = nextCommitOid;
     this.rootTreeOid = nextRootOid;
     if (changed) {
-      this._emitter.fire([
-        { type: vscode.FileChangeType.Changed, uri: this.getRootUri() },
-      ]);
+      this._emitter.fire([{ type: vscode.FileChangeType.Changed, uri: this.getRootUri() }]);
     }
   }
 
@@ -827,10 +780,7 @@ export class WildwoodFileSystemProvider
     const virtualGit = this.getVirtualGitPath(filePath);
     if (virtualGit) {
       return {
-        type:
-          virtualGit === "dir"
-            ? vscode.FileType.Directory
-            : vscode.FileType.File,
+        type: virtualGit === "dir" ? vscode.FileType.Directory : vscode.FileType.File,
         ctime: 0,
         mtime: 0,
         size: virtualGit === "config" ? this.getVirtualGitConfigContent().length : 0,
@@ -841,16 +791,10 @@ export class WildwoodFileSystemProvider
     const entry = await this.trees.lookup(treeOid, filePath);
     if (!entry) {
       if (!oid && this.commitTreeOid && this.commitTreeOid !== treeOid) {
-        const fallback = await this.trees.lookup(
-          this.commitTreeOid,
-          filePath,
-        );
+        const fallback = await this.trees.lookup(this.commitTreeOid, filePath);
         if (fallback) {
           return {
-            type:
-              fallback.type === "tree"
-                ? vscode.FileType.Directory
-                : vscode.FileType.File,
+            type: fallback.type === "tree" ? vscode.FileType.Directory : vscode.FileType.File,
             ctime: 0,
             mtime: 0,
             size: 0,
@@ -861,10 +805,7 @@ export class WildwoodFileSystemProvider
     }
 
     return {
-      type:
-        entry.type === "tree"
-          ? vscode.FileType.Directory
-          : vscode.FileType.File,
+      type: entry.type === "tree" ? vscode.FileType.Directory : vscode.FileType.File,
       ctime: 0,
       mtime: 0,
       size: 0,
@@ -940,10 +881,7 @@ export class WildwoodFileSystemProvider
 
     if (!isBinary && this._conflictPaths.has(path)) {
       const current = await this.resolve(uri);
-      if (
-        current?.type === "blob" &&
-        current.content === (filePayload as string)
-      ) {
+      if (current?.type === "blob" && current.content === (filePayload as string)) {
         return;
       }
     }
@@ -969,9 +907,7 @@ export class WildwoodFileSystemProvider
           this.rootTreeOid = addResult.rootTreeOid;
           const binaryOid = await calculateBlobOidFromBytes(content);
           await this.objectCache.putBlobRaw(this.repo, binaryOid, content);
-          this._emitter.fire([
-            { type: vscode.FileChangeType.Changed, uri: this.getRootUri() },
-          ]);
+          this._emitter.fire([{ type: vscode.FileChangeType.Changed, uri: this.getRootUri() }]);
           return;
         }
 
@@ -984,10 +920,9 @@ export class WildwoodFileSystemProvider
           rootTreeOid,
           entries: [{ oid: blobOid, path }],
         });
-        const trees = treesForPatch(
-          await this.trees.exportTreesForPersist(applied.trees),
-          { omitEmptyTree: true },
-        );
+        const trees = treesForPatch(await this.trees.exportTreesForPersist(applied.trees), {
+          omitEmptyTree: true,
+        });
         progress.report({
           message: `Uploading ${trees.length} changed tree(s) and indexing ${path}…`,
         });
@@ -1002,9 +937,7 @@ export class WildwoodFileSystemProvider
         this._conflictPaths.delete(path);
         this.rootTreeOid = patchResult.rootTreeOid;
         await this.objectCache.putBlobRaw(this.repo, blobOid, content);
-        this._emitter.fire([
-          { type: vscode.FileChangeType.Changed, uri: this.getRootUri() },
-        ]);
+        this._emitter.fire([{ type: vscode.FileChangeType.Changed, uri: this.getRootUri() }]);
       },
     );
 

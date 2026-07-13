@@ -25,7 +25,9 @@ export function createGitHubRouter(client: WildwoodClient): H3 {
 
   function orgInstallUrl(appSlug: string): string {
     // Limits picker to `org` — still better than global "All repos".
-    return org ? `https://github.com/organizations/${org}/settings/installs/${encodeURIComponent(appSlug)}` : `https://github.com/apps/${appSlug}/installations/new`;
+    return org
+      ? `https://github.com/organizations/${org}/settings/installs/${encodeURIComponent(appSlug)}`
+      : `https://github.com/apps/${appSlug}/installations/new`;
   }
 
   router.get("/installation", async () => {
@@ -66,14 +68,19 @@ export function createGitHubRouter(client: WildwoodClient): H3 {
     return Response.json(
       {
         ok: false,
-        error: "Webhook handler not yet implemented — wire signature verification + event dispatch here.",
+        error:
+          "Webhook handler not yet implemented — wire signature verification + event dispatch here.",
         hint: "Webhooks are opt-in. Re-save your GitHub App with a webhook URL pointing here once wired.",
       },
       { status: 501 },
     );
   });
   router.get("/webhook", async () => {
-    return Response.json({ ok: true, status: "webhook placeholder — wire handler to enable", path: "/api/wildwood/github/webhook" });
+    return Response.json({
+      ok: true,
+      status: "webhook placeholder — wire handler to enable",
+      path: "/api/wildwood/github/webhook",
+    });
   });
 
   return router;

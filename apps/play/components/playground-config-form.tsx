@@ -1,13 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import {
-  type FormEvent,
-  useEffect,
-  useId,
-  useState,
-  useTransition,
-} from "react";
+import { type FormEvent, useEffect, useId, useState, useTransition } from "react";
 import {
   PLAYGROUND_CONFIG_COOKIE,
   type PlaygroundConfig,
@@ -71,14 +65,8 @@ function readConfigFromForm(form: HTMLFormElement): PlaygroundConfig {
 }
 
 function setClientCookie(name: string, value: string, maxAge: number) {
-  const secure =
-    typeof window !== "undefined" && window.location?.protocol === "https:";
-  const parts = [
-    `${name}=${value}`,
-    "Path=/",
-    `Max-Age=${maxAge}`,
-    "SameSite=Lax",
-  ];
+  const secure = typeof window !== "undefined" && window.location?.protocol === "https:";
+  const parts = [`${name}=${value}`, "Path=/", `Max-Age=${maxAge}`, "SameSite=Lax"];
   if (secure) {
     parts.push("Secure");
   }
@@ -94,13 +82,9 @@ export function PlaygroundConfigForm({ githubSignedIn, initial }: Props) {
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const effectiveInitial: PlaygroundConfig =
-    githubSignedIn || initial.source === "local"
-      ? initial
-      : { ...initial, source: "local" };
+    githubSignedIn || initial.source === "local" ? initial : { ...initial, source: "local" };
   const effectiveInitialKey = `${effectiveInitial.source}\x1e${effectiveInitial.org}\x1e${effectiveInitial.repo}\x1e${effectiveInitial.ref}\x1e${effectiveInitial.localPath}\x1e${effectiveInitial.match}\x1e${effectiveInitial.contentType}\x1e${githubSignedIn}`;
-  const [source, setSource] = useState<PlaygroundSource>(
-    effectiveInitial.source,
-  );
+  const [source, setSource] = useState<PlaygroundSource>(effectiveInitial.source);
   const [org, setOrg] = useState(effectiveInitial.org);
   const [repo, setRepo] = useState(effectiveInitial.repo);
   const [ref, setRef] = useState(effectiveInitial.ref);
@@ -110,8 +94,7 @@ export function PlaygroundConfigForm({ githubSignedIn, initial }: Props) {
   const [repoFilter, setRepoFilter] = useState("");
   const [repoLoading, setRepoLoading] = useState(false);
   const baseId = useId();
-  const selectedAccountType =
-    accounts.find((account) => account.login === org)?.type ?? "user";
+  const selectedAccountType = accounts.find((account) => account.login === org)?.type ?? "user";
   const filteredRepos = repos.filter((item) => {
     const q = repoFilter.trim().toLowerCase();
     if (!q) {
@@ -170,9 +153,8 @@ export function PlaygroundConfigForm({ githubSignedIn, initial }: Props) {
         const nextAccounts = data.accounts ?? [];
         setAccounts(nextAccounts);
         setOrg((current) =>
-          nextAccounts.length > 0 &&
-          !nextAccounts.some((account) => account.login === current)
-            ? nextAccounts[0]?.login ?? current
+          nextAccounts.length > 0 && !nextAccounts.some((account) => account.login === current)
+            ? (nextAccounts[0]?.login ?? current)
             : current,
         );
       } catch {
@@ -266,11 +248,7 @@ export function PlaygroundConfigForm({ githubSignedIn, initial }: Props) {
       start(() => {
         try {
           const config = readConfigFromForm(e.currentTarget);
-          setClientCookie(
-            PLAYGROUND_CONFIG_COOKIE,
-            serialize(config),
-            COOKIE_MAX_AGE,
-          );
+          setClientCookie(PLAYGROUND_CONFIG_COOKIE, serialize(config), COOKIE_MAX_AGE);
           router.refresh();
         } catch (ex) {
           setErr(ex instanceof Error ? ex.message : "Invalid input");
@@ -319,8 +297,7 @@ export function PlaygroundConfigForm({ githubSignedIn, initial }: Props) {
             </div>
             {!githubSignedIn ? (
               <p className="text-[11px] text-zinc-500">
-                GitHub repo picking appears after you sign in with GitHub from
-                the toolbar.
+                GitHub repo picking appears after you sign in with GitHub from the toolbar.
               </p>
             ) : null}
           </div>
@@ -383,8 +360,7 @@ export function PlaygroundConfigForm({ githubSignedIn, initial }: Props) {
                   )}
                   {filteredRepos.map((item) => (
                     <option key={item.fullName} value={item.name}>
-                      {item.name} · {item.private ? "private" : "public"} ·{" "}
-                      {item.defaultBranch}
+                      {item.name} · {item.private ? "private" : "public"} · {item.defaultBranch}
                     </option>
                   ))}
                 </select>
@@ -432,12 +408,12 @@ export function PlaygroundConfigForm({ githubSignedIn, initial }: Props) {
           ) : null}
           {source === "local" && (
             <p className="sm:col-span-2 text-[11px] text-zinc-500">
-              The path above must be the git worktree. Org/repo must match how
-              this DB was first indexed (e.g. repo{" "}
-              <code className="text-zinc-600 dark:text-zinc-500">wildwood-mono</code>{" "}
-              if you started from defaults); changing to{" "}
-              <code className="text-zinc-600 dark:text-zinc-500">wildwood</code>{" "}
-              alone does not “rename” stored blobs and can cause empty previews.
+              The path above must be the git worktree. Org/repo must match how this DB was first
+              indexed (e.g. repo{" "}
+              <code className="text-zinc-600 dark:text-zinc-500">wildwood-mono</code> if you started
+              from defaults); changing to{" "}
+              <code className="text-zinc-600 dark:text-zinc-500">wildwood</code> alone does not
+              “rename” stored blobs and can cause empty previews.
             </p>
           )}
           <div className="sm:col-span-1">
@@ -469,9 +445,8 @@ export function PlaygroundConfigForm({ githubSignedIn, initial }: Props) {
                 type="text"
               />
               <p className="mt-1 text-[11px] text-zinc-500">
-                Leave empty for zero-config dev — Wildwood auto-detects the git
-                root from the Next dev server cwd. Set only if your checkout
-                lives elsewhere.
+                Leave empty for zero-config dev — Wildwood auto-detects the git root from the Next
+                dev server cwd. Set only if your checkout lives elsewhere.
               </p>
             </div>
           )}

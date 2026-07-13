@@ -16,10 +16,7 @@ function formatPath(path: readonly PropertyKey[]): string {
  * Produces a short, user-oriented explanation when structured data (e.g. a worktree) fails
  * Zod validation, so callers can `throw new Error(…)` instead of surfacing a raw `ZodError`.
  */
-export function formatZodErrorForUser(
-  error: z.ZodError,
-  what: "worktree" | "data",
-): string {
+export function formatZodErrorForUser(error: z.ZodError, what: "worktree" | "data"): string {
   const issues = error.issues;
   if (issues.length === 0) {
     return `We couldn’t read this ${what}. The response didn’t look valid.`;
@@ -37,9 +34,7 @@ export function formatZodErrorForUser(
     ].join("\n\n");
   }
 
-  const tail = rest.length
-    ? ` (${rest.length} more issue${rest.length > 1 ? "s" : ""})`
-    : "";
+  const tail = rest.length ? ` (${rest.length} more issue${rest.length > 1 ? "s" : ""})` : "";
 
   if (path) {
     return `Couldn’t read this ${what} (${path}): ${first.message}.${tail}`;

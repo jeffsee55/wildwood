@@ -5,9 +5,7 @@ export const resolveEventOrigin = (event: {
 }): string => {
   const { origin } = event.url;
   if (origin && origin !== "null") return origin;
-  const host =
-    event.req.headers.get("x-forwarded-host") ??
-    event.req.headers.get("host");
+  const host = event.req.headers.get("x-forwarded-host") ?? event.req.headers.get("host");
   if (!host) return "http://localhost";
   const proto =
     event.req.headers.get("x-forwarded-proto") ??

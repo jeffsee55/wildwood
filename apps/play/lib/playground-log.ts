@@ -19,9 +19,7 @@ function safeLine(value: unknown): string {
     return value;
   }
   try {
-    return JSON.stringify(value, (_k, v) =>
-      v === undefined ? "__undefined__" : v,
-    );
+    return JSON.stringify(value, (_k, v) => (v === undefined ? "__undefined__" : v));
   } catch {
     return inspect(value, { depth: 6, colors: false, breakLength: 120 });
   }
@@ -32,16 +30,12 @@ export function playDebug(phase: string, data: Record<string, unknown>): void {
   if (!isPlayVerbose()) {
     return;
   }
-  process.stderr.write(
-    `[play] ${phase} ${new Date().toISOString()} ${safeLine(data)}\n`,
-  );
+  process.stderr.write(`[play] ${phase} ${new Date().toISOString()} ${safeLine(data)}\n`);
 }
 
 /** Always: one line per call; cannot collapse to `{}`. */
 export function playInfo(phase: string, data: Record<string, unknown>): void {
-  process.stderr.write(
-    `[play] ${phase} ${new Date().toISOString()} ${safeLine(data)}\n`,
-  );
+  process.stderr.write(`[play] ${phase} ${new Date().toISOString()} ${safeLine(data)}\n`);
 }
 
 /**
@@ -59,9 +53,7 @@ export function playFailureHeadline(
       : typeof err === "string"
         ? err
         : safeLine(err);
-  process.stderr.write(
-    `[play] FAILED at ${stage}: ${msg.replace(/\s+/g, " ").slice(0, 2000)}\n`,
-  );
+  process.stderr.write(`[play] FAILED at ${stage}: ${msg.replace(/\s+/g, " ").slice(0, 2000)}\n`);
   if (err instanceof Error && err.stack) {
     process.stderr.write(`${err.stack}\n`);
   }

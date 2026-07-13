@@ -20,12 +20,13 @@ export default async function GithubAppManifestPage({ searchParams }: PageProps)
   return (
     <main className="flex min-h-svh w-full flex-1 flex-col items-center gap-6 bg-zinc-50 px-6 py-16 font-sans dark:bg-black">
       <div className="w-full max-w-2xl rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-        Legacy callback path. New flow uses <code>/api/wildwood/github/app-manifest/callback</code> automatically if you used the toolbar&apos;s
-        Create GitHub App after this deploy.
+        Legacy callback path. New flow uses <code>/api/wildwood/github/app-manifest/callback</code>{" "}
+        automatically if you used the toolbar&apos;s Create GitHub App after this deploy.
       </div>
       <GitHubAppManifestCallback code={code} />
       <p className="text-xs text-zinc-500">
-        Preferred URL after migration: <code>/api/wildwood/github/app-manifest/callback?code=…&amp;state=…</code>
+        Preferred URL after migration:{" "}
+        <code>/api/wildwood/github/app-manifest/callback?code=…&amp;state=…</code>
       </p>
     </main>
   );

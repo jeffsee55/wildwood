@@ -1,12 +1,7 @@
 import type { Root } from "mdast";
 
 export class Logger {
-  constructor(args: {
-    name: string;
-  }) {
-    // Not used yet
-    args;
-  }
+  constructor(_args: { name: string }) {}
 
   log(...args: Parameters<typeof console.log>) {
     console.log(...args);
@@ -50,11 +45,7 @@ export class Logger {
           return `${data.raw.slice(0, 30)} [...]`;
         }
       }
-      if (
-        "_meta" in data &&
-        typeof data._meta === "object" &&
-        data._meta !== null
-      ) {
+      if ("_meta" in data && typeof data._meta === "object" && data._meta !== null) {
         data._meta = {
           // @ts-expect-error
           path: data._meta.path,
@@ -65,12 +56,7 @@ export class Logger {
       }
 
       // Check if this is a Zod type (has def.type property)
-      if (
-        "def" in data &&
-        data.def &&
-        typeof data.def === "object" &&
-        "type" in data.def
-      ) {
+      if ("def" in data && data.def && typeof data.def === "object" && "type" in data.def) {
         return `[Zod ${data.def.type}]`;
       }
 

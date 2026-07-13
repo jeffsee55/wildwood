@@ -4,10 +4,7 @@ import dynamic from "next/dynamic";
 import type { PlaygroundConfig } from "@/lib/playground-config";
 
 const PlaygroundConfigForm = dynamic(
-  () =>
-    import("@/components/playground-config-form").then(
-      (m) => m.PlaygroundConfigForm,
-    ),
+  () => import("@/components/playground-config-form").then((m) => m.PlaygroundConfigForm),
   {
     ssr: false,
     loading: () => (
@@ -26,10 +23,5 @@ type Props = {
 
 /** Client-only: `ssr: false` is not valid on `next/dynamic` from a Server Component. */
 export function PlaygroundConfigFormLoader({ githubSignedIn, initial }: Props) {
-  return (
-    <PlaygroundConfigForm
-      githubSignedIn={githubSignedIn}
-      initial={initial}
-    />
-  );
+  return <PlaygroundConfigForm githubSignedIn={githubSignedIn} initial={initial} />;
 }

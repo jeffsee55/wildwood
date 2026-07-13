@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import type { KitAuthConfig, Theme } from "wildwood-kit";
 import dynamic from "next/dynamic";
@@ -21,7 +21,11 @@ class WildwoodToolbarBoundary extends React.Component<
     return { error };
   }
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error("[wildwood:toolbar] failed (isolated):", error, info.componentStack?.slice(0, 1800));
+    console.error(
+      "[wildwood:toolbar] failed (isolated):",
+      error,
+      info.componentStack?.slice(0, 1800),
+    );
   }
   render() {
     if (this.state.error) {

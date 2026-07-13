@@ -24,27 +24,12 @@ export const relations = defineRelations(schema, (r) => {
         to: [r._blobs.orgName, r._blobs.repoName, r._blobs.oid],
       }),
       siblings: r.many.entries({
-        from: [
-          r.entries.orgName,
-          r.entries.repoName,
-          r.entries.ref,
-          r.entries.canonical,
-        ],
-        to: [
-          r.entries.orgName,
-          r.entries.repoName,
-          r.entries.ref,
-          r.entries.canonical,
-        ],
+        from: [r.entries.orgName, r.entries.repoName, r.entries.ref, r.entries.canonical],
+        to: [r.entries.orgName, r.entries.repoName, r.entries.ref, r.entries.canonical],
       }),
       // Forward: entry's field points away. Row lives at entry.path.
       toConnections: r.many.connections({
-        from: [
-          r.entries.orgName,
-          r.entries.repoName,
-          r.entries.version,
-          r.entries.path,
-        ],
+        from: [r.entries.orgName, r.entries.repoName, r.entries.version, r.entries.path],
         to: [
           r.connections.orgName,
           r.connections.repoName,

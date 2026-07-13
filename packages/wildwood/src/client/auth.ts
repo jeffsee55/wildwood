@@ -58,7 +58,8 @@ export function normalizeProviderConfig(
   const gh = input.github;
   if (!gh) return { github: undefined };
 
-  const type = typeof gh.type === "string" ? (gh.type.trim() as "app" | "token" | "default") : undefined;
+  const type =
+    typeof gh.type === "string" ? (gh.type.trim() as "app" | "token" | "default") : undefined;
 
   if (type === "token") {
     const token = trimOrUndefined(gh.token);

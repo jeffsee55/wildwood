@@ -1,15 +1,7 @@
 import fs from "node:fs";
 import { dirname, join } from "node:path";
-import {
-  type MergePrResult,
-  type PrResult,
-  type PushResult,
-  Remote,
-} from "@/git/remote";
-import {
-  runGit,
-  runGitBuffer,
-} from "@/git/remote/native/run-git-command";
+import { type MergePrResult, type PrResult, type PushResult, Remote } from "@/git/remote";
+import { runGit, runGitBuffer } from "@/git/remote/native/run-git-command";
 import { type Commit, commitSchema } from "@/types";
 
 function gitErrorSummary(message: string): string {
@@ -18,9 +10,7 @@ function gitErrorSummary(message: string): string {
     .map((l) => l.trim())
     .filter(Boolean);
   const fatal = lines.find((l) => l.startsWith("fatal:"));
-  const raw = fatal
-    ? fatal.replace(/^fatal:\s*/i, "").trim()
-    : (lines[0] ?? message);
+  const raw = fatal ? fatal.replace(/^fatal:\s*/i, "").trim() : (lines[0] ?? message);
   return raw.length > 200 ? `${raw.slice(0, 197)}…` : raw;
 }
 
@@ -45,8 +35,7 @@ export class NativeRemote extends Remote {
         args: ["branch", "-r", "--format=%(refname:short)"],
       }),
     ]);
-    if (localResult.isErr())
-      throw new Error(`Failed to list local branches: ${localResult.error}`);
+    if (localResult.isErr()) throw new Error(`Failed to list local branches: ${localResult.error}`);
     if (remoteResult.isErr())
       throw new Error(`Failed to list remote branches: ${remoteResult.error}`);
     const normalize = (value: string) =>
@@ -56,9 +45,7 @@ export class NativeRemote extends Remote {
         .filter(Boolean)
         .map((b) => b.replace(/^origin\//, ""))
         .filter((b) => b !== "HEAD");
-    return [
-      ...new Set([...normalize(localResult.value), ...normalize(remoteResult.value)]),
-    ];
+    return [...new Set([...normalize(localResult.value), ...normalize(remoteResult.value)])];
   }
 
   async fetchBlobs(args: { oids: string[] }) {
@@ -138,8 +125,8 @@ export class NativeRemote extends Remote {
       if (result.isOk()) return result.value.trim();
       lastErr = String(result.error);
     }
-    for (const fallback of ["HEAD", process.env.VERCEL_GIT_COMMIT_SHA].filter(
-      (v): v is string => Boolean(v?.trim()),
+    for (const fallback of ["HEAD", process.env.VERCEL_GIT_COMMIT_SHA].filter((v): v is string =>
+      Boolean(v?.trim()),
     )) {
       if (tried.has(fallback)) continue;
       tried.add(fallback);
@@ -201,10 +188,7 @@ export class NativeRemote extends Remote {
     return runGit({ cwd: this.cwd(), args: args.args, input: args.input });
   }
 
-  private async executeCommandBuffer(args: {
-    args: string[];
-    input?: string;
-  }) {
+  private async executeCommandBuffer(args: { args: string[]; input?: string }) {
     return runGitBuffer({ cwd: this.cwd(), args: args.args, input: args.input });
   }
 
@@ -221,15 +205,9 @@ export class NativeRemote extends Remote {
     const lines = rawCommitObject.split("\n");
     const messageStartIndex = lines.findIndex((line) => line === "") + 1;
     let actualMessageStart = messageStartIndex;
-    while (
-      actualMessageStart < lines.length &&
-      lines[actualMessageStart]!.startsWith("gpgsig")
-    ) {
+    while (actualMessageStart < lines.length && lines[actualMessageStart]!.startsWith("gpgsig")) {
       actualMessageStart++;
-      while (
-        actualMessageStart < lines.length &&
-        lines[actualMessageStart]!.startsWith(" ")
-      )
+      while (actualMessageStart < lines.length && lines[actualMessageStart]!.startsWith(" "))
         actualMessageStart++;
       if (actualMessageStart < lines.length && lines[actualMessageStart] === "") {
         actualMessageStart++;

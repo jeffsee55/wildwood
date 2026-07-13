@@ -34,12 +34,12 @@ const config = defineConfig({
 
 Resolution order — no `WILDWOOD_*` env required on Vercel when System Envs are enabled (Settings → Environment Variables → "Enable access to System Environment Variables"):
 
-| Field | Priority (first wins) |
-|-------|-----------------------|
-| `org` | explicit `org` → `VERCEL_GIT_REPO_OWNER` (system) → git `remote.origin` owner (dev only) |
-| `repo`| explicit `repo` → `VERCEL_GIT_REPO_SLUG` (system) → git `remote.origin` repo |
-| `ref` | explicit `ref` → `VERCEL_GIT_COMMIT_REF` (branch) → `VERCEL_GIT_COMMIT_SHA` (immutable) → `"main"` |
-| `origin`| explicit `origin` → `VERCEL_PROJECT_PRODUCTION_URL` → `VERCEL_BRANCH_URL` → `VERCEL_URL` |
+| Field    | Priority (first wins)                                                                              |
+| -------- | -------------------------------------------------------------------------------------------------- |
+| `org`    | explicit `org` → `VERCEL_GIT_REPO_OWNER` (system) → git `remote.origin` owner (dev only)           |
+| `repo`   | explicit `repo` → `VERCEL_GIT_REPO_SLUG` (system) → git `remote.origin` repo                       |
+| `ref`    | explicit `ref` → `VERCEL_GIT_COMMIT_REF` (branch) → `VERCEL_GIT_COMMIT_SHA` (immutable) → `"main"` |
+| `origin` | explicit `origin` → `VERCEL_PROJECT_PRODUCTION_URL` → `VERCEL_BRANCH_URL` → `VERCEL_URL`           |
 
 That means `defineConfig({ collections })` alone is sufficient on Vercel after you enable System Environment Variables — no custom env wiring.
 

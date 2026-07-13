@@ -211,7 +211,7 @@ import { createDraftRoute, type CreateDraftRouteOptions } from "wildwood"nextjs/
 export const { GET, POST } = createDraftRoute({ branchCookieName?, legacyCookieNames? });
 ```
 
-Legacy alias `resolveActiveRef` still re-exported from "wildwood"nextjs/branch`/`resolve-active-ref`; preferred is `getBranch` / `resolveBranch`.
+Legacy alias `resolveActiveRef` still re-exported from "wildwood"nextjs/branch`/`resolve-active-ref`; preferred is `getBranch`/`resolveBranch`.
 
 ## Branch / cookie helpers
 

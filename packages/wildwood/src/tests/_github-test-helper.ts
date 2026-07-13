@@ -32,14 +32,11 @@ export class GitHubTestHelper {
     }
     await mkdir(this.localPath, { recursive: true });
 
-    execSync(
-      `gh repo create ${this.owner}/${this.repoName} --private --clone`,
-      {
-        cwd: join(this.localPath, ".."),
-        encoding: "utf-8",
-        stdio: "pipe",
-      },
-    );
+    execSync(`gh repo create ${this.owner}/${this.repoName} --private --clone`, {
+      cwd: join(this.localPath, ".."),
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
 
     this.runGit("config user.name 'Wildwood Test'");
     this.runGit("config user.email 'tr33-test@example.com'");
@@ -65,10 +62,7 @@ export class GitHubTestHelper {
   async addFiles(files: Record<string, string | Buffer>): Promise<void> {
     this.ensureInitialized();
     for (const filePath of Object.keys(files)) {
-      const dir = join(
-        this.localPath,
-        filePath.split("/").slice(0, -1).join("/"),
-      );
+      const dir = join(this.localPath, filePath.split("/").slice(0, -1).join("/"));
       if (dir !== this.localPath) {
         await mkdir(dir, { recursive: true });
       }
@@ -131,8 +125,7 @@ export class GitHubTestHelper {
       const resources = JSON.parse(result);
       const graphql = resources.graphql;
       const core = resources.core;
-      const resetAt = (r: { reset: number }) =>
-        new Date(r.reset * 1000).toLocaleTimeString();
+      const resetAt = (r: { reset: number }) => new Date(r.reset * 1000).toLocaleTimeString();
       console.log(
         `GitHub rate limit — GraphQL: ${graphql.remaining}/${graphql.limit} (resets ${resetAt(graphql)}) | REST: ${core.remaining}/${core.limit} (resets ${resetAt(core)})`,
       );

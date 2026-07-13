@@ -86,7 +86,19 @@ type ExtendedPhrasing =
       children?: MdastNode[];
     };
 
-type MdastNode = AugmentedRoot | ExtendedPhrasing | { type: string; value?: string; children?: MdastNode[]; depth?: number; ordered?: boolean; url?: string; lang?: string; [k: string]: unknown };
+type MdastNode =
+  | AugmentedRoot
+  | ExtendedPhrasing
+  | {
+      type: string;
+      value?: string;
+      children?: MdastNode[];
+      depth?: number;
+      ordered?: boolean;
+      url?: string;
+      lang?: string;
+      [k: string]: unknown;
+    };
 
 type NodeType =
   | "root"
@@ -112,7 +124,24 @@ type NodeType =
 // ── public props ───────────────────────────────────────────────────────────
 
 export type MarkdownClassNames = Partial<
-  Record<NodeType | "ul" | "ol" | "h1" | "h2" | "h3" | "h4" | "a" | "p" | "code" | "pre" | "blockquote" | "li" | "img" | "image", string>
+  Record<
+    | NodeType
+    | "ul"
+    | "ol"
+    | "h1"
+    | "h2"
+    | "h3"
+    | "h4"
+    | "a"
+    | "p"
+    | "code"
+    | "pre"
+    | "blockquote"
+    | "li"
+    | "img"
+    | "image",
+    string
+  >
 >;
 
 export type MarkdownComponents = {
@@ -139,9 +168,24 @@ export type MarkdownComponents = {
 } & {
   // allow `link`, `leafDirective`, etc
   link?: MarkdownComponents["a"];
-  leafDirective?: (props: { name: string; attributes?: Record<string, unknown>; children: ReactNode; node: MdastNode }) => ReactNode;
-  inlineDirective?: (props: { name: string; attributes?: Record<string, unknown>; children: ReactNode; node: MdastNode }) => ReactNode;
-  containerDirective?: (props: { name: string; attributes?: Record<string, unknown>; children: ReactNode; node: MdastNode }) => ReactNode;
+  leafDirective?: (props: {
+    name: string;
+    attributes?: Record<string, unknown>;
+    children: ReactNode;
+    node: MdastNode;
+  }) => ReactNode;
+  inlineDirective?: (props: {
+    name: string;
+    attributes?: Record<string, unknown>;
+    children: ReactNode;
+    node: MdastNode;
+  }) => ReactNode;
+  containerDirective?: (props: {
+    name: string;
+    attributes?: Record<string, unknown>;
+    children: ReactNode;
+    node: MdastNode;
+  }) => ReactNode;
 };
 
 export type MarkdownProps = {
@@ -210,25 +254,65 @@ function renderNode(node: MdastNode, key: number, ctx: Ctx): ReactNode {
       const depth = (node as { depth?: number }).depth ?? 1;
       const kids = renderChildren(childrenOf(node), ctx);
       if (depth === 1) {
-        if (C.h1) return <C.h1 key={key} node={node as unknown as Heading}>{kids}</C.h1>;
-        return <h1 key={key} className={$.h1 ?? $.heading}>{kids}</h1>;
+        if (C.h1)
+          return (
+            <C.h1 key={key} node={node as unknown as Heading}>
+              {kids}
+            </C.h1>
+          );
+        return (
+          <h1 key={key} className={$.h1 ?? $.heading}>
+            {kids}
+          </h1>
+        );
       }
       if (depth === 2) {
-        if (C.h2) return <C.h2 key={key} node={node as unknown as Heading}>{kids}</C.h2>;
-        return <h2 key={key} className={$.h2 ?? $.heading}>{kids}</h2>;
+        if (C.h2)
+          return (
+            <C.h2 key={key} node={node as unknown as Heading}>
+              {kids}
+            </C.h2>
+          );
+        return (
+          <h2 key={key} className={$.h2 ?? $.heading}>
+            {kids}
+          </h2>
+        );
       }
       if (depth === 3) {
-        if (C.h3) return <C.h3 key={key} node={node as unknown as Heading}>{kids}</C.h3>;
-        return <h3 key={key} className={$.h3 ?? $.heading}>{kids}</h3>;
+        if (C.h3)
+          return (
+            <C.h3 key={key} node={node as unknown as Heading}>
+              {kids}
+            </C.h3>
+          );
+        return (
+          <h3 key={key} className={$.h3 ?? $.heading}>
+            {kids}
+          </h3>
+        );
       }
-      if (C.h4) return <C.h4 key={key} node={node as unknown as Heading}>{kids}</C.h4>;
-      return <h4 key={key} className={$.h4 ?? $.heading}>{kids}</h4>;
+      if (C.h4)
+        return (
+          <C.h4 key={key} node={node as unknown as Heading}>
+            {kids}
+          </C.h4>
+        );
+      return (
+        <h4 key={key} className={$.h4 ?? $.heading}>
+          {kids}
+        </h4>
+      );
     }
 
     case "paragraph": {
       const kids = renderChildren(childrenOf(node), ctx);
       if (C.p) return <C.p key={key}>{kids}</C.p>;
-      return <p key={key} className={$.p ?? $.paragraph}>{kids}</p>;
+      return (
+        <p key={key} className={$.p ?? $.paragraph}>
+          {kids}
+        </p>
+      );
     }
 
     case "text":
@@ -249,16 +333,31 @@ function renderNode(node: MdastNode, key: number, ctx: Ctx): ReactNode {
     case "inlineCode": {
       const v = nodeText(node) ?? "";
       if (C.code) return <C.code key={key}>{v}</C.code>;
-      return <code key={key} className={cn("rounded bg-black/5 px-1.5 py-0.5 font-mono text-sm", $.inlineCode, $.code)}>{v}</code>;
+      return (
+        <code
+          key={key}
+          className={cn("rounded bg-black/5 px-1.5 py-0.5 font-mono text-sm", $.inlineCode, $.code)}
+        >
+          {v}
+        </code>
+      );
     }
 
     case "code": {
       const v = nodeText(node) ?? "";
       const lang = (node as { lang?: string }).lang;
-      if (C.pre) return <C.pre key={key} lang={lang}><code>{v}</code></C.pre>;
+      if (C.pre)
+        return (
+          <C.pre key={key} lang={lang}>
+            <code>{v}</code>
+          </C.pre>
+        );
       // inherit `.code` className only when no specific `pre` override
       return (
-        <pre key={key} className={cn("mt-5 overflow-x-auto rounded-2xl border p-4 text-sm", $.pre ?? $.code)}>
+        <pre
+          key={key}
+          className={cn("mt-5 overflow-x-auto rounded-2xl border p-4 text-sm", $.pre ?? $.code)}
+        >
           <code>{v}</code>
         </pre>
       );
@@ -269,16 +368,28 @@ function renderNode(node: MdastNode, key: number, ctx: Ctx): ReactNode {
       const kids = renderChildren(childrenOf(node), ctx);
       if (ordered) {
         if (C.ol) return <C.ol key={key}>{kids}</C.ol>;
-        return <ol key={key} className={cn("mt-5 space-y-2 pl-6", $.ol ?? $.list)}>{kids}</ol>;
+        return (
+          <ol key={key} className={cn("mt-5 space-y-2 pl-6", $.ol ?? $.list)}>
+            {kids}
+          </ol>
+        );
       }
       if (C.ul) return <C.ul key={key}>{kids}</C.ul>;
-      return <ul key={key} className={cn("mt-5 space-y-2 pl-6", $.ul ?? $.list)}>{kids}</ul>;
+      return (
+        <ul key={key} className={cn("mt-5 space-y-2 pl-6", $.ul ?? $.list)}>
+          {kids}
+        </ul>
+      );
     }
 
     case "listItem": {
       const kids = renderChildren(childrenOf(node), ctx);
       if (C.li) return <C.li key={key}>{kids}</C.li>;
-      return <li key={key} className={$.li ?? $.listItem}>{kids}</li>;
+      return (
+        <li key={key} className={$.li ?? $.listItem}>
+          {kids}
+        </li>
+      );
     }
 
     case "link": {
@@ -288,10 +399,21 @@ function renderNode(node: MdastNode, key: number, ctx: Ctx): ReactNode {
       const Comp = C.a ?? C.link;
       if (Comp) {
         // user-provided Link may call `next/link`-style href handling
-        return <Comp key={key} href={href} node={node}>{kids}</Comp>;
+        return (
+          <Comp key={key} href={href} node={node}>
+            {kids}
+          </Comp>
+        );
       }
       return (
-        <a key={key} href={href} className={cn("font-medium underline decoration-black/20 underline-offset-4 hover:decoration-black", $.a)}>
+        <a
+          key={key}
+          href={href}
+          className={cn(
+            "font-medium underline decoration-black/20 underline-offset-4 hover:decoration-black",
+            $.a,
+          )}
+        >
           {kids}
         </a>
       );
@@ -308,7 +430,11 @@ function renderNode(node: MdastNode, key: number, ctx: Ctx): ReactNode {
     case "blockquote": {
       const kids = renderChildren(childrenOf(node), ctx);
       if (C.blockquote) return <C.blockquote key={key}>{kids}</C.blockquote>;
-      return <blockquote key={key} className={$.blockquote}>{kids}</blockquote>;
+      return (
+        <blockquote key={key} className={$.blockquote}>
+          {kids}
+        </blockquote>
+      );
     }
 
     case "leafDirective":
@@ -318,12 +444,32 @@ function renderNode(node: MdastNode, key: number, ctx: Ctx): ReactNode {
       const attrs = (node as { attributes?: Record<string, unknown> }).attributes;
       const kids = renderChildren(childrenOf(node), ctx);
       const compKey = t as "leafDirective" | "containerDirective" | "inlineDirective";
-      const Override = ctx.components[compKey] as ((p: { name: string; attributes?: Record<string, unknown>; children: ReactNode; node: MdastNode }) => ReactNode) | undefined;
-      if (Override) return <Override key={key} name={name} attributes={attrs} node={node} children={kids} />;
-      if (C.div) return <C.div key={key} node={node}>{kids}</C.div>;
+      const Override = ctx.components[compKey] as
+        | ((p: {
+            name: string;
+            attributes?: Record<string, unknown>;
+            children: ReactNode;
+            node: MdastNode;
+          }) => ReactNode)
+        | undefined;
+      if (Override)
+        return <Override key={key} name={name} attributes={attrs} node={node} children={kids} />;
+      if (C.div)
+        return (
+          <C.div key={key} node={node}>
+            {kids}
+          </C.div>
+        );
       // sensible default: render as a bordered callout
       return (
-        <aside key={key} data-directive={name} className={cn("mt-6 rounded-2xl border bg-white p-5", ($ as Record<string, string | undefined>)[t])}>
+        <aside
+          key={key}
+          data-directive={name}
+          className={cn(
+            "mt-6 rounded-2xl border bg-white p-5",
+            ($ as Record<string, string | undefined>)[t],
+          )}
+        >
           {kids}
         </aside>
       );

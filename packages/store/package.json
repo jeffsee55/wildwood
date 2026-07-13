@@ -2,10 +2,10 @@
   "name": "wildwood-store",
   "version": "0.1.0",
   "description": "Git object store and merge primitives for Wildwood",
-  "license": "MIT",
   "author": "Jeff See <jeff@wildwood.dev>",
-  "publishConfig": { "access": "public" },
+  "license": "MIT",
   "type": "module",
+  "main": "./dist/index.mjs",
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
@@ -14,14 +14,18 @@
     },
     "./package.json": "./package.json"
   },
-  "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
-    "lib:dev": "tsdown --watch"
+    "lib:dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint .",
+    "format": "oxfmt ."
   },
   "dependencies": {
     "node-diff3": "^3.2.0"
@@ -30,5 +34,8 @@
     "@types/diff3": "^0.0.2",
     "tsdown": "0.18.2",
     "typescript": "5.5.4"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

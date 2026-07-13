@@ -18,7 +18,13 @@ export function buildPlaygroundWildwood(pg: PlaygroundConfig) {
   // No `.trim()` needed — `defineConfig` and provider normalizers trim internally.
   const wildwoodConfig =
     pg.source === "github"
-      ? defineConfig({ org: pg.org, repo: pg.repo, ref: pg.ref, version: "0", collections: { page } })
+      ? defineConfig({
+          org: pg.org,
+          repo: pg.repo,
+          ref: pg.ref,
+          version: "0",
+          collections: { page },
+        })
       : defineConfig({
           org: pg.org,
           repo: pg.repo,
@@ -49,7 +55,9 @@ export function buildPlaygroundWildwood(pg: PlaygroundConfig) {
 
 export type PlaygroundWildwoodClient = ReturnType<typeof buildPlaygroundWildwood>;
 
-export function getPlaygroundWildwood(cookies: { get(name: string): { value: string } | undefined }): PlaygroundWildwoodClient {
+export function getPlaygroundWildwood(cookies: {
+  get(name: string): { value: string } | undefined;
+}): PlaygroundWildwoodClient {
   return buildPlaygroundWildwood(parsePlaygroundConfig(cookies));
 }
 

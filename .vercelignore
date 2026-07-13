@@ -13,6 +13,6 @@ packages/wildwood/src/tests
 packages/wildwood/playground.ts
 packages/wildwood/wildwood.db
 packages/wildwood/wildwood-docs.db
-# legacy
 packages/wildwood/tr33.db
 packages/wildwood/tr33-docs.db
+content

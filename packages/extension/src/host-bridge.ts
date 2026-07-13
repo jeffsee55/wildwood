@@ -43,5 +43,9 @@ export function subscribeHostRef(onRef: (ref: string) => void): { dispose(): voi
     const r = ev.data?.ref;
     if (typeof r === "string" && r.length > 0) onRef(r);
   };
-  return { dispose() { bc.close(); } };
+  return {
+    dispose() {
+      bc.close();
+    },
+  };
 }

@@ -36,6 +36,13 @@ export default defineConfig({
     // Bundle `wildwood-shared` (pure JS / ~3KB) so consumers don't need `transpilePackages`.
     alwaysBundle: [/wildwood-shared/, /sonner.*\.css/],
     // Keep React + Next external to guarantee single React copy (fixes useRef-of-null).
-    neverBundle: ["react", "react-dom", "react/jsx-runtime", "next", "next/navigation", "next/link"],
+    neverBundle: [
+      "react",
+      "react-dom",
+      "react/jsx-runtime",
+      "next",
+      "next/navigation",
+      "next/link",
+    ],
   },
 });

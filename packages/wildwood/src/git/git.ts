@@ -10,12 +10,7 @@ import type { Config } from "@/client/config";
 import { type PrInput, type Remote, resolvePrField } from "@/git/remote";
 import { isProdRuntime } from "@/runtime";
 import { isMissingSchemaError, type LibsqlDatabase } from "@/sqlite/database";
-import {
-  type Commit,
-  type FindWorktreeEntriesArgs,
-  type Worktree,
-  worktreeSchema,
-} from "@/types";
+import { type Commit, type FindWorktreeEntriesArgs, type Worktree, worktreeSchema } from "@/types";
 import { formatZodErrorForUser } from "@/zod/format-zod-for-user";
 
 export type GitAddResult = {
@@ -43,11 +38,7 @@ export class Git implements Gitable {
   blobStore = new Map<string, string>();
   trees: Trees;
 
-  constructor(args: {
-    config: Config;
-    remote: Remote;
-    db: LibsqlDatabase;
-  }) {
+  constructor(args: { config: Config; remote: Remote; db: LibsqlDatabase }) {
     this.config = args.config;
     this.db = args.db;
     this.remote = args.remote;
@@ -164,8 +155,7 @@ export class Git implements Gitable {
     return {
       commit: { oid: commit.oid, treeOid: commit.treeOid },
       rootTreeOid:
-        worktree.rootTree?.oid &&
-        worktree.rootTree.oid !== commit.treeOid
+        worktree.rootTree?.oid && worktree.rootTree.oid !== commit.treeOid
           ? worktree.rootTree.oid
           : null,
     };
@@ -184,9 +174,7 @@ export class Git implements Gitable {
         }),
       });
       const prev = worktree.versions ?? [];
-      const versions = prev.includes(this.config.version)
-        ? prev
-        : [...prev, this.config.version];
+      const versions = prev.includes(this.config.version) ? prev : [...prev, this.config.version];
       await this.db.refs.updateVersions({
         ref: args.ref,
         versions,
@@ -222,9 +210,7 @@ export class Git implements Gitable {
     });
     const indexed = await this.db.refs.get({ ref: args.ref });
     const prev = indexed?.versions ?? [];
-    const versions = prev.includes(this.config.version)
-      ? prev
-      : [...prev, this.config.version];
+    const versions = prev.includes(this.config.version) ? prev : [...prev, this.config.version];
     await this.db.refs.updateVersions({
       ref: args.ref,
       versions,
@@ -384,10 +370,7 @@ export class Git implements Gitable {
 
   async findMany(
     args: FindWorktreeEntriesArgs,
-    {
-      retrying = false,
-      didInit = false,
-    }: { retrying?: boolean; didInit?: boolean } = {},
+    { retrying = false, didInit = false }: { retrying?: boolean; didInit?: boolean } = {},
   ): Promise<{
     collection: string;
     commitOid: string;
@@ -511,10 +494,7 @@ export class Git implements Gitable {
   // First-principles: findFirst is findMany limit 1 with slug/path as real columns.
   async findFirst(
     args: FindWorktreeEntriesArgs,
-    {
-      retrying = false,
-      didInit = false,
-    }: { retrying?: boolean; didInit?: boolean } = {},
+    { retrying = false, didInit = false }: { retrying?: boolean; didInit?: boolean } = {},
   ): Promise<{
     collection: string;
     commitOid: string;
@@ -528,10 +508,10 @@ export class Git implements Gitable {
   }> {
     const ref = args.ref || this.config.ref;
     try {
-      const inner = await this.findMany(
-        { ...args, limit: 1, ref } as FindWorktreeEntriesArgs,
-        { retrying, didInit },
-      );
+      const inner = await this.findMany({ ...args, limit: 1, ref } as FindWorktreeEntriesArgs, {
+        retrying,
+        didInit,
+      });
       const item = inner.items[0] ?? null;
       return {
         collection: args.collection,
@@ -669,10 +649,7 @@ export class Git implements Gitable {
 
   async commit(args: {
     ref: string;
-    commit: Omit<
-      Commit,
-      "oid" | "treeOid" | "parent" | "secondParent" | "committer" | "author"
-    > & {
+    commit: Omit<Commit, "oid" | "treeOid" | "parent" | "secondParent" | "committer" | "author"> & {
       author: { name: string; email: string };
       committer?: { name: string; email: string };
     };
@@ -758,9 +735,7 @@ export class Git implements Gitable {
     const blobOids = new Set<string>();
 
     for (const commit of unpushedCommits) {
-      const parentCommit = commit.parent
-        ? await this.db.commits.get({ oid: commit.parent })
-        : null;
+      const parentCommit = commit.parent ? await this.db.commits.get({ oid: commit.parent }) : null;
       const paths = await this.trees.diffBlobPathsForPush({
         baseTreeOid: parentCommit?.treeOid ?? null,
         treeOid: commit.treeOid,
@@ -814,9 +789,7 @@ export class Git implements Gitable {
       if (existing) {
         const title = resolvePrField(pr.title, existing.title);
         const body = resolvePrField(pr.body, existing.body);
-        const labels = pr.labels
-          ? resolvePrField(pr.labels, existing.labels)
-          : undefined;
+        const labels = pr.labels ? resolvePrField(pr.labels, existing.labels) : undefined;
         result.pr = await this.remote.updatePr({
           pr: existing.number,
           title,

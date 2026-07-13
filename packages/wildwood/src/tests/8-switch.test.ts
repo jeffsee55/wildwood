@@ -19,8 +19,7 @@ describe("git", () => {
     beforeEach(async () => {
       const initialFiles = {
         "content/other/nested/unrelated.md": `# Unrelated`,
-        "content/docs/getting-started.md":
-          "---\ntitle: Getting Started\n---\n\n# Getting Started",
+        "content/docs/getting-started.md": "---\ntitle: Getting Started\n---\n\n# Getting Started",
       };
       await t.helper.addFilesAndCommit(initialFiles, "Initial commit");
     });
@@ -75,8 +74,7 @@ describe("git", () => {
       await t.git.add({
         ref: "main",
         files: {
-          "content/docs/hello-world.md":
-            "---\ntitle: Hello World\n---\n\n# Hello W",
+          "content/docs/hello-world.md": "---\ntitle: Hello World\n---\n\n# Hello W",
         },
       });
       const client2 = t.createClientWithConfig({
@@ -101,8 +99,7 @@ describe("git", () => {
       await t.git.add({
         ref: "main",
         files: {
-          "content/docs/hello-world.md":
-            "---\ntitle: Hello World\n---\n\n# Hello W",
+          "content/docs/hello-world.md": "---\ntitle: Hello World\n---\n\n# Hello W",
         },
       });
       const result1 = await t2.docs.findMany({
@@ -164,8 +161,7 @@ describe("git", () => {
       await t.git.add({
         ref: "main",
         files: {
-          "content/docs/hello-world.md":
-            "---\ntitle: Hello World\n---\n\n# Hello W",
+          "content/docs/hello-world.md": "---\ntitle: Hello World\n---\n\n# Hello W",
         },
       });
       const client2 = t.createClientWithConfig({
@@ -213,8 +209,7 @@ describe("git", () => {
       await t.git.add({
         ref: "main",
         files: {
-          "content/docs/hello-world.md":
-            "---\ntitle: Hello World\n---\n\n# Hello W",
+          "content/docs/hello-world.md": "---\ntitle: Hello World\n---\n\n# Hello W",
         },
       });
       const client2 = t.createClientWithConfig({

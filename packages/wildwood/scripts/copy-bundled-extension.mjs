@@ -2,14 +2,10 @@ import { access, cp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-
 const wildwoodRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const extensionRoot = path.join(wildwoodRoot, "..", "extension");
 const dest = path.join(wildwoodRoot, "bundled-extension");
-const genTs = path.join(
-  wildwoodRoot,
-  "src/nextjs/bundled-extension-bytes.gen.ts",
-);
+const genTs = path.join(wildwoodRoot, "src/nextjs/bundled-extension-bytes.gen.ts");
 
 const required = ["dist/extension.js", "package.json", "themes/wildwood-dark.json"];
 
@@ -39,9 +35,7 @@ for (const file of ["package.json", "package.nls.json"]) {
 
 const extensionJs = await readFile(path.join(extensionRoot, "dist/extension.js"));
 const extensionJsBase64 = extensionJs.toString("base64");
-const themeJson = await readFile(
-  path.join(extensionRoot, "themes/wildwood-dark.json"),
-);
+const themeJson = await readFile(path.join(extensionRoot, "themes/wildwood-dark.json"));
 const themeJsonBase64 = themeJson.toString("base64");
 
 const pkgJsonRaw = await readFile(path.join(extensionRoot, "package.json"), "utf8");
@@ -52,7 +46,9 @@ const pkgMinimal = {
   name: pkgJson.name ?? "wildwood-vscode",
   publisher: pkgJson.publisher ?? "jsee",
   version: pkgJson.version ?? "0.0.0",
-  enabledApiProposals: Array.isArray(pkgJson.enabledApiProposals) ? pkgJson.enabledApiProposals : [],
+  enabledApiProposals: Array.isArray(pkgJson.enabledApiProposals)
+    ? pkgJson.enabledApiProposals
+    : [],
 };
 const pkgJsonBase64 = Buffer.from(JSON.stringify(pkgMinimal), "utf8").toString("base64");
 

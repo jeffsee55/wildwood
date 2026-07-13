@@ -18,8 +18,7 @@ export const sameLineEditConflictScenario: PlaygroundScenarioDefinition = {
   },
   pendingFiles: {
     "content/docs/conflict.md":
-      "---\ntitle: Conflict demo\nauthor: ../authors/jeff.json\n---\n\n" +
-      UNCOMMITTED_LINE,
+      "---\ntitle: Conflict demo\nauthor: ../authors/jeff.json\n---\n\n" + UNCOMMITTED_LINE,
   },
   createConfigInput: ({ org, repo, localPath }) => {
     const page = z.collection({
@@ -48,25 +47,22 @@ export const sameLineEditConflictScenario: PlaygroundScenarioDefinition = {
   apply: async (helper) => {
     const initialFiles = {
       "content/authors/jeff.json": JSON.stringify({ name: "Jeff" }),
-      "content/docs/conflict.md":
-        `---\ntitle: Conflict demo\nauthor: ../authors/jeff.json\n---\n\n${BASE_LINE}`,
-      "package.json": "{\"name\":\"tr33-mono\"}",
+      "content/docs/conflict.md": `---\ntitle: Conflict demo\nauthor: ../authors/jeff.json\n---\n\n${BASE_LINE}`,
+      "package.json": '{"name":"tr33-mono"}',
       "README.md": "# README",
     };
     await helper.addFilesAndCommit(initialFiles, "Initial commit");
     await helper.createBranch("feature/conflict");
     await helper.addFilesAndCommit(
       {
-        "content/docs/conflict.md":
-          `---\ntitle: Conflict demo\nauthor: ../authors/jeff.json\n---\n\n${FEATURE_LINE}`,
+        "content/docs/conflict.md": `---\ntitle: Conflict demo\nauthor: ../authors/jeff.json\n---\n\n${FEATURE_LINE}`,
       },
       "Edit line on feature",
     );
     await helper.switchBranch("main");
     await helper.addFilesAndCommit(
       {
-        "content/docs/conflict.md":
-          `---\ntitle: Conflict demo\nauthor: ../authors/jeff.json\n---\n\n${MAIN_LINE}`,
+        "content/docs/conflict.md": `---\ntitle: Conflict demo\nauthor: ../authors/jeff.json\n---\n\n${MAIN_LINE}`,
       },
       "Edit same line on main",
     );

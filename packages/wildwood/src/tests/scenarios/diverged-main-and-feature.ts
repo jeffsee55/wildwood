@@ -36,28 +36,24 @@ export const divergedMainAndFeatureScenario: PlaygroundScenarioDefinition = {
   apply: async (helper) => {
     const initialFiles = {
       "content/authors/jeff.json": JSON.stringify({ name: "Jeff" }),
-      "content/docs/a.md":
-        "---\ntitle: hello from a\nauthor: ../authors/jeff.json\n---\n\n# a",
-      "content/docs/b.md":
-        "---\ntitle: hello from b\nauthor: ../authors/jeff.json\n---\n\n# b",
+      "content/docs/a.md": "---\ntitle: hello from a\nauthor: ../authors/jeff.json\n---\n\n# a",
+      "content/docs/b.md": "---\ntitle: hello from b\nauthor: ../authors/jeff.json\n---\n\n# b",
       "content/unrelated/c.json": "{}",
-      "package.json": "{\"name\":\"tr33-mono\"}",
+      "package.json": '{"name":"tr33-mono"}',
       "README.md": "# README",
     };
     await helper.addFilesAndCommit(initialFiles, "Initial commit");
     await helper.createBranch("feature/diverged");
     await helper.addFilesAndCommit(
       {
-        "content/docs/feature-only.md":
-          "---\ntitle: Feature Only\n---\n\n# Feature Only",
+        "content/docs/feature-only.md": "---\ntitle: Feature Only\n---\n\n# Feature Only",
       },
       "Add feature-only page",
     );
     await helper.switchBranch("main");
     await helper.addFilesAndCommit(
       {
-        "content/docs/main-only.md":
-          "---\ntitle: Main Only\n---\n\n# Main Only",
+        "content/docs/main-only.md": "---\ntitle: Main Only\n---\n\n# Main Only",
       },
       "Add main-only page",
     );

@@ -1,12 +1,5 @@
 import { z as zod } from "zod/v4";
-import {
-  collection,
-  connect,
-  filter,
-  json,
-  markdown,
-  variant,
-} from "@/zod/extensions";
+import { collection, connect, filter, json, markdown, variant } from "@/zod/extensions";
 
 export {
   defineConfig,

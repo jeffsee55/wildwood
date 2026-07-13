@@ -116,12 +116,16 @@ function providerLabel(id: string, fallback?: string): string {
   return id.charAt(0).toUpperCase() + id.slice(1);
 }
 
-function resolveOAuthProviders(auth: KitAuthConfig): (OAuthProviderConfig & { enabledResolved: boolean })[] {
+function resolveOAuthProviders(
+  auth: KitAuthConfig,
+): (OAuthProviderConfig & { enabledResolved: boolean })[] {
   const explicit = auth.oauth?.providers;
 
   // New config path — explicit list wins, but still resolves enabled default.
   if (explicit && explicit.length > 0) {
-    const ghAppConfigured = auth.githubApp?.configured !== false && (!!auth.githubApp?.appSlug || auth.githubApp?.configured === true);
+    const ghAppConfigured =
+      auth.githubApp?.configured !== false &&
+      (!!auth.githubApp?.appSlug || auth.githubApp?.configured === true);
     const providesOAuth = auth.githubApp?.providesOAuth !== false;
     return explicit.map((p) => {
       const id = p.id.trim().toLowerCase();
@@ -143,7 +147,9 @@ function resolveOAuthProviders(auth: KitAuthConfig): (OAuthProviderConfig & { en
   }
 
   // Back-compat: single github provider inferred from legacy flag + App config.
-  const ghAppConfigured = auth.githubApp?.configured !== false && (!!auth.githubApp?.appSlug || auth.githubApp?.configured === true);
+  const ghAppConfigured =
+    auth.githubApp?.configured !== false &&
+    (!!auth.githubApp?.appSlug || auth.githubApp?.configured === true);
   const providesOAuth = auth.githubApp?.providesOAuth !== false;
   const legacyGithubOAuthEnabled = auth.githubOAuthEnabled === true;
   // Happy path: if GitHub App exists and opts into providing OAuth (default), GitHub sign-in is enabled
@@ -170,9 +176,12 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
   const [name, setName] = React.useState(auth.githubApp?.name || "Wildwood Play Dev");
   const [origin, setOrigin] = React.useState(auth.githubApp?.origin || "");
   const [contents, setContents] = React.useState<Permission>(auth.githubApp?.contents || "write");
-  const [pullRequests, setPullRequests] = React.useState<Permission>(auth.githubApp?.pullRequests || "write");
+  const [pullRequests, setPullRequests] = React.useState<Permission>(
+    auth.githubApp?.pullRequests || "write",
+  );
 
-  const manifestRedirectPath = auth.githubApp?.manifestRedirectPath || "/api/wildwood/github/app-manifest/callback";
+  const manifestRedirectPath =
+    auth.githubApp?.manifestRedirectPath || "/api/wildwood/github/app-manifest/callback";
   const oauthCallbackPath = auth.githubApp?.oauthCallbackPath || `${authBase}/callback/github`;
   const callbackURL = auth.callbackURL || "/";
   // Repo-scoped install URL — GitHub's App install page lets you pre-filter by state/repo hint.
@@ -183,7 +192,7 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
   const repoFull =
     gha?.repoFull?.trim() ||
     authExtra.repoFull?.trim() ||
-    ([gha?.org ?? authExtra.org, gha?.repo ?? authExtra.repo].filter(Boolean).join("/").trim()) ||
+    [gha?.org ?? authExtra.org, gha?.repo ?? authExtra.repo].filter(Boolean).join("/").trim() ||
     "";
   const installUrl = auth.githubApp?.appSlug
     ? repoFull
@@ -213,13 +222,23 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
       callback_urls: [`${origin || "https://example.com"}${oauthCallbackPath}`],
       public: false,
       default_permissions: { contents, pull_requests: pullRequests, metadata: "read" },
-      default_events: auth.githubApp?.webhookUrl ? (["pull_request", "push"] as const) : ([] as const),
+      default_events: auth.githubApp?.webhookUrl
+        ? (["pull_request", "push"] as const)
+        : ([] as const),
     } as Record<string, unknown>;
     if (auth.githubApp?.webhookUrl) {
       base.hook_attributes = { url: auth.githubApp.webhookUrl, active: true };
     }
     return base;
-  }, [contents, manifestRedirectPath, name, oauthCallbackPath, origin, pullRequests, auth.githubApp?.webhookUrl]);
+  }, [
+    contents,
+    manifestRedirectPath,
+    name,
+    oauthCallbackPath,
+    origin,
+    pullRequests,
+    auth.githubApp?.webhookUrl,
+  ]);
 
   const signIn = React.useCallback(
     async (providerId: string) => {
@@ -239,7 +258,11 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
             scopes: providerId === "github" ? ["read:user", "user:email"] : undefined,
           }),
         });
-        const result = (await response.json().catch(() => null)) as { url?: string; redirect?: boolean; message?: string } | null;
+        const result = (await response.json().catch(() => null)) as {
+          url?: string;
+          redirect?: boolean;
+          message?: string;
+        } | null;
         if (!response.ok) throw new Error(result?.message || response.statusText);
         if (result?.url) window.location.href = result.url;
       } catch (err) {
@@ -256,7 +279,10 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(`${authBase}/sign-out`, { method: "POST", credentials: "include" });
+      const response = await fetch(`${authBase}/sign-out`, {
+        method: "POST",
+        credentials: "include",
+      });
       if (!response.ok) throw new Error(await response.text());
       window.location.reload();
     } catch (err) {
@@ -328,11 +354,21 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
       setError(err instanceof Error ? err.message : String(err));
       setCreating(false);
     }
-  }, [auth.githubApp?.webhookUrl, contents, manifestRedirectPath, name, oauthCallbackPath, origin, pullRequests]);
+  }, [
+    auth.githubApp?.webhookUrl,
+    contents,
+    manifestRedirectPath,
+    name,
+    oauthCallbackPath,
+    origin,
+    pullRequests,
+  ]);
 
   const sessionSection = (() => {
     const enabledProviders = providers.filter((p) => p.enabledResolved);
-    const ghAppConfigured = auth.githubApp?.configured !== false && (!!auth.githubApp?.appSlug || auth.githubApp?.configured === true);
+    const ghAppConfigured =
+      auth.githubApp?.configured !== false &&
+      (!!auth.githubApp?.appSlug || auth.githubApp?.configured === true);
     const providesOAuth = auth.githubApp?.providesOAuth !== false;
     const viaSingleApp = ghAppConfigured && providesOAuth;
 
@@ -366,24 +402,38 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
             <div className="space-y-1">
               {ghAppConfigured ? (
                 <p className="text-muted-foreground">
-                  GitHub sign-in will be available once your deploy picks up the App&apos;s <code className="font-mono">GITHUB_CLIENT_ID</code>/<code className="font-mono">GITHUB_CLIENT_SECRET</code> from the manifest conversion. Redeploy after saving env.
+                  GitHub sign-in will be available once your deploy picks up the App&apos;s{" "}
+                  <code className="font-mono">GITHUB_CLIENT_ID</code>/
+                  <code className="font-mono">GITHUB_CLIENT_SECRET</code> from the manifest
+                  conversion. Redeploy after saving env.
                 </p>
               ) : (
                 <p className="text-muted-foreground">
-                  Set up the GitHub App once — it provides both sign-in and write access. No separate OAuth app needed. Or configure additional providers via <code className="font-mono">auth.oauth.providers</code>.
+                  Set up the GitHub App once — it provides both sign-in and write access. No
+                  separate OAuth app needed. Or configure additional providers via{" "}
+                  <code className="font-mono">auth.oauth.providers</code>.
                 </p>
               )}
             </div>
           )}
           {auth.userEmail ? (
-            <Button className="h-8 text-xs" disabled={busy} onClick={signOut} type="button" variant="secondary">
+            <Button
+              className="h-8 text-xs"
+              disabled={busy}
+              onClick={signOut}
+              type="button"
+              variant="secondary"
+            >
               Sign out
             </Button>
           ) : null}
         </div>
         {viaSingleApp ? (
           <p className="mt-2 text-[11px] text-muted-foreground">
-            Single credential set: your GitHub App&apos;s own <code className="font-mono">client_id</code>/<code className="font-mono">client_secret</code> doubles as the OAuth app. Add more providers later via <code className="font-mono">oauth.providers</code>.
+            Single credential set: your GitHub App&apos;s own{" "}
+            <code className="font-mono">client_id</code>/
+            <code className="font-mono">client_secret</code> doubles as the OAuth app. Add more
+            providers later via <code className="font-mono">oauth.providers</code>.
           </p>
         ) : null}
       </div>
@@ -395,9 +445,16 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="font-medium text-popover-foreground">GitHub App manifest</p>
-          <p className="mt-1 text-muted-foreground">Create disposable app, then exchange manifest code (no webhook — works from preview).</p>
+          <p className="mt-1 text-muted-foreground">
+            Create disposable app, then exchange manifest code (no webhook — works from preview).
+          </p>
         </div>
-        <Button className="h-7 px-2 text-xs" onClick={() => setName(randomAppName())} type="button" variant="secondary">
+        <Button
+          className="h-7 px-2 text-xs"
+          onClick={() => setName(randomAppName())}
+          type="button"
+          variant="secondary"
+        >
           <Shuffle className="size-3" />
         </Button>
       </div>
@@ -416,7 +473,9 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
           <input
             className="h-8 rounded-md border border-border bg-background px-2 font-mono text-[11px] text-popover-foreground outline-none ring-ring/40 focus:ring-2"
             onChange={(event) => setOrigin(trimSlashes(event.currentTarget.value))}
-            placeholder={typeof window !== "undefined" ? window.location.origin : "https://your-app.vercel.app"}
+            placeholder={
+              typeof window !== "undefined" ? window.location.origin : "https://your-app.vercel.app"
+            }
             value={origin}
           />
         </label>
@@ -438,7 +497,12 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
         </pre>
       </details>
 
-      <Button className="mt-3 h-8 w-full text-xs" disabled={creating} onClick={createGitHubApp} type="button">
+      <Button
+        className="mt-3 h-8 w-full text-xs"
+        disabled={creating}
+        onClick={createGitHubApp}
+        type="button"
+      >
         {creating ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
         Create GitHub App
       </Button>
@@ -450,7 +514,11 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
               href={installUrl}
               rel="noreferrer"
               target="_blank"
-              title={repoFull ? `Opens App install; choose Only select repositories → ${repoFull}` : undefined}
+              title={
+                repoFull
+                  ? `Opens App install; choose Only select repositories → ${repoFull}`
+                  : undefined
+              }
             >
               Install GitHub App{repoFull ? ` on ${repoFull}` : " on a repo"}
             </a>
@@ -467,13 +535,16 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
           </div>
           {repoFull ? (
             <p className="mt-1.5 text-[11px] text-muted-foreground">
-              On GitHub pick <b>Only select repositories</b> → <code className="font-mono">{repoFull.split("/")[1] ?? repoFull}</code>. No need to hunt — we link directly to <code className="font-mono">{repoFull}</code>.
+              On GitHub pick <b>Only select repositories</b> →{" "}
+              <code className="font-mono">{repoFull.split("/")[1] ?? repoFull}</code>. No need to
+              hunt — we link directly to <code className="font-mono">{repoFull}</code>.
             </p>
           ) : null}
         </>
       ) : null}
       <p className="mt-2 text-[11px] text-muted-foreground">
-        After redirect you&apos;ll see Vercel CLI snippets and .env.local. Code is single-use, expires in 1h.
+        After redirect you&apos;ll see Vercel CLI snippets and .env.local. Code is single-use,
+        expires in 1h.
       </p>
     </div>
   );
@@ -484,7 +555,10 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
         <>
           <div>
             <p className="text-sm font-semibold text-popover-foreground">GitHub App (local dev)</p>
-            <p className="mt-1 text-muted-foreground">Create disposable GitHub App for local testing. Production uses pre-configured credentials from Vercel env.</p>
+            <p className="mt-1 text-muted-foreground">
+              Create disposable GitHub App for local testing. Production uses pre-configured
+              credentials from Vercel env.
+            </p>
           </div>
           {githubAppManifestSection}
         </>
@@ -492,14 +566,21 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
         <>
           <div>
             <p className="text-sm font-semibold text-popover-foreground">Auth</p>
-            <p className="mt-1 text-muted-foreground">GitHub sign-in for local Wildwood development.</p>
+            <p className="mt-1 text-muted-foreground">
+              GitHub sign-in for local Wildwood development.
+            </p>
           </div>
           {sessionSection}
         </>
       )}
 
       {error ? (
-        <p className={cn("max-h-32 overflow-auto rounded-md border border-destructive/30 bg-destructive/10 p-2 text-destructive")} role="alert">
+        <p
+          className={cn(
+            "max-h-32 overflow-auto rounded-md border border-destructive/30 bg-destructive/10 p-2 text-destructive",
+          )}
+          role="alert"
+        >
           {error}
         </p>
       ) : null}

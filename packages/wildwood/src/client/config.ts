@@ -62,11 +62,11 @@ export function fixedPrefixFromMatch(match: string): string {
   return out.join("/");
 }
 
-export function deriveSlug(
-  filePath: string,
-  opts: { basePath?: string; match: string },
-): string {
-  let p = filePath.replace(/\\/g, "/").replace(/^\.?\//, "").replace(/^\/+/, "");
+export function deriveSlug(filePath: string, opts: { basePath?: string; match: string }): string {
+  let p = filePath
+    .replace(/\\/g, "/")
+    .replace(/^\.?\//, "")
+    .replace(/^\/+/, "");
   const base = (opts.basePath != null ? opts.basePath : fixedPrefixFromMatch(opts.match))
     .replace(/\\/g, "/")
     .replace(/\/+$/, "")
@@ -308,9 +308,7 @@ export class Config<Colls extends AnyCollections = AnyCollections> {
   }
   getCollectionForPath(path: string) {
     let collectionName: string | null = null;
-    for (const [key, collection] of Object.entries(
-      this.configObject.collections,
-    )) {
+    for (const [key, collection] of Object.entries(this.configObject.collections)) {
       if (minimatch(path, collection.match)) {
         collectionName = key;
         break;
@@ -340,9 +338,7 @@ export class Config<Colls extends AnyCollections = AnyCollections> {
       return deepestFixedFolders;
     }
 
-    const sortedPaths = [...deepestFixedFolders].sort(
-      (a, b) => a.length - b.length,
-    );
+    const sortedPaths = [...deepestFixedFolders].sort((a, b) => a.length - b.length);
     const result: string[] = [];
 
     for (const currentPath of sortedPaths) {
@@ -396,10 +392,7 @@ export class Config<Colls extends AnyCollections = AnyCollections> {
 				 or 
 				 [ 'a.v1.md', 'a.md' ]
 	 */
-  findMostSpecificVariant(
-    entries: string[],
-    variant: string,
-  ): string | undefined {
+  findMostSpecificVariant(entries: string[], variant: string): string | undefined {
     const variants = this.configObject.variants;
     if (!variants || Object.keys(variants).length === 0) {
       return entries[0];
@@ -456,10 +449,8 @@ export class Config<Colls extends AnyCollections = AnyCollections> {
       if (bExplicit !== aExplicit) return bExplicit - aExplicit;
       // Tie-break: prefer match on earlier variant key
       for (const key of variantKeys) {
-        const aExplicitKey =
-          a.explicitKeys.includes(key) && a.options[key] === requested[key];
-        const bExplicitKey =
-          b.explicitKeys.includes(key) && b.options[key] === requested[key];
+        const aExplicitKey = a.explicitKeys.includes(key) && a.options[key] === requested[key];
+        const bExplicitKey = b.explicitKeys.includes(key) && b.options[key] === requested[key];
         if (aExplicitKey && !bExplicitKey) return -1;
         if (!aExplicitKey && bExplicitKey) return 1;
       }
@@ -489,9 +480,7 @@ export class Config<Colls extends AnyCollections = AnyCollections> {
     // Reduce to get all combinations
     return variantOptions.reduce<string[]>(
       (combinations, options) =>
-        combinations.flatMap((combo) =>
-          options.map((opt) => (combo ? `${combo}|${opt}` : opt)),
-        ),
+        combinations.flatMap((combo) => options.map((opt) => (combo ? `${combo}|${opt}` : opt))),
       [""],
     );
   }
@@ -527,11 +516,7 @@ export class Config<Colls extends AnyCollections = AnyCollections> {
         if (!variantConfig.pathModifier) continue;
         let matched = false;
         for (const option of variantConfig.options) {
-          const result = this.matchPathToVariantOption(
-            canonical,
-            variantKey,
-            option,
-          );
+          const result = this.matchPathToVariantOption(canonical, variantKey, option);
           if (result) {
             options[variantKey] = option;
             explicitKeys.push(variantKey);
@@ -640,11 +625,7 @@ export class Config<Colls extends AnyCollections = AnyCollections> {
       match: schema.match,
     });
 
-    const addEntry = (
-      variant: string,
-      canonical: string,
-      collection: string,
-    ) => {
+    const addEntry = (variant: string, canonical: string, collection: string) => {
       cache.entries.push({
         ref,
         path: filePath,
@@ -686,13 +667,7 @@ export class Config<Colls extends AnyCollections = AnyCollections> {
         variant,
         skipMutations: true,
         onFilter: (args) => {
-          addFilter(
-            variant,
-            canonical,
-            args.field.join("."),
-            args.key.join("."),
-            args.value,
-          );
+          addFilter(variant, canonical, args.field.join("."), args.key.join("."), args.value);
         },
         onConnection: (args) => {
           const connectionTarget = String(args.value);
@@ -711,16 +686,10 @@ export class Config<Colls extends AnyCollections = AnyCollections> {
           let toCanonical = fullPath;
           const variants = this.configObject.variants;
           if (variants) {
-            for (const [variantKey, variantConfig] of Object.entries(
-              variants,
-            )) {
+            for (const [variantKey, variantConfig] of Object.entries(variants)) {
               if (!variantConfig.pathModifier) continue;
               for (const option of variantConfig.options) {
-                const matched = this.matchPathToVariantOption(
-                  fullPath,
-                  variantKey,
-                  option,
-                );
+                const matched = this.matchPathToVariantOption(fullPath, variantKey, option);
                 if (matched) {
                   toCanonical = matched;
                   break;
@@ -757,11 +726,7 @@ export class Config<Colls extends AnyCollections = AnyCollections> {
       for (const [variantKey, variantConfig] of Object.entries(variants)) {
         if (!variantConfig.pathModifier) continue;
         for (const option of variantConfig.options) {
-          const result = this.matchPathToVariantOption(
-            canonical,
-            variantKey,
-            option,
-          );
+          const result = this.matchPathToVariantOption(canonical, variantKey, option);
           if (result) {
             matchedVariants[variantKey] = option;
             canonical = result;
@@ -835,9 +800,7 @@ export class Config<Colls extends AnyCollections = AnyCollections> {
       variant: entry.variant,
       onFilter: () => {},
       onConnection: (args) => {
-        const connection = entry.toConnections?.find(
-          (c) => c.key === args.key.join("."),
-        );
+        const connection = entry.toConnections?.find((c) => c.key === args.key.join("."));
         if (connection?.toEntry) {
           try {
             return this.buildEntry(connection.toEntry, true);
@@ -965,7 +928,9 @@ export type ConfigObject = {
   collections: AnyCollections;
 };
 
-export const defineConfig = <const Colls extends AnyCollections>(config: DefineConfigInput<Colls>) => {
+export const defineConfig = <const Colls extends AnyCollections>(
+  config: DefineConfigInput<Colls>,
+) => {
   // Trimming is internal to Config ctor via resolveConfigObject — callers pass env raw.
   return new Config<Colls>(config);
 };

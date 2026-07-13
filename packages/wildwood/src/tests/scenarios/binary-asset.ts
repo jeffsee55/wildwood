@@ -44,8 +44,7 @@ export const binaryAssetScenario: PlaygroundScenarioDefinition = {
     await helper.addFilesAndCommit(
       {
         "content/authors/jeff.json": JSON.stringify({ name: "Jeff" }),
-        "content/docs/hello.md":
-          "---\ntitle: Hello\n---\n\n# Hello\n\nWelcome.",
+        "content/docs/hello.md": "---\ntitle: Hello\n---\n\n# Hello\n\nWelcome.",
         "package.json": '{"name":"tr33-mono"}',
         "README.md": "# README",
       },

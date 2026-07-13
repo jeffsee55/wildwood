@@ -2,35 +2,27 @@
   "name": "wildwood-kit",
   "version": "0.1.0",
   "description": "Client UI kit for Wildwood (React, shadcn/ui, Tailwind v4)",
-  "license": "MIT",
   "author": "Jeff See <jeff@wildwood.dev>",
-  "publishConfig": {
-    "access": "public"
-  },
+  "license": "MIT",
   "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsdown",
     "lib:dev": "tsdown --watch",
     "watch:deps": "tsdown --watch",
-    "lint": "eslint .",
-    "shadcn": "shadcn",
-    "format": "prettier --write \"**/*.{ts,tsx}\"",
+    "lint": "oxlint .",
+    "format": "oxfmt .",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },
-  "peerDependencies": {
-    "next": "^16.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
-  },
-  "peerDependenciesMeta": {
-    "next": {
-      "optional": true
-    }
-  },
   "dependencies": {
-    "wildwood-shared": "workspace:*",
     "@base-ui/react": "^1.3.0",
     "@fontsource-variable/geist": "^5.2.8",
     "@fontsource-variable/geist-mono": "^5.2.7",
@@ -47,34 +39,32 @@
     "tailwind-merge": "^3.3.1",
     "tailwindcss": "^4.2.1",
     "tsdown": "^0.21.7",
-    "tw-animate-css": "^1.3.4"
+    "tw-animate-css": "^1.3.4",
+    "wildwood-shared": "workspace:*"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.4",
     "@tailwindcss/cli": "^4.2.2",
     "@types/node": "^24.12.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
-    "eslint": "^9.39.4",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.5.2",
-    "globals": "^16.5.0",
     "next": "16.2.1",
-    "prettier": "^3.8.1",
-    "prettier-plugin-tailwindcss": "^0.7.2",
-    "tsc-alias": "^1.8.16",
     "typescript": "~5.9.3",
-    "typescript-eslint": "^8.57.1",
     "vite": "8.0.3"
   },
-  "exports": {
-    ".": "./dist/index.js",
-    "./package.json": "./package.json"
+  "peerDependencies": {
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
-  "files": [
-    "dist"
-  ],
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "inlinedDependencies": {
     "sonner": "2.0.5"
   }

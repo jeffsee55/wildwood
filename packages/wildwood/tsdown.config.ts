@@ -79,13 +79,7 @@ export default defineConfig([
     format: "esm",
     unbundle: true,
     platform: "browser",
-    external: [
-      "react",
-      "react-dom",
-      "react/jsx-runtime",
-      "next/dynamic",
-      "wildwood-kit",
-    ],
+    external: ["react", "react-dom", "react/jsx-runtime", "next/dynamic", "wildwood-kit"],
     hooks: {
       "build:done": async () => {
         const { readFile, writeFile } = await import("node:fs/promises");

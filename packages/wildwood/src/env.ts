@@ -274,7 +274,10 @@ export function resolveIdentity(explicit?: {
   };
 }
 
-export function requireOrgRepo(org: string | undefined, repo: string | undefined): { org: string; repo: string } {
+export function requireOrgRepo(
+  org: string | undefined,
+  repo: string | undefined,
+): { org: string; repo: string } {
   if (!org || !repo) {
     const v = getVercelSystemEnv();
     throw new Error(

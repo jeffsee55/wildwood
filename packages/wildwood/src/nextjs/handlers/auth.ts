@@ -18,7 +18,10 @@ export type AuthGate = {
    * so already-signed-in sessions are gated even if they were created before
    * `authenticate` was configured.
    */
-  evaluateAuthenticate?: (user: WildwoodAuthUser | null, request: Request) => Promise<Response | false | null>;
+  evaluateAuthenticate?: (
+    user: WildwoodAuthUser | null,
+    request: Request,
+  ) => Promise<Response | false | null>;
 };
 
 export async function authorizeGitAction(gate: AuthGate): Promise<Response | null> {

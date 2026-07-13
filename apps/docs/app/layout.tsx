@@ -15,9 +15,7 @@ export const metadata: Metadata = {
   description: "Git as content store. Typeset as man page.",
 };
 
-export default async function RootLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const navRes = await wildwood.nav.findMany({ with: { children: true } });
   const nav = navRes.items[0];
   if (!nav) return null;
@@ -27,11 +25,7 @@ export default async function RootLayout({
     // suppressHydrationWarning — color-scheme is driven by prefers-color-scheme,
     // no FOUC toggle. If we add manual theme switching later, inject the
     // before-paint script here. For now system-only, so pure CSS.
-    <html
-      lang="en"
-      className={`${geistMono.variable} antialiased`}
-      suppressHydrationWarning
-    >
+    <html lang="en" className={`${geistMono.variable} antialiased`} suppressHydrationWarning>
       <body className="min-h-screen">
         {/* top rule — man header */}
         <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
@@ -79,20 +73,31 @@ export default async function RootLayout({
             <div className="mt-12 border-t border-border pt-8 font-mono text-[11px] leading-[1.9] text-muted-foreground">
               <div className="uppercase tracking-[0.12em]">source</div>
               <div className="mt-2 normal-case tracking-[-01em]">
-                <code className="rounded border border-border bg-card px-1 py-0.5 text-[11px]">content/</code>{" "}
+                <code className="rounded border border-border bg-card px-1 py-0.5 text-[11px]">
+                  content/
+                </code>{" "}
                 in this repo.
                 <br />
                 queries via <code className="text-foreground">wildwood.docs.findMany()</code>.
               </div>
               <div className="mt-5 uppercase tracking-[0.12em]">see also</div>
               <div className="mt-2 space-y-1">
-                <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/intro">
+                <Link
+                  className="block underline decoration-border underline-offset-4 hover:decoration-foreground"
+                  href="/docs/intro"
+                >
                   wildwood(1) intro
                 </Link>
-                <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/api">
+                <Link
+                  className="block underline decoration-border underline-offset-4 hover:decoration-foreground"
+                  href="/docs/api"
+                >
                   wildwood(5) api
                 </Link>
-                <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/guides">
+                <Link
+                  className="block underline decoration-border underline-offset-4 hover:decoration-foreground"
+                  href="/docs/guides"
+                >
                   wildwood(7) guides
                 </Link>
               </div>

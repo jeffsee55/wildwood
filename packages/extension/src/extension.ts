@@ -19,9 +19,7 @@ const MIME_TYPES: Record<string, string> = {
   ico: "image/x-icon",
 };
 
-class WildwoodImageEditorProvider
-  implements vscode.CustomReadonlyEditorProvider
-{
+class WildwoodImageEditorProvider implements vscode.CustomReadonlyEditorProvider {
   constructor(private fs: WildwoodFileSystemProvider) {}
 
   openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
@@ -35,8 +33,7 @@ class WildwoodImageEditorProvider
     const uri = document.uri;
     const blobOid = await this.fs.lookupBlobOid(uri);
     if (!blobOid) {
-      webviewPanel.webview.html =
-        "<!DOCTYPE html><html><body><p>File not found</p></body></html>";
+      webviewPanel.webview.html = "<!DOCTYPE html><html><body><p>File not found</p></body></html>";
       return;
     }
 
@@ -75,21 +72,14 @@ class WildwoodImageEditorProvider
 export async function activate(context: vscode.ExtensionContext) {
   try {
     logger("Activating...", context.extensionUri.toString());
-    const resolved = await whenWildwoodExtensionContextReady(
-      context.extensionUri,
-    );
-    const wildwoodFS = new WildwoodFileSystemProvider(
-      context.extensionUri,
-      resolved,
-    );
+    const resolved = await whenWildwoodExtensionContextReady(context.extensionUri);
+    const wildwoodFS = new WildwoodFileSystemProvider(context.extensionUri, resolved);
 
     const hostRefSub = subscribeHostRef((ref) => {
       writeActiveRefToStorage(ref);
       void wildwoodFS.switchRef(ref, { notifyParent: false });
     });
-    context.subscriptions.push(
-      new vscode.Disposable(() => hostRefSub.dispose()),
-    );
+    context.subscriptions.push(new vscode.Disposable(() => hostRefSub.dispose()));
 
     try {
       await wildwoodFS.initializeWorkspace();
@@ -104,30 +94,24 @@ export async function activate(context: vscode.ExtensionContext) {
       wildwoodFS.refreshExplorer();
       queueMicrotask(() => wildwoodFS.refreshExplorer());
       setTimeout(() => wildwoodFS.refreshExplorer(), 250);
-      void vscode.commands.executeCommand(
-        "workbench.files.action.refreshFilesExplorer",
-      );
+      void vscode.commands.executeCommand("workbench.files.action.refreshFilesExplorer");
     } catch (error) {
-      const detail =
-        error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `Wildwood: failed to register "${SCHEME}" file system provider (${detail})`,
-        { cause: error },
-      );
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Wildwood: failed to register "${SCHEME}" file system provider (${detail})`, {
+        cause: error,
+      });
     }
 
     context.subscriptions.push(
       wildwoodFS.onDidCreateBranch((branchName) => {
-        vscode.window.showInformationMessage(
-          `Created branch: ${branchName}`,
-        );
+        vscode.window.showInformationMessage(`Created branch: ${branchName}`);
       }),
     );
 
     context.subscriptions.push(
       vscode.window.registerCustomEditorProvider(
-      "wildwood.imagePreview",
-      new WildwoodImageEditorProvider(wildwoodFS),
+        "wildwood.imagePreview",
+        new WildwoodImageEditorProvider(wildwoodFS),
         { supportsMultipleEditorsPerDocument: true },
       ),
     );
@@ -135,215 +119,199 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
       vscode.commands.registerCommand(
         "wildwood.openMergeEditor",
-      async (
-        resourceUri: vscode.Uri,
-        commitTreeOid: string,
-        configRefTreeOid: string,
-        mergeBaseTreeOid: string,
-      ) => {
-        const base = wildwoodFS.getTreeUri(resourceUri, mergeBaseTreeOid);
-        const input1 = wildwoodFS.getTreeUri(resourceUri, commitTreeOid);
-        const input2 = wildwoodFS.getTreeUri(resourceUri, configRefTreeOid);
-        await vscode.commands.executeCommand("_open.mergeEditor", {
-          base,
-          input1: { uri: input1, title: "Current" },
-          input2: { uri: input2, title: "Incoming" },
-          output: resourceUri,
-        });
+        async (
+          resourceUri: vscode.Uri,
+          commitTreeOid: string,
+          configRefTreeOid: string,
+          mergeBaseTreeOid: string,
+        ) => {
+          const base = wildwoodFS.getTreeUri(resourceUri, mergeBaseTreeOid);
+          const input1 = wildwoodFS.getTreeUri(resourceUri, commitTreeOid);
+          const input2 = wildwoodFS.getTreeUri(resourceUri, configRefTreeOid);
+          await vscode.commands.executeCommand("_open.mergeEditor", {
+            base,
+            input1: { uri: input1, title: "Current" },
+            input2: { uri: input2, title: "Incoming" },
+            output: resourceUri,
+          });
         },
       ),
     );
 
     const workingScm = new WildwoodSourceControlProvider(context, wildwoodFS, {
-    id: "wildwood-scm",
-    label: "Wildwood",
-    mode: "combined",
-    primaryAction: {
-      command: "wildwood.source-control.commit",
-      title: "Commit",
-    },
-    getPrimaryActionTitle: (state) => {
-      if (state.hasUncommittedChanges) {
-        return {
-          title: "Commit & Push",
-          placeholder: `Message (Cmd+Enter to commit and push to "${state.currentRef}")`,
-        };
-      }
-      if (state.isMergeOnly) {
-        return {
-          title: `Merge to ${state.configRef}`,
-          placeholder: `No uncommitted changes. Cmd+Enter to merge "${state.currentRef}" -> "${state.configRef}"`,
-        };
-      }
-      if (state.existingPr) {
-        return {
-          title: "Merge PR",
-          placeholder: `Comment to post on PR before merge (optional). Cmd+Enter to merge into "${state.configRef}"`,
-        };
-      }
-      return {
-        title: "Create PR",
-        placeholder: `PR title and description. Cmd+Enter to create PR for "${state.currentRef}" -> "${state.configRef}"`,
-      };
-    },
-    secondaryActions: [
-      {
-        command: "wildwood.source-control.syncToConfigRef",
-        title: "Create PR / Merge PR",
+      id: "wildwood-scm",
+      label: "Wildwood",
+      mode: "combined",
+      primaryAction: {
+        command: "wildwood.source-control.commit",
+        title: "Commit",
       },
-    ],
+      getPrimaryActionTitle: (state) => {
+        if (state.hasUncommittedChanges) {
+          return {
+            title: "Commit & Push",
+            placeholder: `Message (Cmd+Enter to commit and push to "${state.currentRef}")`,
+          };
+        }
+        if (state.isMergeOnly) {
+          return {
+            title: `Merge to ${state.configRef}`,
+            placeholder: `No uncommitted changes. Cmd+Enter to merge "${state.currentRef}" -> "${state.configRef}"`,
+          };
+        }
+        if (state.existingPr) {
+          return {
+            title: "Merge PR",
+            placeholder: `Comment to post on PR before merge (optional). Cmd+Enter to merge into "${state.configRef}"`,
+          };
+        }
+        return {
+          title: "Create PR",
+          placeholder: `PR title and description. Cmd+Enter to create PR for "${state.currentRef}" -> "${state.configRef}"`,
+        };
+      },
+      secondaryActions: [
+        {
+          command: "wildwood.source-control.syncToConfigRef",
+          title: "Create PR / Merge PR",
+        },
+      ],
       showStatusBar: true,
     });
 
     context.subscriptions.push(
       vscode.commands.registerCommand("wildwood.switchBranch", async () => {
-      const branches = await wildwoodFS.fetchBranches();
-      const currentRef = wildwoodFS.getCurrentRef();
-      const configRef = wildwoodFS.getConfigRef();
-      const items: vscode.QuickPickItem[] = [
-        {
-          label: "$(add) New branch",
-          description: `Create from ${configRef} (auto-named)`,
-          alwaysShow: true,
-        },
-        ...branches.map((branch) => {
-          const isCurrent = branch === currentRef;
-          const isDefault = branch === configRef;
-          const desc = [isCurrent ? "current" : "", isDefault ? "default" : ""]
-            .filter(Boolean)
-            .join(", ");
-          return {
-            label: `${isCurrent ? "$(check) " : "$(git-branch) "}${branch}`,
-            description: desc || undefined,
-            detail: undefined,
-            picked: isCurrent,
-            alwaysShow: isCurrent || isDefault,
-          } satisfies vscode.QuickPickItem;
-        }),
-      ];
-      const picked = await vscode.window.showQuickPick(items, {
-        title: "Switch branch",
-        placeHolder: "Type to filter branches or create new...",
-        matchOnDescription: true,
-      });
-      if (!picked) return;
-      if (picked.label.startsWith("$(add)")) {
-        const branchName = generateBranchName();
-        try {
-          await wildwoodFS.createBranch(branchName, configRef);
-          await wildwoodFS.switchRef(branchName);
-          vscode.window.showInformationMessage(
-            `Created and switched to branch: ${branchName}`,
-          );
-        } catch (error) {
-          vscode.window.showErrorMessage(
-            `Failed to create branch: ${error instanceof Error ? error.message : String(error)}`,
-          );
+        const branches = await wildwoodFS.fetchBranches();
+        const currentRef = wildwoodFS.getCurrentRef();
+        const configRef = wildwoodFS.getConfigRef();
+        const items: vscode.QuickPickItem[] = [
+          {
+            label: "$(add) New branch",
+            description: `Create from ${configRef} (auto-named)`,
+            alwaysShow: true,
+          },
+          ...branches.map((branch) => {
+            const isCurrent = branch === currentRef;
+            const isDefault = branch === configRef;
+            const desc = [isCurrent ? "current" : "", isDefault ? "default" : ""]
+              .filter(Boolean)
+              .join(", ");
+            return {
+              label: `${isCurrent ? "$(check) " : "$(git-branch) "}${branch}`,
+              description: desc || undefined,
+              detail: undefined,
+              picked: isCurrent,
+              alwaysShow: isCurrent || isDefault,
+            } satisfies vscode.QuickPickItem;
+          }),
+        ];
+        const picked = await vscode.window.showQuickPick(items, {
+          title: "Switch branch",
+          placeHolder: "Type to filter branches or create new...",
+          matchOnDescription: true,
+        });
+        if (!picked) return;
+        if (picked.label.startsWith("$(add)")) {
+          const branchName = generateBranchName();
+          try {
+            await wildwoodFS.createBranch(branchName, configRef);
+            await wildwoodFS.switchRef(branchName);
+            vscode.window.showInformationMessage(`Created and switched to branch: ${branchName}`);
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to create branch: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+          return;
         }
-        return;
-      }
-      const branch = picked.label.replace(/^\$\([^)]+\)\s*/, "");
-      if (branch === currentRef) return;
-      await wildwoodFS.switchRef(branch);
+        const branch = picked.label.replace(/^\$\([^)]+\)\s*/, "");
+        if (branch === currentRef) return;
+        await wildwoodFS.switchRef(branch);
         vscode.window.showInformationMessage(`Switched to branch: ${branch}`);
       }),
     );
 
     context.subscriptions.push(
       vscode.commands.registerCommand("wildwood.source-control.commit", () =>
-      workingScm.performCommit(),
-    ),
-    vscode.commands.registerCommand(
-      "wildwood.source-control.commitAndPush",
-      () => workingScm.performCommitAndPush(),
-    ),
-    vscode.commands.registerCommand(
-      "wildwood.source-control.commitAndSyncWithPull",
-      () => workingScm.performCommitAndSyncWithPull(),
-    ),
-    vscode.commands.registerCommand("wildwood.source-control.commitAndMerge", () =>
-      workingScm.performCommitAndMerge(),
-    ),
-    vscode.commands.registerCommand("wildwood.source-control.syncToConfigRef", () =>
-      workingScm.performSyncToConfigRef(),
-    ),
-    vscode.commands.registerCommand(
-      "wildwood.source-control.skipCommitAndSync",
-      () => workingScm.performSyncToConfigRef(),
-    ),
-    vscode.commands.registerCommand("wildwood.source-control.discard", () =>
-      workingScm.performDiscard(),
-    ),
-    vscode.commands.registerCommand("wildwood.source-control.refresh", () =>
-      workingScm.refresh(),
-    ),
-    vscode.commands.registerCommand(
-      "wildwood.source-control.main.commitAndMerge",
-      () => workingScm.performCommitAndMerge(),
-    ),
-    vscode.commands.registerCommand(
-      "wildwood.source-control.main.commitAndCreatePr",
-      () => workingScm.performCommitAndCreatePr(),
-    ),
-    vscode.commands.registerCommand("wildwood.source-control.main.commit", () =>
-      workingScm.performCommit(),
-    ),
-    vscode.commands.registerCommand("wildwood.source-control.main.viewPr", () =>
-      workingScm.viewExistingPr(),
-    ),
-    vscode.commands.registerCommand(
-      "wildwood.source-control.main.pullFromRemote",
-      () => workingScm.performPullFromRemote(),
-    ),
-    vscode.commands.registerCommand("wildwood.openOnGitHub", () => {
-      const repo = wildwoodFS.getRepo();
-      if (repo) {
-        vscode.env.openExternal(
-          vscode.Uri.parse(`https://github.com/${repo}`),
-        );
-      }
-    }),
-    vscode.commands.registerCommand("wildwood.openPullRequests", () => {
-      const repo = wildwoodFS.getRepo();
-      if (repo) {
-        vscode.env.openExternal(
-          vscode.Uri.parse(`https://github.com/${repo}/pulls`),
-        );
-      }
-    }),
-    vscode.commands.registerCommand("wildwood.openIssues", () => {
-      const repo = wildwoodFS.getRepo();
-      if (repo) {
-        vscode.env.openExternal(
-          vscode.Uri.parse(`https://github.com/${repo}/issues`),
-        );
-      }
-    }),
-    vscode.commands.registerCommand("wildwood.openBranchOnGitHub", () => {
-      const repo = wildwoodFS.getRepo();
-      const ref = wildwoodFS.getCurrentRef();
-      if (repo && ref) {
-        vscode.env.openExternal(
-          vscode.Uri.parse(`https://github.com/${repo}/tree/${ref}`),
-        );
-      }
-    }),
-    vscode.commands.registerCommand("wildwood.closeEmbeddedEditor", () => {
-      if (typeof globalThis.window === "undefined") {
-        return;
-      }
-      const w = globalThis.window;
-      // Kit embeds the workbench in an iframe; the extension host is nested deeper.
-      // parent is often the workbench frame, not the host page — use top.
-      if (w.top === w) {
-        return;
-      }
-      let targetOrigin = "*";
-      try {
-        targetOrigin = w.top.location.origin;
-      } catch {
-        /* cross-origin top */
-      }
+        workingScm.performCommit(),
+      ),
+      vscode.commands.registerCommand("wildwood.source-control.commitAndPush", () =>
+        workingScm.performCommitAndPush(),
+      ),
+      vscode.commands.registerCommand("wildwood.source-control.commitAndSyncWithPull", () =>
+        workingScm.performCommitAndSyncWithPull(),
+      ),
+      vscode.commands.registerCommand("wildwood.source-control.commitAndMerge", () =>
+        workingScm.performCommitAndMerge(),
+      ),
+      vscode.commands.registerCommand("wildwood.source-control.syncToConfigRef", () =>
+        workingScm.performSyncToConfigRef(),
+      ),
+      vscode.commands.registerCommand("wildwood.source-control.skipCommitAndSync", () =>
+        workingScm.performSyncToConfigRef(),
+      ),
+      vscode.commands.registerCommand("wildwood.source-control.discard", () =>
+        workingScm.performDiscard(),
+      ),
+      vscode.commands.registerCommand("wildwood.source-control.refresh", () =>
+        workingScm.refresh(),
+      ),
+      vscode.commands.registerCommand("wildwood.source-control.main.commitAndMerge", () =>
+        workingScm.performCommitAndMerge(),
+      ),
+      vscode.commands.registerCommand("wildwood.source-control.main.commitAndCreatePr", () =>
+        workingScm.performCommitAndCreatePr(),
+      ),
+      vscode.commands.registerCommand("wildwood.source-control.main.commit", () =>
+        workingScm.performCommit(),
+      ),
+      vscode.commands.registerCommand("wildwood.source-control.main.viewPr", () =>
+        workingScm.viewExistingPr(),
+      ),
+      vscode.commands.registerCommand("wildwood.source-control.main.pullFromRemote", () =>
+        workingScm.performPullFromRemote(),
+      ),
+      vscode.commands.registerCommand("wildwood.openOnGitHub", () => {
+        const repo = wildwoodFS.getRepo();
+        if (repo) {
+          vscode.env.openExternal(vscode.Uri.parse(`https://github.com/${repo}`));
+        }
+      }),
+      vscode.commands.registerCommand("wildwood.openPullRequests", () => {
+        const repo = wildwoodFS.getRepo();
+        if (repo) {
+          vscode.env.openExternal(vscode.Uri.parse(`https://github.com/${repo}/pulls`));
+        }
+      }),
+      vscode.commands.registerCommand("wildwood.openIssues", () => {
+        const repo = wildwoodFS.getRepo();
+        if (repo) {
+          vscode.env.openExternal(vscode.Uri.parse(`https://github.com/${repo}/issues`));
+        }
+      }),
+      vscode.commands.registerCommand("wildwood.openBranchOnGitHub", () => {
+        const repo = wildwoodFS.getRepo();
+        const ref = wildwoodFS.getCurrentRef();
+        if (repo && ref) {
+          vscode.env.openExternal(vscode.Uri.parse(`https://github.com/${repo}/tree/${ref}`));
+        }
+      }),
+      vscode.commands.registerCommand("wildwood.closeEmbeddedEditor", () => {
+        if (typeof globalThis.window === "undefined") {
+          return;
+        }
+        const w = globalThis.window;
+        // Kit embeds the workbench in an iframe; the extension host is nested deeper.
+        // parent is often the workbench frame, not the host page — use top.
+        if (w.top === w) {
+          return;
+        }
+        let targetOrigin = "*";
+        try {
+          targetOrigin = w.top.location.origin;
+        } catch {
+          /* cross-origin top */
+        }
         w.top.postMessage({ type: "wildwood-kit-close-editor" }, targetOrigin);
       }),
     );
@@ -361,10 +329,7 @@ export async function activate(context: vscode.ExtensionContext) {
       setTimeout(scheduleFullScmRefresh, 2000);
     }
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? (error.stack ?? error.message)
-        : String(error);
+    const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
     logger("Activation failed:", message);
     throw error instanceof Error ? error : new Error(message);
   }

@@ -19,7 +19,7 @@ Copy `.env.example` → `.env.local` for dev. Wildwood itself reads zero `WILDWO
 
 - `org` → `VERCEL_GIT_REPO_OWNER` → git remote (dev)
 - `repo` → `VERCEL_GIT_REPO_SLUG` → git remote (dev)
-- `ref`  → `VERCEL_GIT_COMMIT_REF` / `SHA` → `main`
+- `ref` → `VERCEL_GIT_COMMIT_REF` / `SHA` → `main`
 - `origin` → `VERCEL_PROJECT_PRODUCTION_URL` / `BRANCH_URL` / `URL`
 
 ### Database — Turso integration canonical
@@ -75,7 +75,7 @@ createWildwoodRoute(() => wildwood, {
 ```
 
 - `authenticate` = can this identity create a session? (sign-in/sign-up, not distinguished; inspect `provider` if you need different rules)
-- `authorize`    = can this session perform this action? (`git.commit`, `content.update`, …)
+- `authorize` = can this session perform this action? (`git.commit`, `content.update`, …)
 
 ### Optional / dev-only
 

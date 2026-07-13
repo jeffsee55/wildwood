@@ -1,9 +1,4 @@
-import {
-  integer,
-  primaryKey,
-  sqliteTable,
-  text,
-} from "drizzle-orm/sqlite-core";
+import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const _commits = sqliteTable(
   "_commits",
@@ -84,14 +79,7 @@ export const entries = sqliteTable(
   },
   (t) => [
     primaryKey({
-      columns: [
-        t.orgName,
-        t.repoName,
-        t.ref,
-        t.version,
-        t.variant,
-        t.canonical,
-      ],
+      columns: [t.orgName, t.repoName, t.ref, t.version, t.variant, t.canonical],
     }),
   ],
 );

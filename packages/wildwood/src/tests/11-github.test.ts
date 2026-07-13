@@ -42,8 +42,7 @@ describe("github remote", () => {
     await helper.createRepo();
     await helper.addFilesAndCommit(
       {
-        "content/docs/getting-started.md":
-          "---\ntitle: Getting Started\n---\n\n# Getting Started",
+        "content/docs/getting-started.md": "---\ntitle: Getting Started\n---\n\n# Getting Started",
         "content/authors/jeff.json": JSON.stringify({ name: "Jeff" }),
       },
       "Initial commit",
@@ -58,8 +57,7 @@ describe("github remote", () => {
     await helper.createBranch("feature");
     await helper.addFilesAndCommit(
       {
-        "content/docs/feature-page.md":
-          "---\ntitle: Feature Page\n---\n\n# Feature Page",
+        "content/docs/feature-page.md": "---\ntitle: Feature Page\n---\n\n# Feature Page",
       },
       "Add feature page",
     );
@@ -112,8 +110,7 @@ describe("github remote", () => {
     await git.add({
       ref: "main",
       files: {
-        "content/docs/pushed-page.md":
-          "---\ntitle: Pushed Page\n---\n\n# Pushed Page",
+        "content/docs/pushed-page.md": "---\ntitle: Pushed Page\n---\n\n# Pushed Page",
       },
     });
     await git.commit({
@@ -170,8 +167,7 @@ describe("github remote", () => {
     await git.add({
       ref: "main",
       files: {
-        "content/docs/multi-1.md":
-          "---\ntitle: Multi 1\n---\n\n# First unpushed commit",
+        "content/docs/multi-1.md": "---\ntitle: Multi 1\n---\n\n# First unpushed commit",
       },
     });
     const commit1 = await git.commit({
@@ -186,8 +182,7 @@ describe("github remote", () => {
     await git.add({
       ref: "main",
       files: {
-        "content/docs/multi-2.md":
-          "---\ntitle: Multi 2\n---\n\n# Second unpushed commit",
+        "content/docs/multi-2.md": "---\ntitle: Multi 2\n---\n\n# Second unpushed commit",
       },
     });
     const commit2 = await git.commit({
@@ -202,8 +197,7 @@ describe("github remote", () => {
     await git.add({
       ref: "main",
       files: {
-        "content/docs/multi-3.md":
-          "---\ntitle: Multi 3\n---\n\n# Third unpushed commit",
+        "content/docs/multi-3.md": "---\ntitle: Multi 3\n---\n\n# Third unpushed commit",
       },
     });
     const commit3 = await git.commit({
@@ -291,8 +285,7 @@ describe("github remote", () => {
     await git.add({
       ref: "main",
       files: {
-        "content/docs/main-only.md":
-          "---\ntitle: Main Only\n---\n\n# Main Only",
+        "content/docs/main-only.md": "---\ntitle: Main Only\n---\n\n# Main Only",
       },
     });
     const mainCommit = await git.commit({
@@ -307,8 +300,7 @@ describe("github remote", () => {
     await git.add({
       ref: "feature",
       files: {
-        "content/docs/feature-only.md":
-          "---\ntitle: Feature Only\n---\n\n# Feature Only",
+        "content/docs/feature-only.md": "---\ntitle: Feature Only\n---\n\n# Feature Only",
       },
     });
     const featureCommit = await git.commit({
@@ -355,10 +347,7 @@ describe("github remote", () => {
     expect(remoteCommit.treeOid).toBe(result.treeOid);
 
     // The remote merge commit should have 2 parents
-    const remoteParents = [
-      remoteCommit.parent,
-      remoteCommit.secondParent,
-    ].filter(Boolean);
+    const remoteParents = [remoteCommit.parent, remoteCommit.secondParent].filter(Boolean);
     expect(remoteParents.length).toBe(2);
 
     // Verify the ref is updated
@@ -391,10 +380,7 @@ describe("github remote", () => {
    * The base commit (from main) is already marked as pushed,
    * so new commits on this branch will be the only unpushed ones.
    */
-  async function createLocalBranch(
-    client: ReturnType<typeof makeClient>,
-    branchRef: string,
-  ) {
+  async function createLocalBranch(client: ReturnType<typeof makeClient>, branchRef: string) {
     const mainRef = await client._.db.refs.get({ ref: "main" });
     if (!mainRef) throw new Error("main ref not found");
     await client._.db.refs.updateRemoteCommit({
@@ -449,8 +435,7 @@ describe("github remote", () => {
     await git.add({
       ref: "main",
       files: {
-        "content/docs/no-pr-page.md":
-          "---\ntitle: No PR Page\n---\n\n# No PR Page",
+        "content/docs/no-pr-page.md": "---\ntitle: No PR Page\n---\n\n# No PR Page",
       },
     });
     await git.commit({
@@ -610,8 +595,7 @@ describe("github remote", () => {
     await git.add({
       ref: branchRef,
       files: {
-        "content/docs/merge-pr-page.md":
-          "---\ntitle: Merge PR Page\n---\n\n# Merge PR Page",
+        "content/docs/merge-pr-page.md": "---\ntitle: Merge PR Page\n---\n\n# Merge PR Page",
       },
     });
     await git.commit({

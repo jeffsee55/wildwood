@@ -36,22 +36,16 @@ describe("Config", () => {
     });
 
     it("findMostSpecificVariant returns first entry", () => {
-      expect(config.findMostSpecificVariant(["a.md", "b.md"], "__")).toBe(
-        "a.md",
-      );
+      expect(config.findMostSpecificVariant(["a.md", "b.md"], "__")).toBe("a.md");
     });
 
     it("findMissingCombos returns single combo with first entry", () => {
-      expect(config.findMissingCombos(["a.md", "b.md"])).toEqual([
-        { variant: "__", path: "a.md" },
-      ]);
+      expect(config.findMissingCombos(["a.md", "b.md"])).toEqual([{ variant: "__", path: "a.md" }]);
     });
 
     it("getCollectionForPath returns collection name", () => {
       expect(config.getCollectionForPath("docs/foo.md")).toBe("page");
-      expect(config.getCollectionForPath("content/authors/jeff.json")).toBe(
-        "author",
-      );
+      expect(config.getCollectionForPath("content/authors/jeff.json")).toBe("author");
     });
 
     it("matches path against collection globs", () => {
@@ -94,21 +88,15 @@ describe("Config", () => {
     });
 
     it("findMostSpecificVariant: a.v1.md and a.md for version:v1 returns a.v1.md", () => {
-      expect(
-        config.findMostSpecificVariant(
-          ["a.v1.md", "a.md"],
-          "locale:en|version:v1",
-        ),
-      ).toBe("a.v1.md");
+      expect(config.findMostSpecificVariant(["a.v1.md", "a.md"], "locale:en|version:v1")).toBe(
+        "a.v1.md",
+      );
     });
 
     it("findMostSpecificVariant: a.v1.md and a.fr.md for locale:fr|version:v3 returns a.fr.md", () => {
-      expect(
-        config.findMostSpecificVariant(
-          ["a.v1.md", "a.fr.md"],
-          "locale:fr|version:v3",
-        ),
-      ).toBe("a.fr.md");
+      expect(config.findMostSpecificVariant(["a.v1.md", "a.fr.md"], "locale:fr|version:v3")).toBe(
+        "a.fr.md",
+      );
     });
 
     it("findMostSpecificVariant: a.v1.md and a.fr.v1.md for locale:fr|version:v1 returns a.fr.v1.md", () => {
@@ -122,17 +110,12 @@ describe("Config", () => {
 
     it("findMostSpecificVariant: a.v1.md and a.fr.v2.md for locale:en|version:v1 returns a.v1.md", () => {
       expect(
-        config.findMostSpecificVariant(
-          ["a.v1.md", "a.fr.v2.md"],
-          "locale:en|version:v1",
-        ),
+        config.findMostSpecificVariant(["a.v1.md", "a.fr.v2.md"], "locale:en|version:v1"),
       ).toBe("a.v1.md");
     });
 
     it("findMostSpecificVariant: only a.md for locale:en|version:v3 returns a.md", () => {
-      expect(
-        config.findMostSpecificVariant(["a.md"], "locale:en|version:v3"),
-      ).toBe("a.md");
+      expect(config.findMostSpecificVariant(["a.md"], "locale:en|version:v3")).toBe("a.md");
     });
 
     it("findMissingCombos: a.v1.md and a.md returns full set with closest match per variant", () => {
@@ -159,9 +142,7 @@ describe("Config", () => {
     });
 
     it("findMissingCombos", () => {
-      expect(
-        config.findMissingCombos(["b.fr.v2.md", "b.fr.md", "b.md"]),
-      ).toMatchObject([
+      expect(config.findMissingCombos(["b.fr.v2.md", "b.fr.md", "b.md"])).toMatchObject([
         { variant: "locale:en|version:v1", path: "b.md" },
         { variant: "locale:en|version:v2", path: "b.md" },
         { variant: "locale:en|version:v3", path: "b.md" },
@@ -169,9 +150,7 @@ describe("Config", () => {
         { variant: "locale:fr|version:v2", path: "b.fr.v2.md" },
         { variant: "locale:fr|version:v3", path: "b.fr.md" },
       ]);
-      expect(
-        config.findMissingCombos(["b.fr.md", "b.v2.md", "b.en.v3.md"]),
-      ).toMatchObject([
+      expect(config.findMissingCombos(["b.fr.md", "b.v2.md", "b.en.v3.md"])).toMatchObject([
         { variant: "locale:en|version:v1", path: "" },
         { variant: "locale:en|version:v2", path: "b.v2.md" },
         { variant: "locale:en|version:v3", path: "b.en.v3.md" },
@@ -202,9 +181,9 @@ describe("Config", () => {
     });
 
     it("findMostSpecificVariant: doc.v1.md and doc.md for version:v1 returns doc.v1.md", () => {
-      expect(
-        config.findMostSpecificVariant(["doc.v1.md", "doc.md"], "version:v1"),
-      ).toBe("doc.v1.md");
+      expect(config.findMostSpecificVariant(["doc.v1.md", "doc.md"], "version:v1")).toBe(
+        "doc.v1.md",
+      );
     });
 
     it("findMissingCombos: doc.v1.md and doc.md", () => {

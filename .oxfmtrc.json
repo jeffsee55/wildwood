@@ -1,0 +1,41 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "tabWidth": 2,
+  "useTabs": false,
+  "semi": true,
+  "singleQuote": false,
+  "trailingComma": "all",
+  "bracketSpacing": true,
+  "bracketSameLine": false,
+  "arrowParens": "always",
+  "quoteProps": "as-needed",
+  "endOfLine": "lf",
+  "insertFinalNewline": true,
+  "sortImports": {
+    "enabled": false
+  },
+  "sortPackageJson": {
+    "enabled": true
+  },
+  "sortTailwindcss": {
+    "enabled": false
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/build/**",
+    "**/.next/**",
+    "**/node_modules/**",
+    "**/.turbo/**",
+    "**/.vercel/**",
+    "**/*.db",
+    "**/wildwood.db",
+    "**/tr33.db",
+    "**/.wildwood-cache/**",
+    "**/.tr33-cache/**",
+    "packages/wildwood/src/tests/fixtures/**",
+    "packages/kit/src/vscode-web/dist/**",
+    "packages/wildwood/bundled-extension/**",
+    "pnpm-lock.yaml"
+  ]
+}

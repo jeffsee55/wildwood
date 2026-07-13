@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 // Do NOT import from `wildwood/react` here — `wildwood/react` is a client entry that
 // re-exports `wildwood-ui` and is built with `wildwood-store` (which can pull Node
@@ -16,4 +16,3 @@ export function PlaygroundJsonClient({ value }: { value: object }) {
     </pre>
   );
 }
-

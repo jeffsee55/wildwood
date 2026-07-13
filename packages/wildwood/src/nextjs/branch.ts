@@ -42,16 +42,11 @@ export function activeRefSetCookieHeader(
   return sharedActiveRefSetCookieHeader(ref, cookieName);
 }
 
-export function clearBranchCookieHeader(
-  cookieName: string = WILDWOOD_BRANCH_COOKIE,
-): string {
+export function clearBranchCookieHeader(cookieName: string = WILDWOOD_BRANCH_COOKIE): string {
   return sharedClearBranchCookieHeader(cookieName);
 }
 
-export function branchCookieOptions(
-  ref: string,
-  cookieName: string = WILDWOOD_BRANCH_COOKIE,
-) {
+export function branchCookieOptions(ref: string, cookieName: string = WILDWOOD_BRANCH_COOKIE) {
   return sharedBranchCookieOptions(ref, cookieName);
 }
 
@@ -66,10 +61,7 @@ export type WildwoodRequestCookies = {
   get(name: string): { value: string } | undefined;
 };
 
-function cookieValue(
-  cookies: WildwoodRequestCookies,
-  name: string,
-): string | undefined {
+function cookieValue(cookies: WildwoodRequestCookies, name: string): string | undefined {
   return cookies.get(name)?.value;
 }
 
@@ -105,13 +97,17 @@ export function cookiesFromCookieHeader(
 export type WildwoodForBranch = {
   // Permissive — accepts Config, Config stub, or plain object with optional ref/org/repo.
   // Internally we trim, so callers don't need `.trim()`.
-  _?: {
-    config?: {
-      ref?: string | undefined;
-      org?: string | undefined;
-      repo?: string | undefined;
-    } | undefined;
-  } | undefined;
+  _?:
+    | {
+        config?:
+          | {
+              ref?: string | undefined;
+              org?: string | undefined;
+              repo?: string | undefined;
+            }
+          | undefined;
+      }
+    | undefined;
 };
 
 /**

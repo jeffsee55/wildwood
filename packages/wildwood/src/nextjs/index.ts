@@ -14,7 +14,14 @@
 export { createHandler, handle, type CreateHandlerOptions } from "./handler";
 export type { WildwoodClient } from "@/client/index";
 
-export { WildwoodKit, Toolbar, type KitAuthConfig, type ToolbarProps, type WildwoodKitHostClient, type WildwoodKitProps } from "./wildwood-kit";
+export {
+  WildwoodKit,
+  Toolbar,
+  type KitAuthConfig,
+  type ToolbarProps,
+  type WildwoodKitHostClient,
+  type WildwoodKitProps,
+} from "./wildwood-kit";
 
 // ── route factory (Next.js specific, uses next/headers + next/cache) ──────
 // ── branch helpers (framework-agnostic) — export first, so `route` can
@@ -83,10 +90,7 @@ export {
 } from "wildwood-shared";
 
 // Legacy alias — `resolve-active-ref` still works, but import `wildwood/nextjs/branch` instead.
-export {
-  resolveActiveRef,
-  type WildwoodForActiveRef,
-} from "./resolve-active-ref";
+export { resolveActiveRef, type WildwoodForActiveRef } from "./resolve-active-ref";
 
 export {
   buildWildwoodGitHubAppManifest,

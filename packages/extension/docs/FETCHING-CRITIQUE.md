@@ -99,14 +99,14 @@ Context: lazy tree fetching, stale-tolerant data, cacheable blob/tree (cache hea
 
 ## 9. Summary table
 
-| Area | Priority | Note |
-|------|----------|------|
-| full-tree = base only | Doc | Comment that dirty trees are still lazy-loaded. |
-| worktrees never refreshed | Doc / later | Document per-session; add refresh if you support ref switch. |
-| Blob cache | Later | Add in-memory (and then HTTP cache headers) when you add caching. |
-| applyDirty batching | Low | Only if many dirty files under same dir. |
-| Retries | Optional | One retry for worktrees/tree/blob can reduce flakiness. |
-| readDirectory + dirtyFiles | Optional | Comment that it’s a safety net for applied tree. |
-| Server full-tree store | Later | Per-request or documented shared store if multi-ref. |
+| Area                       | Priority    | Note                                                              |
+| -------------------------- | ----------- | ----------------------------------------------------------------- |
+| full-tree = base only      | Doc         | Comment that dirty trees are still lazy-loaded.                   |
+| worktrees never refreshed  | Doc / later | Document per-session; add refresh if you support ref switch.      |
+| Blob cache                 | Later       | Add in-memory (and then HTTP cache headers) when you add caching. |
+| applyDirty batching        | Low         | Only if many dirty files under same dir.                          |
+| Retries                    | Optional    | One retry for worktrees/tree/blob can reduce flakiness.           |
+| readDirectory + dirtyFiles | Optional    | Comment that it’s a safety net for applied tree.                  |
+| Server full-tree store     | Later       | Per-request or documented shared store if multi-ref.              |
 
 Overall the design matches the goals: lazy tree loading, stale-tolerant semantics, and a path to cacheable blob/tree once you add headers and an optional blob cache on the client.

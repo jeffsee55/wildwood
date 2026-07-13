@@ -49,14 +49,26 @@ function errorShapeForLog(err: unknown): Record<string, unknown> {
     try {
       const json = JSON.stringify(err);
       if (json === "{}" && hasCommon) {
-        return { kind: "object", partial: common, inspect: inspect(err, { depth: 4, breakLength: 100, colors: false }) };
+        return {
+          kind: "object",
+          partial: common,
+          inspect: inspect(err, { depth: 4, breakLength: 100, colors: false }),
+        };
       }
       if (json === "{}") {
-        return { kind: "object", emptyJson: true, inspect: inspect(err, { depth: 4, breakLength: 100, colors: false }) };
+        return {
+          kind: "object",
+          emptyJson: true,
+          inspect: inspect(err, { depth: 4, breakLength: 100, colors: false }),
+        };
       }
       return { kind: "object", json };
     } catch {
-      return { kind: "object", partial: hasCommon ? common : null, inspect: inspect(err, { depth: 6, breakLength: 100, colors: false }) };
+      return {
+        kind: "object",
+        partial: hasCommon ? common : null,
+        inspect: inspect(err, { depth: 6, breakLength: 100, colors: false }),
+      };
     }
   }
   return { kind: typeof err, repr: String(err) };
@@ -75,9 +87,7 @@ function isZodLike(
 
 function findZodInChain(
   err: unknown,
-):
-  | { issues: readonly { path: unknown[]; message: string }[] }
-  | null {
+): { issues: readonly { path: unknown[]; message: string }[] } | null {
   let e: unknown = err;
   const seen = new Set<unknown>();
   for (let i = 0; i < 10 && e != null && !seen.has(e); i++) {
@@ -144,10 +154,7 @@ function formatErrorChainForUser(err: unknown): string {
 /**
  * A single string for the alert (user-facing) plus a **server** log with full context.
  */
-export function logAndFormatPlaygroundError(
-  err: unknown,
-  ctx: PlaygroundErrorContext,
-): string {
+export function logAndFormatPlaygroundError(err: unknown, ctx: PlaygroundErrorContext): string {
   const c = ctx.config;
   const localPathLine =
     c.source === "local"

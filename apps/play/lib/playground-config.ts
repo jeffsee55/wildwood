@@ -27,20 +27,13 @@ export const defaultPlaygroundConfig: PlaygroundConfig = {
   contentType: "md",
 };
 
-function isPlaygroundConfigPayload(value: unknown): value is Record<
-  string,
-  unknown
-> {
+function isPlaygroundConfigPayload(value: unknown): value is Record<string, unknown> {
   if (value == null || typeof value !== "object") {
     return false;
   }
   const o = value as Record<string, unknown>;
   const source = o.source;
-  if (
-    source != null &&
-    source !== "github" &&
-    source !== "local"
-  ) {
+  if (source != null && source !== "github" && source !== "local") {
     return false;
   }
   return (
@@ -56,9 +49,7 @@ function isPlaygroundConfigPayload(value: unknown): value is Record<
   );
 }
 
-function normalizeToPlaygroundConfig(
-  o: Record<string, unknown>,
-): PlaygroundConfig {
+function normalizeToPlaygroundConfig(o: Record<string, unknown>): PlaygroundConfig {
   const contentType = o.contentType === "json" ? "json" : "md";
   const org = o.org as string;
   const repo = o.repo as string;
@@ -109,7 +100,9 @@ export function parsePlaygroundConfig(cookies: {
   get(name: string): { value: string } | undefined;
 }): PlaygroundConfig {
   // Try new cookie first, fall back to legacy
-  const v = cookies.get(PLAYGROUND_CONFIG_COOKIE)?.value ?? cookies.get(LEGACY_PLAYGROUND_CONFIG_COOKIE)?.value;
+  const v =
+    cookies.get(PLAYGROUND_CONFIG_COOKIE)?.value ??
+    cookies.get(LEGACY_PLAYGROUND_CONFIG_COOKIE)?.value;
   return parseValue(v);
 }
 

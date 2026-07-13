@@ -28,10 +28,7 @@ export const VSCODE_EMBED_DOCUMENT_CSP = [
  * host iframe fails to run inline script → no tr33 extension → `ENOPRO` on `wildwood-vfs://`.
  */
 export function stripBuiltInCspMetaFromHtml(html: string): string {
-  return html.replace(
-    /<meta[^>]*http-equiv\s*=\s*["']?content-security-policy["']?[^>]*>/gi,
-    "",
-  );
+  return html.replace(/<meta[^>]*http-equiv\s*=\s*["']?content-security-policy["']?[^>]*>/gi, "");
 }
 
 /**

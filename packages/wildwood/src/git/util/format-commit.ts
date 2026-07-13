@@ -2,9 +2,7 @@ import type { InferSelectModel } from "drizzle-orm";
 import type { _commits } from "@/sqlite/schema";
 import type { Commit } from "@/types";
 
-export const formatCommit = (
-  commit: InferSelectModel<typeof _commits>,
-): Commit => {
+export const formatCommit = (commit: InferSelectModel<typeof _commits>): Commit => {
   return {
     oid: commit.oid,
     message: commit.message,

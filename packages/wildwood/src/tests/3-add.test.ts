@@ -32,8 +32,7 @@ describe("git", () => {
       await t.git.add({
         ref: "main",
         files: {
-          "content/docs/new-file.md":
-            "---\ntitle: New file\n---\n\n# New file\n\nNew content",
+          "content/docs/new-file.md": "---\ntitle: New file\n---\n\n# New file\n\nNew content",
         },
       });
       const result = await t.client.docs.findMany({
@@ -48,8 +47,7 @@ describe("git", () => {
       await t.git.add({
         ref: "main",
         files: {
-          "content/docs/new-file.md":
-            "---\ntitle: New file\n---\n\n# New file\n\nNew content",
+          "content/docs/new-file.md": "---\ntitle: New file\n---\n\n# New file\n\nNew content",
         },
       });
     });
@@ -59,8 +57,7 @@ describe("git", () => {
       await t.git.add({
         ref: "main",
         files: {
-          "content/docs/new-file.md":
-            "---\ntitle: New file\n---\n\n# New file\n\nNew content",
+          "content/docs/new-file.md": "---\ntitle: New file\n---\n\n# New file\n\nNew content",
         },
       });
       const client2 = t.createClientWithConfig({
@@ -85,8 +82,7 @@ describe("git", () => {
       await t.git.add({
         ref: "main",
         files: {
-          "content/docs/new-file.md":
-            "---\ntitle: New file\n---\n\n# New file\n\nNew content",
+          "content/docs/new-file.md": "---\ntitle: New file\n---\n\n# New file\n\nNew content",
         },
       });
 
@@ -108,8 +104,7 @@ describe("git", () => {
       await t.git.add({
         ref: "main",
         files: {
-          "content/docs/new-file.md":
-            "---\ntitle: New file\n---\n\n# New file\n\nNew content",
+          "content/docs/new-file.md": "---\ntitle: New file\n---\n\n# New file\n\nNew content",
         },
       });
 
@@ -126,8 +121,7 @@ describe("git", () => {
       await t.git.add({
         ref: "main",
         files: {
-          "content/docs/a.md":
-            "---\ntitle: hello from a updated\n---\n\n# a updated",
+          "content/docs/a.md": "---\ntitle: hello from a updated\n---\n\n# a updated",
         },
       });
       const result = await t.client.docs.findMany({

@@ -6,202 +6,199 @@ const TREES_STORE = "trees";
 const BLOBS_STORE = "blobs";
 
 export function gitObjectCacheKey(repo: string, oid: string): string {
-	return `${repo.toLowerCase()}:${oid}`;
+  return `${repo.toLowerCase()}:${oid}`;
 }
 
 function uint8ToBase64(bytes: Uint8Array): string {
-	let binary = "";
-	for (let i = 0; i < bytes.length; i++) {
-		binary += String.fromCharCode(bytes[i]!);
-	}
-	return btoa(binary);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]!);
+  }
+  return btoa(binary);
 }
 
 function base64ToUint8(base64: string): Uint8Array {
-	const binary = atob(base64);
-	const bytes = new Uint8Array(binary.length);
-	for (let i = 0; i < binary.length; i++) {
-		bytes[i] = binary.charCodeAt(i);
-	}
-	return bytes;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 type TreeRecord = {
-	id: string;
-	repo: string;
-	oid: string;
-	entries: TreeEntries;
-	updatedAt: number;
+  id: string;
+  repo: string;
+  oid: string;
+  entries: TreeEntries;
+  updatedAt: number;
 };
 
 type BlobRecord = {
-	id: string;
-	repo: string;
-	oid: string;
-	base64: string;
-	updatedAt: number;
+  id: string;
+  repo: string;
+  oid: string;
+  base64: string;
+  updatedAt: number;
 };
 
 let shared: GitObjectCache | null = null;
 
 export function getGitObjectCache(): GitObjectCache {
-	if (!shared) {
-		shared = new GitObjectCache();
-	}
-	return shared;
+  if (!shared) {
+    shared = new GitObjectCache();
+  }
+  return shared;
 }
 
 /** Same-origin IndexedDB cache for immutable git trees and blobs (browser only). */
 export class GitObjectCache {
-	private dbPromise: Promise<IDBDatabase | null> | null = null;
-	private treeInflight = new Map<string, Promise<TreeEntries | null>>();
-	private blobInflight = new Map<string, Promise<Uint8Array | null>>();
+  private dbPromise: Promise<IDBDatabase | null> | null = null;
+  private treeInflight = new Map<string, Promise<TreeEntries | null>>();
+  private blobInflight = new Map<string, Promise<Uint8Array | null>>();
 
-	private openDb(): Promise<IDBDatabase | null> {
-		if (typeof indexedDB === "undefined") {
-			return Promise.resolve(null);
-		}
-		if (!this.dbPromise) {
-			this.dbPromise = new Promise((resolve, reject) => {
-				const req = indexedDB.open(DB_NAME, DB_VERSION);
-				req.onupgradeneeded = () => {
-					const db = req.result;
-					if (!db.objectStoreNames.contains(TREES_STORE)) {
-						db.createObjectStore(TREES_STORE, { keyPath: "id" });
-					}
-					if (!db.objectStoreNames.contains(BLOBS_STORE)) {
-						db.createObjectStore(BLOBS_STORE, { keyPath: "id" });
-					}
-				};
-				req.onsuccess = () => resolve(req.result);
-				req.onerror = () => reject(req.error ?? new Error("IndexedDB open failed"));
-			}).catch(() => null);
-		}
-		return this.dbPromise;
-	}
+  private openDb(): Promise<IDBDatabase | null> {
+    if (typeof indexedDB === "undefined") {
+      return Promise.resolve(null);
+    }
+    if (!this.dbPromise) {
+      this.dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(TREES_STORE)) {
+            db.createObjectStore(TREES_STORE, { keyPath: "id" });
+          }
+          if (!db.objectStoreNames.contains(BLOBS_STORE)) {
+            db.createObjectStore(BLOBS_STORE, { keyPath: "id" });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error ?? new Error("IndexedDB open failed"));
+      }).catch((): null => null);
+    }
+    // Non-null assertion: dbPromise is assigned above if it was null
+    return this.dbPromise as Promise<IDBDatabase | null>;
+  }
 
-	private readRecord<T>(storeName: string, id: string): Promise<T | null> {
-		return this.openDb().then((db) => {
-			if (!db) return null;
-			return new Promise<T | null>((resolve, reject) => {
-				const tx = db.transaction(storeName, "readonly");
-				const req = tx.objectStore(storeName).get(id);
-				req.onsuccess = () => resolve((req.result as T | undefined) ?? null);
-				req.onerror = () => reject(req.error ?? new Error("IndexedDB read failed"));
-			});
-		});
-	}
+  private readRecord<T>(storeName: string, id: string): Promise<T | null> {
+    return this.openDb().then((db) => {
+      if (!db) return null;
+      return new Promise<T | null>((resolve, reject) => {
+        const tx = db.transaction(storeName, "readonly");
+        const req = tx.objectStore(storeName).get(id);
+        req.onsuccess = () => resolve((req.result as T | undefined) ?? null);
+        req.onerror = () => reject(req.error ?? new Error("IndexedDB read failed"));
+      });
+    });
+  }
 
-	private writeRecord(storeName: string, record: unknown): Promise<void> {
-		return this.openDb().then((db) => {
-			if (!db) return;
-			return new Promise<void>((resolve, reject) => {
-				const tx = db.transaction(storeName, "readwrite");
-				tx.objectStore(storeName).put(record);
-				tx.oncomplete = () => resolve();
-				tx.onerror = () => reject(tx.error ?? new Error("IndexedDB write failed"));
-			});
-		});
-	}
+  private writeRecord(storeName: string, record: unknown): Promise<void> {
+    return this.openDb().then((db) => {
+      if (!db) return;
+      return new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(storeName, "readwrite");
+        tx.objectStore(storeName).put(record);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error ?? new Error("IndexedDB write failed"));
+      });
+    });
+  }
 
-	async hasTree(repo: string, oid: string): Promise<boolean> {
-		const key = gitObjectCacheKey(repo, oid);
-		const record = await this.readRecord<TreeRecord>(TREES_STORE, key);
-		return record != null;
-	}
+  async hasTree(repo: string, oid: string): Promise<boolean> {
+    const key = gitObjectCacheKey(repo, oid);
+    const record = await this.readRecord<TreeRecord>(TREES_STORE, key);
+    return record != null;
+  }
 
-	/** Read tree from IndexedDB only. */
-	async getTree(repo: string, oid: string): Promise<TreeEntries | null> {
-		const key = gitObjectCacheKey(repo, oid);
-		const record = await this.readRecord<TreeRecord>(TREES_STORE, key);
-		return record?.entries ?? null;
-	}
+  /** Read tree from IndexedDB only. */
+  async getTree(repo: string, oid: string): Promise<TreeEntries | null> {
+    const key = gitObjectCacheKey(repo, oid);
+    const record = await this.readRecord<TreeRecord>(TREES_STORE, key);
+    return record?.entries ?? null;
+  }
 
-	/** Idempotent write — safe while the editor is loading and saving. */
-	async putTree(repo: string, oid: string, entries: TreeEntries): Promise<void> {
-		const key = gitObjectCacheKey(repo, oid);
-		await this.writeRecord(TREES_STORE, {
-			id: key,
-			repo: repo.toLowerCase(),
-			oid,
-			entries,
-			updatedAt: Date.now(),
-		} satisfies TreeRecord);
-	}
+  /** Idempotent write — safe while the editor is loading and saving. */
+  async putTree(repo: string, oid: string, entries: TreeEntries): Promise<void> {
+    const key = gitObjectCacheKey(repo, oid);
+    await this.writeRecord(TREES_STORE, {
+      id: key,
+      repo: repo.toLowerCase(),
+      oid,
+      entries,
+      updatedAt: Date.now(),
+    } satisfies TreeRecord);
+  }
 
-	/** IndexedDB → network fetcher → IndexedDB (deduped in-flight). */
-	async fetchTree(
-		repo: string,
-		oid: string,
-		fetcher: () => Promise<TreeEntries | null>,
-	): Promise<TreeEntries | null> {
-		const cached = await this.getTree(repo, oid);
-		if (cached) return cached;
+  /** IndexedDB → network fetcher → IndexedDB (deduped in-flight). */
+  async fetchTree(
+    repo: string,
+    oid: string,
+    fetcher: () => Promise<TreeEntries | null>,
+  ): Promise<TreeEntries | null> {
+    const cached = await this.getTree(repo, oid);
+    if (cached) return cached;
 
-		const key = gitObjectCacheKey(repo, oid);
-		const inflight = this.treeInflight.get(key);
-		if (inflight) return inflight;
+    const key = gitObjectCacheKey(repo, oid);
+    const inflight = this.treeInflight.get(key);
+    if (inflight) return inflight;
 
-		const promise = (async () => {
-			const tree = await fetcher();
-			if (tree) {
-				await this.putTree(repo, oid, tree);
-			}
-			return tree;
-		})().finally(() => {
-			this.treeInflight.delete(key);
-		});
-		this.treeInflight.set(key, promise);
-		return promise;
-	}
+    const promise = (async () => {
+      const tree = await fetcher();
+      if (tree) {
+        await this.putTree(repo, oid, tree);
+      }
+      return tree;
+    })().finally(() => {
+      this.treeInflight.delete(key);
+    });
+    this.treeInflight.set(key, promise);
+    return promise;
+  }
 
-	/** Read blob bytes from IndexedDB only. */
-	async getBlobRaw(repo: string, oid: string): Promise<Uint8Array | null> {
-		const key = gitObjectCacheKey(repo, oid);
-		const record = await this.readRecord<BlobRecord>(BLOBS_STORE, key);
-		if (!record) return null;
-		return base64ToUint8(record.base64);
-	}
+  /** Read blob bytes from IndexedDB only. */
+  async getBlobRaw(repo: string, oid: string): Promise<Uint8Array | null> {
+    const key = gitObjectCacheKey(repo, oid);
+    const record = await this.readRecord<BlobRecord>(BLOBS_STORE, key);
+    if (!record) return null;
+    return base64ToUint8(record.base64);
+  }
 
-	/** Idempotent write. */
-	async putBlobRaw(
-		repo: string,
-		oid: string,
-		bytes: Uint8Array,
-	): Promise<void> {
-		const key = gitObjectCacheKey(repo, oid);
-		await this.writeRecord(BLOBS_STORE, {
-			id: key,
-			repo: repo.toLowerCase(),
-			oid,
-			base64: uint8ToBase64(bytes),
-			updatedAt: Date.now(),
-		} satisfies BlobRecord);
-	}
+  /** Idempotent write. */
+  async putBlobRaw(repo: string, oid: string, bytes: Uint8Array): Promise<void> {
+    const key = gitObjectCacheKey(repo, oid);
+    await this.writeRecord(BLOBS_STORE, {
+      id: key,
+      repo: repo.toLowerCase(),
+      oid,
+      base64: uint8ToBase64(bytes),
+      updatedAt: Date.now(),
+    } satisfies BlobRecord);
+  }
 
-	/** IndexedDB → network fetcher → IndexedDB (deduped in-flight). */
-	async fetchBlobRaw(
-		repo: string,
-		oid: string,
-		fetcher: () => Promise<Uint8Array | null>,
-	): Promise<Uint8Array | null> {
-		const cached = await this.getBlobRaw(repo, oid);
-		if (cached) return cached;
+  /** IndexedDB → network fetcher → IndexedDB (deduped in-flight). */
+  async fetchBlobRaw(
+    repo: string,
+    oid: string,
+    fetcher: () => Promise<Uint8Array | null>,
+  ): Promise<Uint8Array | null> {
+    const cached = await this.getBlobRaw(repo, oid);
+    if (cached) return cached;
 
-		const key = gitObjectCacheKey(repo, oid);
-		const inflight = this.blobInflight.get(key);
-		if (inflight) return inflight;
+    const key = gitObjectCacheKey(repo, oid);
+    const inflight = this.blobInflight.get(key);
+    if (inflight) return inflight;
 
-		const promise = (async () => {
-			const bytes = await fetcher();
-			if (bytes) {
-				await this.putBlobRaw(repo, oid, bytes);
-			}
-			return bytes;
-		})().finally(() => {
-			this.blobInflight.delete(key);
-		});
-		this.blobInflight.set(key, promise);
-		return promise;
-	}
+    const promise = (async () => {
+      const bytes = await fetcher();
+      if (bytes) {
+        await this.putBlobRaw(repo, oid, bytes);
+      }
+      return bytes;
+    })().finally(() => {
+      this.blobInflight.delete(key);
+    });
+    this.blobInflight.set(key, promise);
+    return promise;
+  }
 }

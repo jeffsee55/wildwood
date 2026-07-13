@@ -3,10 +3,7 @@ type Props = {
   message: string;
 };
 
-export function PlaygroundDataError({
-  title = "Wildwood preview error",
-  message,
-}: Props) {
+export function PlaygroundDataError({ title = "Wildwood preview error", message }: Props) {
   return (
     <div
       className="w-full rounded-lg border border-amber-200 bg-amber-50 p-4 text-left text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"

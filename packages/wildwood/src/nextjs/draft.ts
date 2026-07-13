@@ -29,10 +29,7 @@
 
 import { cookies, draftMode } from "next/headers";
 import { type NextRequest, NextResponse } from "next/server";
-import {
-  WILDWOOD_BRANCH_COOKIE,
-  WILDWOOD_BRANCH_COOKIE_FALLBACKS,
-} from "./branch";
+import { WILDWOOD_BRANCH_COOKIE, WILDWOOD_BRANCH_COOKIE_FALLBACKS } from "./branch";
 
 export type CreateDraftRouteOptions = {
   /**

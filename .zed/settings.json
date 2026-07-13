@@ -1,0 +1,69 @@
+{
+  // oxfmt is the single source of truth for formatting.
+  // Uses --stdin-filepath so oxfmt resolves .oxfmtrc.json via directory walk.
+  "format_on_save": "on",
+  "formatter": {
+    "external": {
+      "command": "pnpm",
+      "arguments": ["exec", "oxfmt", "--stdin-filepath", "{buffer_path}"]
+    }
+  },
+  "remove_trailing_whitespace_on_save": false,
+  "ensure_final_newline_on_save": false,
+  "languages": {
+    "TypeScript": {
+      "format_on_save": "on",
+      "formatter": {
+        "external": {
+          "command": "pnpm",
+          "arguments": ["exec", "oxfmt", "--stdin-filepath", "{buffer_path}"]
+        }
+      }
+    },
+    "TSX": {
+      "format_on_save": "on",
+      "formatter": {
+        "external": {
+          "command": "pnpm",
+          "arguments": ["exec", "oxfmt", "--stdin-filepath", "{buffer_path}"]
+        }
+      }
+    },
+    "JavaScript": {
+      "format_on_save": "on",
+      "formatter": {
+        "external": {
+          "command": "pnpm",
+          "arguments": ["exec", "oxfmt", "--stdin-filepath", "{buffer_path}"]
+        }
+      }
+    },
+    "JSON": {
+      "format_on_save": "on",
+      "formatter": {
+        "external": {
+          "command": "pnpm",
+          "arguments": ["exec", "oxfmt", "--stdin-filepath", "{buffer_path}"]
+        }
+      }
+    },
+    "JSONC": {
+      "format_on_save": "on",
+      "formatter": {
+        "external": {
+          "command": "pnpm",
+          "arguments": ["exec", "oxfmt", "--stdin-filepath", "{buffer_path}"]
+        }
+      }
+    },
+    "CSS": {
+      "format_on_save": "on",
+      "formatter": {
+        "external": {
+          "command": "pnpm",
+          "arguments": ["exec", "oxfmt", "--stdin-filepath", "{buffer_path}"]
+        }
+      }
+    }
+  }
+}

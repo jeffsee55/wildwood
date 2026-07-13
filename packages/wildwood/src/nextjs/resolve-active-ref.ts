@@ -26,7 +26,12 @@ export {
   type WildwoodRequestCookies,
 } from "./branch";
 
-import { WILDWOOD_BRANCH_COOKIE, WILDWOOD_BRANCH_COOKIE_FALLBACKS, type WildwoodForBranch, type WildwoodRequestCookies } from "./branch";
+import {
+  WILDWOOD_BRANCH_COOKIE,
+  WILDWOOD_BRANCH_COOKIE_FALLBACKS,
+  type WildwoodForBranch,
+  type WildwoodRequestCookies,
+} from "./branch";
 import { resolveBranch as resolveBranchImpl } from "./branch";
 
 // ---- compat aliases ------------------------------------------------------
@@ -64,5 +69,9 @@ export function resolveActiveRefLegacy(args: {
   cookies: WildwoodRequestCookies;
   cookieName?: string;
 }) {
-  return resolveActiveRef({ wildwood: args.tr33, cookies: args.cookies, cookieName: args.cookieName });
+  return resolveActiveRef({
+    wildwood: args.tr33,
+    cookies: args.cookies,
+    cookieName: args.cookieName,
+  });
 }

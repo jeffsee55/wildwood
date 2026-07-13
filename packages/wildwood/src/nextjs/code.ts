@@ -10,8 +10,7 @@ const escapeHtmlAttr = (value: string) =>
     .replaceAll(">", "&gt;");
 
 /** Safe JSON inside `<script>` (not HTML attributes). */
-const jsonForScript = (value: unknown) =>
-  JSON.stringify(value).replace(/</g, "\\u003c");
+const jsonForScript = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
 
 export const getCode = (config: {
   origin: string;
@@ -23,9 +22,7 @@ export const getCode = (config: {
   const asset = (path: string) =>
     vscodeCdnProxyAssetUrl(config.origin, config.prefix, commit, path);
   const fileRoot = `${asset("out")}/`;
-  const workbenchModule = asset(
-    "out/vs/workbench/workbench.web.main.internal.js",
-  );
+  const workbenchModule = asset("out/vs/workbench/workbench.web.main.internal.js");
   const configJson = escapeHtmlAttr(JSON.stringify(config.workbenchConfig));
   const emptyAuthSession = escapeHtmlAttr(JSON.stringify({}));
   return `<!DOCTYPE html>

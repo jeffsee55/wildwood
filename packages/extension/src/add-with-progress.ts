@@ -29,9 +29,7 @@ export async function postAddWithProgress(
 
   if (!res.body) {
     const err = await res.text().catch(() => "");
-    throw new Error(
-      err.trim() || `Failed to save (${res.status})`,
-    );
+    throw new Error(err.trim() || `Failed to save (${res.status})`);
   }
 
   const reader = res.body.getReader();

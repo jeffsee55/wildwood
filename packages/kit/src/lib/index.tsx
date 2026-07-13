@@ -1,11 +1,7 @@
-'use client'
+"use client";
 
 import * as React from "react";
-import {
-  ThemeProvider,
-  type ResolvedTheme,
-  type Theme,
-} from "@/components/theme-provider";
+import { ThemeProvider, type ResolvedTheme, type Theme } from "@/components/theme-provider";
 import { KitFabMenu } from "@/components/kit-fab-menu";
 import type { KitAuthConfig } from "@/components/kit-auth-panel";
 import { Toaster } from "@/components/ui/sonner";
@@ -15,7 +11,7 @@ import { ShadowRoot } from "./shadow-root";
 
 const allCss = css + "\n" + sonnerCss;
 
-export type { ResolvedTheme, Theme }
+export type { ResolvedTheme, Theme };
 export type { KitAuthConfig };
 
 export type KitProps = {
@@ -57,7 +53,11 @@ class KitErrorBoundary extends React.Component<
   }
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     // Must never crash host page. Log for diagnostics, surface inline fallback.
-    console.error("[wildwood:kit] rendering failed (isolated):", error, info.componentStack?.slice(0, 2000));
+    console.error(
+      "[wildwood:kit] rendering failed (isolated):",
+      error,
+      info.componentStack?.slice(0, 2000),
+    );
   }
   render() {
     if (this.state.error) {
@@ -84,9 +84,13 @@ class KitErrorBoundary extends React.Component<
           }}
         >
           <div style={{ fontWeight: 600 }}>Wildwood editor unavailable</div>
-          <div style={{ opacity: 0.85, marginTop: 4, wordBreak: "break-word" }}>{e.message.slice(0, 600)}</div>
+          <div style={{ opacity: 0.85, marginTop: 4, wordBreak: "break-word" }}>
+            {e.message.slice(0, 600)}
+          </div>
           <div style={{ opacity: 0.7, marginTop: 6, fontSize: 11 }}>
-            The page content is unaffected. Check env: <code>GITHUB_APP_SLUG</code>, <code>GITHUB_APP_ID</code>, <code>GITHUB_PRIVATE_KEY</code>. Docs: <code>/docs/kit#github-app</code>
+            The page content is unaffected. Check env: <code>GITHUB_APP_SLUG</code>,{" "}
+            <code>GITHUB_APP_ID</code>, <code>GITHUB_PRIVATE_KEY</code>. Docs:{" "}
+            <code>/docs/kit#github-app</code>
           </div>
           <button
             type="button"

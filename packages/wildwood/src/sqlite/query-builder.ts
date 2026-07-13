@@ -48,14 +48,10 @@ const whereClauseSchema: z.ZodType<WhereClause> = z.lazy(() =>
         z.string(), // Simple equality: { field: "value" }
         QueryOperatorsSchema, // Complex operators: { field: { eq: "value", gt: "10" } }
         z.object({
-          OR: z
-            .array(QueryOperatorsSchema)
-            .min(1, "OR array must have at least one condition"),
+          OR: z.array(QueryOperatorsSchema).min(1, "OR array must have at least one condition"),
         }),
         z.object({
-          AND: z
-            .array(QueryOperatorsSchema)
-            .min(1, "AND array must have at least one condition"),
+          AND: z.array(QueryOperatorsSchema).min(1, "AND array must have at least one condition"),
         }),
         z.record(
           z.string(),
@@ -63,9 +59,7 @@ const whereClauseSchema: z.ZodType<WhereClause> = z.lazy(() =>
             z.string(), // Simple equality: { field: "value" }
             QueryOperatorsSchema, // Complex operators: { field: { eq: "value", gt: "10" } }
             z.object({
-              OR: z
-                .array(QueryOperatorsSchema)
-                .min(1, "OR array must have at least one condition"),
+              OR: z.array(QueryOperatorsSchema).min(1, "OR array must have at least one condition"),
             }),
             z.object({
               AND: z
@@ -119,196 +113,170 @@ type DrizzleWhereClause =
   | DrizzleFilterCondition[];
 
 // Transform WhereClause to Drizzle query format using Zod
-export const toDrizzleWhereClause = whereClauseSchema.transform(
-  (clause): DrizzleWhereClause => {
-    const transform = (c: WhereClause): DrizzleWhereClause => {
-      // Handle AND clause
-      if ("AND" in c && Array.isArray(c.AND)) {
-        return {
-          AND: c.AND.map(transform),
-        };
-      }
+export const toDrizzleWhereClause = whereClauseSchema.transform((clause): DrizzleWhereClause => {
+  const transform = (c: WhereClause): DrizzleWhereClause => {
+    // Handle AND clause
+    if ("AND" in c && Array.isArray(c.AND)) {
+      return {
+        AND: c.AND.map(transform),
+      };
+    }
 
-      // Handle OR clause
-      if ("OR" in c && Array.isArray(c.OR)) {
-        return {
-          OR: c.OR.map(transform),
-        };
-      }
+    // Handle OR clause
+    if ("OR" in c && Array.isArray(c.OR)) {
+      return {
+        OR: c.OR.map(transform),
+      };
+    }
 
-      // Handle field conditions (record of field -> value/operators)
-      const entries = Object.entries(c).map(([field, value]) => {
-        // Simple string value (equality)
-        if (typeof value === "string") {
-          return {
-            filters: {
-              field,
-              value,
-            },
-          };
-        }
-
-        // Check if it's a nested OR/AND of operators
-        if ("OR" in value && Array.isArray(value.OR)) {
-          return {
-            filters: {
-              field,
-              value: {
-                OR: value.OR.map((op: z.infer<typeof QueryOperatorsSchema>) => {
-                  const entries = Object.entries(op).filter(
-                    ([_, v]) => v !== undefined,
-                  );
-                  return Object.fromEntries(entries);
-                }),
-              },
-            },
-          };
-        }
-
-        if ("AND" in value && Array.isArray(value.AND)) {
-          return {
-            filters: {
-              field,
-              value: {
-                AND: value.AND.map(
-                  (op: z.infer<typeof QueryOperatorsSchema>) => {
-                    const entries = Object.entries(op).filter(
-                      ([_, v]) => v !== undefined,
-                    );
-                    return Object.fromEntries(entries);
-                  },
-                ),
-              },
-            },
-          };
-        }
-
-        // Check if this is a nested connection filter
-        // (object with keys that aren't known operators)
-        const knownOperators = new Set([
-          "eq",
-          "ne",
-          "gt",
-          "gte",
-          "lt",
-          "lte",
-          "in",
-          "notIn",
-          "like",
-          "ilike",
-          "notLike",
-          "notIlike",
-          "isNull",
-          "isNotNull",
-        ]);
-
-        const valueKeys = Object.keys(value);
-        const isNestedConnection =
-          valueKeys.length > 0 &&
-          !valueKeys.every((key) => knownOperators.has(key));
-
-        if (isNestedConnection) {
-          // Transform nested connection filter
-          const transformNestedField = (
-            nestedValue: string | Record<string, unknown>,
-          ): DrizzleFilterValue => {
-            if (typeof nestedValue === "string") {
-              return nestedValue;
-            }
-
-            // Check for OR/AND arrays
-            if ("OR" in nestedValue && Array.isArray(nestedValue.OR)) {
-              return {
-                OR: nestedValue.OR.map(
-                  (op: z.infer<typeof QueryOperatorsSchema>) => {
-                    const entries = Object.entries(op).filter(
-                      ([_, v]) => v !== undefined,
-                    );
-                    return Object.fromEntries(entries);
-                  },
-                ),
-              };
-            }
-
-            if ("AND" in nestedValue && Array.isArray(nestedValue.AND)) {
-              return {
-                AND: nestedValue.AND.map(
-                  (op: z.infer<typeof QueryOperatorsSchema>) => {
-                    const entries = Object.entries(op).filter(
-                      ([_, v]) => v !== undefined,
-                    );
-                    return Object.fromEntries(entries);
-                  },
-                ),
-              };
-            }
-
-            // Regular operators
-            const entries = Object.entries(nestedValue).filter(
-              ([_, v]) => v !== undefined,
-            );
-            return Object.fromEntries(entries) as DrizzleFilterValue;
-          };
-
-          // Build connection filter structure
-          const connectionFilters: Record<string, DrizzleFilterValue> = {};
-
-          for (const [nestedField, nestedValue] of Object.entries(value)) {
-            connectionFilters[nestedField] = transformNestedField(
-              nestedValue as string | Record<string, unknown>,
-            );
-          }
-
-          return {
-            toConnections: {
-              AND: [
-                {
-                  field: { eq: field },
-                  toEntry: {
-                    filters: {
-                      AND: Object.entries(connectionFilters).map(
-                        ([nestedField, nestedValue]) => ({
-                          field: { eq: nestedField },
-                          value: nestedValue,
-                        }),
-                      ),
-                    },
-                  },
-                },
-              ],
-            },
-          };
-        }
-
-        // Complex operators object (single level)
-        const operators = value as Record<
-          string,
-          string | string[] | boolean | undefined
-        >;
-        const validEntries = Object.entries(operators).filter(
-          ([_, v]) => v !== undefined,
-        );
-
-        if (validEntries.length === 0) {
-          throw new Error(`No valid operators found for field: ${field}`);
-        }
-
+    // Handle field conditions (record of field -> value/operators)
+    const entries = Object.entries(c).map(([field, value]) => {
+      // Simple string value (equality)
+      if (typeof value === "string") {
         return {
           filters: {
             field,
-            value: Object.fromEntries(validEntries),
+            value,
           },
         };
-      });
+      }
 
-      return entries.length === 1
-        ? (entries[0] as DrizzleWhereClause)
-        : (entries as DrizzleWhereClause);
-    };
+      // Check if it's a nested OR/AND of operators
+      if ("OR" in value && Array.isArray(value.OR)) {
+        return {
+          filters: {
+            field,
+            value: {
+              OR: value.OR.map((op: z.infer<typeof QueryOperatorsSchema>) => {
+                const entries = Object.entries(op).filter(([_, v]) => v !== undefined);
+                return Object.fromEntries(entries);
+              }),
+            },
+          },
+        };
+      }
 
-    return transform(clause);
-  },
-);
+      if ("AND" in value && Array.isArray(value.AND)) {
+        return {
+          filters: {
+            field,
+            value: {
+              AND: value.AND.map((op: z.infer<typeof QueryOperatorsSchema>) => {
+                const entries = Object.entries(op).filter(([_, v]) => v !== undefined);
+                return Object.fromEntries(entries);
+              }),
+            },
+          },
+        };
+      }
+
+      // Check if this is a nested connection filter
+      // (object with keys that aren't known operators)
+      const knownOperators = new Set([
+        "eq",
+        "ne",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "in",
+        "notIn",
+        "like",
+        "ilike",
+        "notLike",
+        "notIlike",
+        "isNull",
+        "isNotNull",
+      ]);
+
+      const valueKeys = Object.keys(value);
+      const isNestedConnection =
+        valueKeys.length > 0 && !valueKeys.every((key) => knownOperators.has(key));
+
+      if (isNestedConnection) {
+        // Transform nested connection filter
+        const transformNestedField = (
+          nestedValue: string | Record<string, unknown>,
+        ): DrizzleFilterValue => {
+          if (typeof nestedValue === "string") {
+            return nestedValue;
+          }
+
+          // Check for OR/AND arrays
+          if ("OR" in nestedValue && Array.isArray(nestedValue.OR)) {
+            return {
+              OR: nestedValue.OR.map((op: z.infer<typeof QueryOperatorsSchema>) => {
+                const entries = Object.entries(op).filter(([_, v]) => v !== undefined);
+                return Object.fromEntries(entries);
+              }),
+            };
+          }
+
+          if ("AND" in nestedValue && Array.isArray(nestedValue.AND)) {
+            return {
+              AND: nestedValue.AND.map((op: z.infer<typeof QueryOperatorsSchema>) => {
+                const entries = Object.entries(op).filter(([_, v]) => v !== undefined);
+                return Object.fromEntries(entries);
+              }),
+            };
+          }
+
+          // Regular operators
+          const entries = Object.entries(nestedValue).filter(([_, v]) => v !== undefined);
+          return Object.fromEntries(entries) as DrizzleFilterValue;
+        };
+
+        // Build connection filter structure
+        const connectionFilters: Record<string, DrizzleFilterValue> = {};
+
+        for (const [nestedField, nestedValue] of Object.entries(value)) {
+          connectionFilters[nestedField] = transformNestedField(
+            nestedValue as string | Record<string, unknown>,
+          );
+        }
+
+        return {
+          toConnections: {
+            AND: [
+              {
+                field: { eq: field },
+                toEntry: {
+                  filters: {
+                    AND: Object.entries(connectionFilters).map(([nestedField, nestedValue]) => ({
+                      field: { eq: nestedField },
+                      value: nestedValue,
+                    })),
+                  },
+                },
+              },
+            ],
+          },
+        };
+      }
+
+      // Complex operators object (single level)
+      const operators = value as Record<string, string | string[] | boolean | undefined>;
+      const validEntries = Object.entries(operators).filter(([_, v]) => v !== undefined);
+
+      if (validEntries.length === 0) {
+        throw new Error(`No valid operators found for field: ${field}`);
+      }
+
+      return {
+        filters: {
+          field,
+          value: Object.fromEntries(validEntries),
+        },
+      };
+    });
+
+    return entries.length === 1
+      ? (entries[0] as DrizzleWhereClause)
+      : (entries as DrizzleWhereClause);
+  };
+
+  return transform(clause);
+});
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
@@ -344,15 +312,11 @@ type FromSpec = {
 function buildNestedWith(
   clause: Record<string, WithClauseInput>,
   recurseWith: (c: Record<string, WithClauseInput>) => Record<string, unknown>,
-  recurseRefs: (
-    r: Record<string, WithClauseInput>,
-  ) => Record<string, unknown> | undefined,
+  recurseRefs: (r: Record<string, WithClauseInput>) => Record<string, unknown> | undefined,
 ): Record<string, unknown> {
   // Nested `with` is itself a map of field->input; recurse into it via the main transforms.
-  const w =
-    Object.keys(clause).length === 0 ? undefined : recurseWith(clause);
-  const r =
-    Object.keys(clause).length === 0 ? undefined : recurseRefs(clause);
+  const w = Object.keys(clause).length === 0 ? undefined : recurseWith(clause);
+  const r = Object.keys(clause).length === 0 ? undefined : recurseRefs(clause);
   const merged: Record<string, unknown> = { ...(w ?? {}) };
   if (r) Object.assign(merged, r);
   return merged;
@@ -378,7 +342,11 @@ function toConnsSpecToDrizzle(specs: ToSpec[]): Record<string, unknown> {
   // First-class fix: when user asks with:{ children:true }, match exact OR prefix.
   // We use OR of eq + like to cover both single and array connections.
   const fieldClause = (field: string) => ({
-    OR: [{ field: { eq: field } }, { field: { like: `${field}.%` } }, { field: { like: `${field}[%` } }],
+    OR: [
+      { field: { eq: field } },
+      { field: { like: `${field}.%` } },
+      { field: { like: `${field}[%` } },
+    ],
   });
 
   if (specs.length === 1) {
@@ -413,19 +381,14 @@ function toConnsSpecToDrizzle(specs: ToSpec[]): Record<string, unknown> {
   };
 }
 
-function fromConnsSpecToDrizzle(
-  specs: FromSpec[],
-): Record<string, unknown> {
+function fromConnsSpecToDrizzle(specs: FromSpec[]): Record<string, unknown> {
   if (specs.length === 0) return {};
   const mkWith = (s: FromSpec | undefined) => s?.nestedWith ?? blobOnly();
   if (specs.length === 1) {
     const only = specs[0]!;
     const where = only.entryWhere
       ? {
-          AND: [
-            { referencedAs: { eq: only.referencedAs } },
-            { fromEntry: only.entryWhere },
-          ],
+          AND: [{ referencedAs: { eq: only.referencedAs } }, { fromEntry: only.entryWhere }],
         }
       : { referencedAs: { eq: only.referencedAs } };
     return {
@@ -444,10 +407,7 @@ function fromConnsSpecToDrizzle(
 
 // ── main ─────────────────────────────────────────────────────────────────
 
-export function buildWorktreeQuery(
-  args: FindWorktreeEntriesArgs,
-  config: Config,
-) {
+export function buildWorktreeQuery(args: FindWorktreeEntriesArgs, config: Config) {
   // 1) entry-level conditions (version, collection, variant, path + delegated filters)
   const namespaceConditions: unknown[] = [
     { version: { eq: config.version } },
@@ -480,9 +440,7 @@ export function buildWorktreeQuery(
     if (Object.keys(rest).length > 0) {
       const whereConditions = toDrizzleWhereClause.parse(rest);
 
-      const addVersion = (
-        cond: DrizzleWhereClause,
-      ): DrizzleWhereClause => {
+      const addVersion = (cond: DrizzleWhereClause): DrizzleWhereClause => {
         if ("AND" in cond) {
           return { AND: cond.AND.map(addVersion) };
         }
@@ -508,22 +466,17 @@ export function buildWorktreeQuery(
     }
   }
 
-  const query =
-    namespaceConditions.length > 0 ? { AND: namespaceConditions } : undefined;
+  const query = namespaceConditions.length > 0 ? { AND: namespaceConditions } : undefined;
 
   // 2) with / references — transform recursively, merging multiple fields.
 
   // Forward declarations (need mutual recursion).
-  let transformWith: (
-    clause?: Record<string, WithClauseInput>,
-  ) => Record<string, unknown>;
+  let transformWith: (clause?: Record<string, WithClauseInput>) => Record<string, unknown>;
   let transformReferences: (
     clause?: Record<string, WithClauseInput>,
   ) => Record<string, unknown> | undefined;
 
-  transformWith = (
-    clause?: Record<string, WithClauseInput>,
-  ): Record<string, unknown> => {
+  transformWith = (clause?: Record<string, WithClauseInput>): Record<string, unknown> => {
     if (!clause) {
       // Default when no `with` — caller wants all connections + blob.
       return {
@@ -551,12 +504,17 @@ export function buildWorktreeQuery(
 
       if (typeof value === "object" && value !== null) {
         const obj = value as WithObject;
-        const entryWhere =
-          obj.where ? toDrizzleWhereClause.parse(obj.where as WhereClause) : undefined;
+        const entryWhere = obj.where
+          ? toDrizzleWhereClause.parse(obj.where as WhereClause)
+          : undefined;
 
         // Nested `with` / `references` inside this connection request.
-        const nestedWith = obj.with ? transformWith(obj.with as Record<string, WithClauseInput>) : undefined;
-        const nestedRefs = obj.references ? transformReferences(obj.references as Record<string, WithClauseInput>) : undefined;
+        const nestedWith = obj.with
+          ? transformWith(obj.with as Record<string, WithClauseInput>)
+          : undefined;
+        const nestedRefs = obj.references
+          ? transformReferences(obj.references as Record<string, WithClauseInput>)
+          : undefined;
         // Merge nested with+refs into a single `with` map for the toEntry/fromEntry relation.
         const mergedNested: Record<string, unknown> = {
           ...(nestedWith ?? {}),
@@ -607,11 +565,16 @@ export function buildWorktreeQuery(
       }
       if (typeof value === "object" && value !== null) {
         const obj = value as WithObject;
-        const entryWhere =
-          obj.where ? toDrizzleWhereClause.parse(obj.where as WhereClause) : undefined;
+        const entryWhere = obj.where
+          ? toDrizzleWhereClause.parse(obj.where as WhereClause)
+          : undefined;
 
-        const nestedWith = obj.with ? transformWith(obj.with as Record<string, WithClauseInput>) : undefined;
-        const nestedRefs = obj.references ? transformReferences(obj.references as Record<string, WithClauseInput>) : undefined;
+        const nestedWith = obj.with
+          ? transformWith(obj.with as Record<string, WithClauseInput>)
+          : undefined;
+        const nestedRefs = obj.references
+          ? transformReferences(obj.references as Record<string, WithClauseInput>)
+          : undefined;
         const mergedNested: Record<string, unknown> = {
           ...(nestedWith ?? {}),
           ...(nestedRefs ?? {}),
@@ -669,12 +632,12 @@ export function buildWorktreeQuery(
   };
   const mergedTo = mergeConns(
     withClause as Record<string, unknown>,
-    (referencesClause as Record<string, unknown> | undefined),
+    referencesClause as Record<string, unknown> | undefined,
     "toConnections",
   );
   const mergedFrom = mergeConns(
     withClause as Record<string, unknown>,
-    (referencesClause as Record<string, unknown> | undefined),
+    referencesClause as Record<string, unknown> | undefined,
     "fromConnections",
   );
   if (mergedTo) finalWithClause.toConnections = mergedTo;

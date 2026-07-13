@@ -154,7 +154,7 @@ No preview deploys. No separate env. Branch = preview. Closing preview = clear c
 2. **Never edit generated DB files.** `*.db` is ignored by `**/wildwood-docs.db`. Never commit them.
 3. **Preserve literal generics.** Do not change `collection()` to rebuild shape via `_zod.def.shape`. That collapses `FindTypes` to `never` and breaks `with` in downstream apps.
 4. **Test core via `packages/wildwood/src/tests/*.test.ts`.** Core suite: `pnpm --filter wildwood exec vitest run 3-add 8-switch 6-query 5-variants 1-switch 2-merge 4-commit` + `version-bump` regression. Docs build must stay green.
-5. **When touching `ensureTrees` / `versions` / `createBranch` / `findMany`, run `version-bump.test.ts`. It guards the hardest invariant.
+5. \*\*When touching `ensureTrees` / `versions` / `createBranch` / `findMany`, run `version-bump.test.ts`. It guards the hardest invariant.
 6. **Treat `z.filter` as intent.** If a field should be queryable, it needs `z.filter(...)`. If not, it shouldn't be.
 7. **Prefer references over strings.** When modeling new content, reach for `z.connect` and `referencedAs` before URLs.
 8. **Branches are cheap. Make one.** `generateBranchName()` (`BRANCH_CITIES`) exists. Use it for agent edits, set cookie, never mutate `main` directly in preview flows.

@@ -118,8 +118,7 @@ export const zodVisitor = (args: ZodVisitorArgs): unknown => {
         }
       }
       if (def.params?.__wildwoodConnection || def.params?.__tr33Connection) {
-        const connName =
-          def.params?.__wildwoodConnection ?? def.params?.__tr33Connection;
+        const connName = def.params?.__wildwoodConnection ?? def.params?.__tr33Connection;
         const result = onConnection({
           value: value as string,
           field,
@@ -179,11 +178,7 @@ export const zodVisitor = (args: ZodVisitorArgs): unknown => {
         const decodedShape = shape.decode(
           optionDef.shape as Record<
             string,
-            z.ZodType<
-              unknown,
-              unknown,
-              z.core.$ZodTypeInternals<unknown, unknown>
-            >
+            z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>
           >,
         );
         for (const val of Object.values(decodedShape)) {
@@ -201,10 +196,16 @@ export const zodVisitor = (args: ZodVisitorArgs): unknown => {
         const name =
           (anyOpt?._zod?.def?.params?.__wildwoodConnection as string | undefined) ??
           (anyOpt?._zod?.def?.params?.__tr33Connection as string | undefined) ??
-          (anyOpt?._zod?.def?.params as { __wildwoodConnection?: string; __tr33Connection?: string } | undefined)
-            ?.__wildwoodConnection ??
-          (anyOpt?._zod?.def?.params as { __wildwoodConnection?: string; __tr33Connection?: string } | undefined)
-            ?.__tr33Connection;
+          (
+            anyOpt?._zod?.def?.params as
+              | { __wildwoodConnection?: string; __tr33Connection?: string }
+              | undefined
+          )?.__wildwoodConnection ??
+          (
+            anyOpt?._zod?.def?.params as
+              | { __wildwoodConnection?: string; __tr33Connection?: string }
+              | undefined
+          )?.__tr33Connection;
         if (name) field.push(name as unknown as string);
       }
       if (option) {
@@ -307,9 +308,7 @@ export const zodVisitor = (args: ZodVisitorArgs): unknown => {
       return undefined;
     }
     default: {
-      throw new Error(
-        `Unsupported schema type: ${def.type} at ${field.join(".")}`,
-      );
+      throw new Error(`Unsupported schema type: ${def.type} at ${field.join(".")}`);
     }
   }
 };

@@ -59,9 +59,7 @@ export function WildwoodJsonView({
         style={theme as CSSProperties}
         collapsed={false}
         shouldExpandNodeInitially={(isExpanded, { keys, level }) => {
-          if (
-            keys.join(".") === 'items.0'
-          ) {
+          if (keys.join(".") === "items.0") {
             return true;
           }
           return isExpanded;

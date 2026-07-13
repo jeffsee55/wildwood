@@ -51,9 +51,7 @@ export function getWildwoodExtensionRoot(): string {
     return extensionRoot;
   }
 
-  const fromNodeRequire = tryResolve(() =>
-    nodeRequire.resolve("wildwood-vscode/package.json"),
-  );
+  const fromNodeRequire = tryResolve(() => nodeRequire.resolve("wildwood-vscode/package.json"));
   if (fromNodeRequire) {
     extensionRoot = fromNodeRequire;
     return extensionRoot;

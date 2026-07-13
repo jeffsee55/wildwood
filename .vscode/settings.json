@@ -1,7 +1,26 @@
 {
-	"editor.defaultFormatter": "biomejs.biome",
-	"editor.formatOnSave": true,
-	"editor.codeActionsOnSave": {
-		"source.organizeImports.biome": "explicit"
-	}
+  // Single formatter: oxfmt. No Biome, no Prettier, no ESLint auto-fix.
+  // Install https://marketplace.visualstudio.com/items?itemName=oxc.oxc-vscode
+  // or ensure `pnpm exec oxfmt` is on PATH.
+  "editor.defaultFormatter": "oxc.oxc-vscode",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {},
+  "[typescript]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[css]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  }
 }

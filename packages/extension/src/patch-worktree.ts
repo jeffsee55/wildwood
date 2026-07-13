@@ -29,9 +29,7 @@ export async function postPatchWorktree(
   });
   if (!res.ok) {
     const err = await res.text().catch(() => "");
-    throw new Error(
-      err.trim() || `Failed to patch worktree (${res.status})`,
-    );
+    throw new Error(err.trim() || `Failed to patch worktree (${res.status})`);
   }
   return (await res.json()) as { rootTreeOid: string };
 }

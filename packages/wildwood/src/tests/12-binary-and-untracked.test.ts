@@ -18,8 +18,7 @@ describe("binary and untracked files", () => {
     await t.helper.addFilesAndCommit(
       {
         "content/authors/jeff.json": JSON.stringify({ name: "Jeff" }),
-        "content/docs/a.md":
-          "---\ntitle: hello from a\nauthor: ../authors/jeff.json\n---\n\n# a",
+        "content/docs/a.md": "---\ntitle: hello from a\nauthor: ../authors/jeff.json\n---\n\n# a",
         "package.json": '{"name":"tr33-mono"}',
         "README.md": "# README",
       },
@@ -36,9 +35,7 @@ describe("binary and untracked files", () => {
     it("matches calculateBlobOid for the same UTF-8 content", async () => {
       const text = "Hello, world!";
       const textOid = await calculateBlobOid(text);
-      const bytesOid = await calculateBlobOidFromBytes(
-        new TextEncoder().encode(text),
-      );
+      const bytesOid = await calculateBlobOidFromBytes(new TextEncoder().encode(text));
       expect(bytesOid).toBe(textOid);
     });
 
@@ -51,12 +48,12 @@ describe("binary and untracked files", () => {
       const oid = await calculateBlobOidFromBytes(PNG_BYTES);
       // Write the PNG to a temp file and let git compute the OID
       await t.helper.addFiles({ "tmp-test.png": PNG_BYTES });
-      const gitOid = (
-        await import("node:child_process")
-      ).execSync(`git hash-object tmp-test.png`, {
-        cwd: t.helper.getFullPath(),
-        encoding: "utf-8",
-      }).trim();
+      const gitOid = (await import("node:child_process"))
+        .execSync(`git hash-object tmp-test.png`, {
+          cwd: t.helper.getFullPath(),
+          encoding: "utf-8",
+        })
+        .trim();
       expect(oid).toBe(gitOid);
     });
   });
@@ -113,8 +110,7 @@ describe("binary and untracked files", () => {
       await t.git.add({
         ref: "main",
         files: {
-          "content/docs/new.md":
-            "---\ntitle: New doc\n---\n\n# New\n\nWith image",
+          "content/docs/new.md": "---\ntitle: New doc\n---\n\n# New\n\nWith image",
           "assets/banner.png": new Uint8Array(PNG_BYTES),
         },
       });

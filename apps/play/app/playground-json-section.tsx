@@ -9,9 +9,7 @@ import { logAndFormatPlaygroundError } from "@/lib/playground-error";
 import { getPlaygroundViewData } from "@/lib/playground-data";
 import { PlaygroundJsonClient } from "./playground-json-client";
 
-export async function PlaygroundJsonSection(props: {
-  config: PlaygroundConfig;
-}) {
+export async function PlaygroundJsonSection(props: { config: PlaygroundConfig }) {
   let viewData: object;
   try {
     viewData = await getPlaygroundViewData(props.config.ref, props.config);

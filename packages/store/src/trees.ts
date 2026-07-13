@@ -1,14 +1,6 @@
-import {
-  calculateBlobOid,
-  calculateTreeOid,
-  GIT_EMPTY_TREE_OID,
-} from "./git-objects";
+import { calculateBlobOid, calculateTreeOid, GIT_EMPTY_TREE_OID } from "./git-objects";
 import { tryContentMerge } from "./merge";
-import type {
-	CommitAuthor,
-	CommitNode,
-	TreeEntries,
-} from "./types";
+import type { CommitAuthor, CommitNode, TreeEntries } from "./types";
 
 export type { CommitAuthor, CommitNode };
 
@@ -20,7 +12,6 @@ export interface Gitable {
   /** Persist a tree locally (IndexedDB in the browser; in-memory on server). */
   putTree?(oid: string, entries: TreeEntries): Promise<void>;
 }
-
 
 export type DiffEntry =
   | { status: "added"; path: string; theirsOid: string }
@@ -56,9 +47,7 @@ export type ResolveResult =
   | { type: "tree"; oid: string; entries: TreeEntries }
   | { type: "blob"; oid: string; content: string };
 
-export type LookupResult =
-  | { type: "tree"; oid: string }
-  | { type: "blob"; oid: string };
+export type LookupResult = { type: "tree"; oid: string } | { type: "blob"; oid: string };
 
 export type Diff2Entry =
   | { status: "added"; path: string; oid: string }
@@ -66,22 +55,20 @@ export type Diff2Entry =
   | { status: "modified"; path: string; baseOid: string; currentOid: string };
 
 export class Trees {
-	private gitable: Gitable;
-	treeStore = new Map<string, TreeEntries>();
-	private emptyTreeOid: string | null = null;
+  private gitable: Gitable;
+  treeStore = new Map<string, TreeEntries>();
+  private emptyTreeOid: string | null = null;
 
-	constructor(args: { gitable: Gitable }) {
-		this.gitable = args.gitable;
-	}
+  constructor(args: { gitable: Gitable }) {
+    this.gitable = args.gitable;
+  }
 
   async getTree(oid: string): Promise<TreeEntries | null> {
     return this.gitable.getTree(oid);
   }
 
   /** Trees produced by `applyEntriesToTree` — read back from the gitable store. */
-  async exportTreesForPersist(
-    oids: string[],
-  ): Promise<{ oid: string; entries: TreeEntries }[]> {
+  async exportTreesForPersist(oids: string[]): Promise<{ oid: string; entries: TreeEntries }[]> {
     const out: { oid: string; entries: TreeEntries }[] = [];
     for (const oid of oids) {
       if (this.gitable.putTree) {
@@ -99,10 +86,7 @@ export class Trees {
     return out;
   }
 
-  private async persistTree(
-    oid: string,
-    entries: TreeEntries,
-  ): Promise<void> {
+  private async persistTree(oid: string, entries: TreeEntries): Promise<void> {
     if (this.gitable.putTree) {
       await this.gitable.putTree(oid, entries);
       return;
@@ -110,10 +94,7 @@ export class Trees {
     this.treeStore.set(oid, entries);
   }
 
-  async resolve(
-    rootOid: string,
-    path: string,
-  ): Promise<ResolveResult | null> {
+  async resolve(rootOid: string, path: string): Promise<ResolveResult | null> {
     const segments = path.split("/").filter(Boolean);
 
     if (segments.length === 0) {
@@ -147,10 +128,7 @@ export class Trees {
   }
 
   /** Walk the tree without fetching blob content — for stat-like operations. */
-  async lookup(
-    rootOid: string,
-    path: string,
-  ): Promise<LookupResult | null> {
+  async lookup(rootOid: string, path: string): Promise<LookupResult | null> {
     const segments = path.split("/").filter(Boolean);
     if (segments.length === 0) {
       const entries = await this.getTree(rootOid);
@@ -184,10 +162,7 @@ export class Trees {
 
     const baseEntries = (await this.getTree(baseTreeOid)) ?? {};
     const currentEntries = (await this.getTree(currentTreeOid)) ?? {};
-    const allNames = new Set([
-      ...Object.keys(baseEntries),
-      ...Object.keys(currentEntries),
-    ]);
+    const allNames = new Set([...Object.keys(baseEntries), ...Object.keys(currentEntries)]);
 
     const result: Diff2Entry[] = [];
 
@@ -198,21 +173,33 @@ export class Trees {
 
       if (!base && current) {
         if (current.type === "tree") {
-          const sub = await this.diff2({ baseTreeOid: await this.getEmptyTreeOid(), currentTreeOid: current.oid, pathPrefix: path });
+          const sub = await this.diff2({
+            baseTreeOid: await this.getEmptyTreeOid(),
+            currentTreeOid: current.oid,
+            pathPrefix: path,
+          });
           result.push(...sub);
         } else {
           result.push({ status: "added", path, oid: current.oid });
         }
       } else if (base && !current) {
         if (base.type === "tree") {
-          const sub = await this.diff2({ baseTreeOid: base.oid, currentTreeOid: await this.getEmptyTreeOid(), pathPrefix: path });
+          const sub = await this.diff2({
+            baseTreeOid: base.oid,
+            currentTreeOid: await this.getEmptyTreeOid(),
+            pathPrefix: path,
+          });
           result.push(...sub);
         } else {
           result.push({ status: "removed", path, oid: base.oid });
         }
       } else if (base && current && base.oid !== current.oid) {
         if (base.type === "tree" && current.type === "tree") {
-          const sub = await this.diff2({ baseTreeOid: base.oid, currentTreeOid: current.oid, pathPrefix: path });
+          const sub = await this.diff2({
+            baseTreeOid: base.oid,
+            currentTreeOid: current.oid,
+            pathPrefix: path,
+          });
           result.push(...sub);
         } else if (base.type === "blob" && current.type === "blob") {
           result.push({ status: "modified", path, baseOid: base.oid, currentOid: current.oid });
@@ -277,10 +264,7 @@ export class Trees {
 
       if (overlay.type === "blob" && commitAt.type === "blob") {
         if (overlay.oid !== commitAt.oid) {
-          const sameContent = await this.blobsEquivalent(
-            overlay.oid,
-            commitAt.oid,
-          );
+          const sameContent = await this.blobsEquivalent(overlay.oid, commitAt.oid);
           if (!sameContent) {
             result.push({
               status: "modified",
@@ -340,10 +324,7 @@ export class Trees {
 
   private async blobsEquivalent(oidA: string, oidB: string): Promise<boolean> {
     if (oidA === oidB) return true;
-    const [a, b] = await Promise.all([
-      this.gitable.getBlob(oidA),
-      this.gitable.getBlob(oidB),
-    ]);
+    const [a, b] = await Promise.all([this.gitable.getBlob(oidA), this.gitable.getBlob(oidB)]);
     if (!a || !b) return false;
     return a.content === b.content;
   }
@@ -363,11 +344,7 @@ export class Trees {
   }: {
     oid: string;
     path?: string;
-    callback: (entry: {
-      oid: string;
-      path: string;
-      type: "blob" | "tree";
-    }) => Promise<void>;
+    callback: (entry: { oid: string; path: string; type: "blob" | "tree" }) => Promise<void>;
   }) {
     const tree = await this.getTree(oid);
     if (!tree) return;
@@ -407,9 +384,9 @@ export class Trees {
     if (!args.baseTreeOid) {
       return childBlobs;
     }
-    const parentBlobs = (
-      await this.entriesFromTree({ oid: args.baseTreeOid })
-    ).filter((e) => e.type === "blob");
+    const parentBlobs = (await this.entriesFromTree({ oid: args.baseTreeOid })).filter(
+      (e) => e.type === "blob",
+    );
     const parentByPath = new Map(parentBlobs.map((e) => [e.path, e.oid]));
     return childBlobs.filter((e) => parentByPath.get(e.path) !== e.oid);
   }
@@ -421,13 +398,11 @@ export class Trees {
   }): Promise<string> {
     const oursContent =
       args.oursOid != null
-        ? ((await this.gitable.getBlob(args.oursOid))?.content ??
-          "(unable to load)")
+        ? ((await this.gitable.getBlob(args.oursOid))?.content ?? "(unable to load)")
         : "(deleted)";
     const theirsContent =
       args.theirsOid != null
-        ? ((await this.gitable.getBlob(args.theirsOid))?.content ??
-          "(unable to load)")
+        ? ((await this.gitable.getBlob(args.theirsOid))?.content ?? "(unable to load)")
         : "(deleted)";
     return `<<<<<<< ours\n${oursContent}\n=======\n${theirsContent}\n>>>>>>> theirs`;
   }
@@ -480,18 +455,12 @@ export class Trees {
       const oursOid = oursEntry?.oid;
       const theirsOid = theirsEntry?.oid;
 
-      if (
-        baseOid !== undefined &&
-        oursOid === baseOid &&
-        theirsOid === baseOid
-      ) {
+      if (baseOid !== undefined && oursOid === baseOid && theirsOid === baseOid) {
         continue;
       }
 
       const anyIsTree =
-        baseEntry?.type === "tree" ||
-        oursEntry?.type === "tree" ||
-        theirsEntry?.type === "tree";
+        baseEntry?.type === "tree" || oursEntry?.type === "tree" || theirsEntry?.type === "tree";
 
       if (anyIsTree) {
         const emptyOid = await this.getEmptyTreeOid();
@@ -511,13 +480,7 @@ export class Trees {
       const inOurs = oursOid !== undefined;
       const inTheirs = theirsOid !== undefined;
 
-      if (
-        !inBase &&
-        inOurs &&
-        inTheirs &&
-        oursOid !== theirsOid &&
-        theirsOid !== undefined
-      ) {
+      if (!inBase && inOurs && inTheirs && oursOid !== theirsOid && theirsOid !== undefined) {
         entries.push({ status: "added", path, theirsOid });
         conflicts.push({
           path,
@@ -642,12 +605,7 @@ export class Trees {
     if (pathPrefix === "") {
       const baseOid = oursTreeOid ?? (await this.getEmptyTreeOid());
       const newTreeOids: string[] = [];
-      const rootOid = await this.applyDiffToTree(
-        baseOid,
-        entries,
-        "",
-        newTreeOids,
-      );
+      const rootOid = await this.applyDiffToTree(baseOid, entries, "", newTreeOids);
       return {
         entries,
         conflicts,
@@ -673,10 +631,8 @@ export class Trees {
     const ours = (await this.getTree(oursTreeOid)) ?? {};
     const result: TreeEntries = { ...ours };
 
-    const relPath = (p: string) =>
-      pathPrefix ? p.slice(pathPrefix.length + 1) : p;
-    const fullPath = (name: string) =>
-      pathPrefix ? `${pathPrefix}/${name}` : name;
+    const relPath = (p: string) => (pathPrefix ? p.slice(pathPrefix.length + 1) : p);
+    const fullPath = (name: string) => (pathPrefix ? `${pathPrefix}/${name}` : name);
 
     for (const entry of diffEntries) {
       const isUnder = pathPrefix
@@ -713,15 +669,9 @@ export class Trees {
       const oursChildOid = oursChild?.type === "tree" ? oursChild.oid : null;
       const baseOid = oursChildOid ?? (await this.getEmptyTreeOid());
       const subEntries = diffEntries.filter(
-        (e) =>
-          e.path === childFullPath || e.path.startsWith(`${childFullPath}/`),
+        (e) => e.path === childFullPath || e.path.startsWith(`${childFullPath}/`),
       );
-      const oid = await this.applyDiffToTree(
-        baseOid,
-        subEntries,
-        childFullPath,
-        newTreeOids,
-      );
+      const oid = await this.applyDiffToTree(baseOid, subEntries, childFullPath, newTreeOids);
       result[name] = { type: "tree", oid };
     }
 
@@ -772,9 +722,7 @@ export class Trees {
 
       const leaf = await this.getTree(treeOid);
       if (!leaf) {
-        throw new Error(
-          `Tree not found while applying entry "${entry.path}" (${treeOid})`,
-        );
+        throw new Error(`Tree not found while applying entry "${entry.path}" (${treeOid})`);
       }
       const updated = {
         ...leaf,
@@ -802,10 +750,7 @@ export class Trees {
     return { rootOid, trees: newOids };
   }
 
-  async findMergeBase(args: {
-    oursOid: string;
-    theirsOid: string;
-  }): Promise<CommitNode | null> {
+  async findMergeBase(args: { oursOid: string; theirsOid: string }): Promise<CommitNode | null> {
     const { oursOid, theirsOid } = args;
     const getCommit = (oid: string) => this.gitable.getCommit(oid);
 
@@ -831,10 +776,7 @@ export class Trees {
     const maxIterations = 1000;
     let iterations = 0;
 
-    while (
-      (oursQueue.length > 0 || theirsQueue.length > 0) &&
-      iterations < maxIterations
-    ) {
+    while ((oursQueue.length > 0 || theirsQueue.length > 0) && iterations < maxIterations) {
       iterations++;
 
       if (oursQueue.length > 0) {
@@ -894,14 +836,7 @@ export class Trees {
       if (dominated.has(candidate)) continue;
       for (const other of candidates) {
         if (candidate === other || dominated.has(other)) continue;
-        if (
-          this.isReachableViaParents(
-            candidate,
-            other,
-            candidateSet,
-            commitCache,
-          )
-        ) {
+        if (this.isReachableViaParents(candidate, other, candidateSet, commitCache)) {
           dominated.add(candidate);
           break;
         }

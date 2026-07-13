@@ -49,8 +49,8 @@ function getGitHubToken(): string {
     const hint = inferVercelOidcContext();
     throw new Error(
       "Failed to get GitHub token. In production there is no `gh` CLI — " +
-        "pass `provider: { github: { type: \"app\", app: { appId, privateKey } } }` " +
-        "or PAT via `provider: { github: { type: \"token\", token } }`. " +
+        'pass `provider: { github: { type: "app", app: { appId, privateKey } } }` ' +
+        'or PAT via `provider: { github: { type: "token", token } }`. ' +
         (hint ? hint + " " : "") +
         "For read-only docs, ensure the Turso DB (TURSO_DATABASE_URL/_TOKEN) is populated at build time so no GitHub fetch is needed at runtime.",
     );
@@ -118,7 +118,13 @@ export class GitHubRemote extends Remote {
     return this.githubClientPromise;
   }
 
-  private getNormalizedAuth(): { type?: string; token?: string; app?: { appId?: string | number; privateKey?: string; installationId?: string | number } } | undefined {
+  private getNormalizedAuth():
+    | {
+        type?: string;
+        token?: string;
+        app?: { appId?: string | number; privateKey?: string; installationId?: string | number };
+      }
+    | undefined {
     const raw = this.provider?.github;
     if (!raw) return undefined;
 
@@ -228,19 +234,14 @@ export class GitHubRemote extends Remote {
       const installationId = await this.resolveInstallationId(appAuth);
       return { status: "installed", installationId };
     } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.includes("GitHub App is not installed")
-      ) {
+      if (error instanceof Error && error.message.includes("GitHub App is not installed")) {
         return { status: "not_installed" };
       }
       throw error;
     }
   }
 
-  private async resolveInstallationId(
-    appAuth: ReturnType<typeof createAppAuth>,
-  ): Promise<number> {
+  private async resolveInstallationId(appAuth: ReturnType<typeof createAppAuth>): Promise<number> {
     const appAuthentication = await appAuth({ type: "app" });
     const appOctokit = new Octokit({ auth: appAuthentication.token });
     try {
@@ -416,9 +417,7 @@ export class GitHubRemote extends Remote {
     );
   }
 
-  async fetchBlobs(args: {
-    oids: string[];
-  }): Promise<{ oid: string; content: string }[]> {
+  async fetchBlobs(args: { oids: string[] }): Promise<{ oid: string; content: string }[]> {
     const { octokit } = await this.getGitHubClient();
     if (args.oids.length === 0) {
       return [];
@@ -499,9 +498,7 @@ export class GitHubRemote extends Remote {
 
     // 2. Build each commit tree on GitHub via base_tree + flat paths (avoids local tree OID drift).
     const treeOidMap = new Map<string, string>();
-    const commitTreeByOid = new Map(
-      commitTrees.map((spec) => [spec.treeOid, spec]),
-    );
+    const commitTreeByOid = new Map(commitTrees.map((spec) => [spec.treeOid, spec]));
 
     for (const commit of commits) {
       const spec = commitTreeByOid.get(commit.treeOid);
@@ -530,8 +527,7 @@ export class GitHubRemote extends Remote {
 
     // 3. Create commits (oldest-first, mapping parent OIDs to GitHub's)
     const commitOidMap = new Map<string, string>();
-    let lastCommitResponse: { sha: string; tree: { sha: string } } | null =
-      null;
+    let lastCommitResponse: { sha: string; tree: { sha: string } } | null = null;
 
     for (const commit of commits) {
       const parents = [commit.parent, commit.secondParent]
@@ -673,9 +669,7 @@ export class GitHubRemote extends Remote {
       body: response.data.body ?? "",
       labels:
         args.labels ??
-        response.data.labels.map((l) =>
-          typeof l === "string" ? l : (l.name ?? ""),
-        ),
+        response.data.labels.map((l) => (typeof l === "string" ? l : (l.name ?? ""))),
     };
   }
 
@@ -698,9 +692,7 @@ export class GitHubRemote extends Remote {
       url: pr.html_url,
       title: pr.title,
       body: pr.body ?? "",
-      labels: pr.labels.map((l) =>
-        typeof l === "string" ? l : (l.name ?? ""),
-      ),
+      labels: pr.labels.map((l) => (typeof l === "string" ? l : (l.name ?? ""))),
     };
   }
 

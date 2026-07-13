@@ -120,14 +120,11 @@ export class WildwoodSourceControlProvider implements vscode.QuickDiffProvider {
       this._configRefChangesGroup.label = `Changes compared to ${this._fs.getConfigRef()}`;
       this._conflictsGroup.label = `Conflicts with ${this._fs.getConfigRef()}`;
 
-      this._workingChangesGroup.resourceStates = state.workingChanges.map(
-        (c) =>
-          this.toResourceState(c, rootUri, "working", state.commitTreeOid),
+      this._workingChangesGroup.resourceStates = state.workingChanges.map((c) =>
+        this.toResourceState(c, rootUri, "working", state.commitTreeOid),
       );
 
-      const conflictByPath = new Map(
-        state.conflicts.map((c) => [c.path, c.message]),
-      );
+      const conflictByPath = new Map(state.conflicts.map((c) => [c.path, c.message]));
       const { configRefTreeOid, mergeBaseTreeOid } = state;
       this._configRefChangesGroup.resourceStates = configRefTreeOid
         ? state.configRefChanges.map((c) => {
@@ -225,9 +222,7 @@ export class WildwoodSourceControlProvider implements vscode.QuickDiffProvider {
         },
       );
       this._sourceControl.inputBox.value = "";
-      vscode.window.showInformationMessage(
-        `Committed and pushed: "${message}"`,
-      );
+      vscode.window.showInformationMessage(`Committed and pushed: "${message}"`);
       await this.refresh();
     } catch (error) {
       vscode.window.showErrorMessage(
@@ -296,9 +291,7 @@ export class WildwoodSourceControlProvider implements vscode.QuickDiffProvider {
     const configRef = this._fs.getConfigRef();
     const currentRef = this._fs.getCurrentRef();
     if (currentRef === configRef) {
-      vscode.window.showWarningMessage(
-        `Already on ${configRef}. Use "Commit" instead.`,
-      );
+      vscode.window.showWarningMessage(`Already on ${configRef}. Use "Commit" instead.`);
       return;
     }
 
@@ -391,9 +384,7 @@ export class WildwoodSourceControlProvider implements vscode.QuickDiffProvider {
     const configRef = this._fs.getConfigRef();
     const currentRef = this._fs.getCurrentRef();
     if (currentRef === configRef) {
-      vscode.window.showWarningMessage(
-        `Already on ${configRef}. Nothing to merge.`,
-      );
+      vscode.window.showWarningMessage(`Already on ${configRef}. Nothing to merge.`);
       return;
     }
 
@@ -442,8 +433,7 @@ export class WildwoodSourceControlProvider implements vscode.QuickDiffProvider {
           try {
             await this.pushIfSupported();
           } catch (pushError) {
-            const msg =
-              pushError instanceof Error ? pushError.message : String(pushError);
+            const msg = pushError instanceof Error ? pushError.message : String(pushError);
             if (msg.includes("No unpushed commits found")) {
               // Branch may already be on remote (e.g. scenario or previous push); try creating PR anyway.
             } else {
@@ -528,9 +518,7 @@ export class WildwoodSourceControlProvider implements vscode.QuickDiffProvider {
       );
       this._sourceControl.inputBox.value = "";
       await this.refresh();
-      vscode.window.showInformationMessage(
-        `Pulled latest changes for ${currentRef}`,
-      );
+      vscode.window.showInformationMessage(`Pulled latest changes for ${currentRef}`);
     } catch (error) {
       vscode.window.showErrorMessage(
         `Pull failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -617,9 +605,7 @@ export class WildwoodSourceControlProvider implements vscode.QuickDiffProvider {
         ? `Merge committed changes to ${configRef}`
         : `Skip commit: Create PR / Merge to ${configRef}`,
     } satisfies vscode.Command;
-    const secondaryMenuCommands = this._hasUncommittedChanges
-      ? []
-      : [skipCommitAction];
+    const secondaryMenuCommands = this._hasUncommittedChanges ? [] : [skipCommitAction];
     sc.actionButton = {
       command: primaryAction,
       enabled: true,
@@ -700,14 +686,10 @@ export class WildwoodSourceControlProvider implements vscode.QuickDiffProvider {
             ? "Deleted"
             : "Modified",
       light: {
-        iconPath: isConflict
-          ? new vscode.ThemeIcon("warning")
-          : this.iconForStatus(change.status),
+        iconPath: isConflict ? new vscode.ThemeIcon("warning") : this.iconForStatus(change.status),
       },
       dark: {
-        iconPath: isConflict
-          ? new vscode.ThemeIcon("warning")
-          : this.iconForStatus(change.status),
+        iconPath: isConflict ? new vscode.ThemeIcon("warning") : this.iconForStatus(change.status),
       },
     };
 
@@ -808,19 +790,14 @@ export class WildwoodSourceControlProvider implements vscode.QuickDiffProvider {
   }
 
   private logRemoteCapabilitySkip(operation: string, error: unknown): void {
-    console.warn(
-      `[Wildwood SCM] Skipping unsupported remote operation "${operation}"`,
-      error,
-    );
+    console.warn(`[Wildwood SCM] Skipping unsupported remote operation "${operation}"`, error);
   }
 
   private isRemoteCapabilityError(error: unknown): boolean {
     return (
       this.isPrUnsupportedError(error) ||
       (error instanceof Error &&
-        error.message
-          .toLowerCase()
-          .includes("not implemented for nativeremote"))
+        error.message.toLowerCase().includes("not implemented for nativeremote"))
     );
   }
 }

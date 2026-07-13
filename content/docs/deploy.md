@@ -103,7 +103,7 @@ createWildwoodRoute(() => wildwood, {
 
 No `WILDWOOD_DOCS_DATABASE_URL` / `LIBSQL_URL` / `WILDWOOD_GITHUB_*` fallback cascade, no `database:` in auth config, no `GITHUB_TOKEN` fallback inside core. Host maps `TURSO_*` + `GITHUB_*` once in `lib/wildwood.ts` / App manifest conversion.
 
-## 3 — Zero-config identity (no WILDWOOD_* needed on Vercel)
+## 3 — Zero-config identity (no WILDWOOD\_\* needed on Vercel)
 
 When you enable System Environment Variables (Settings → Environment Variables → **Enable access to System Environment Variables**), Wildwood needs no custom env for `org`/`repo`/`ref`/`origin`:
 
@@ -253,7 +253,6 @@ WILDWOOD_DOCS_REPO_PATH=/abs/to/repo
 ```
 
 Minimal viable prod: System Envs + `vercel integration add tursocloud/database`. Read-only works with no custom env. Editor = GitHub App 5-var set (`GITHUB_APP_ID`, `PRIVATE_KEY`, `CLIENT_ID`, `CLIENT_SECRET`, `APP_SLUG`). Auth = `BETTER_AUTH_SECRET` + `authenticate` callback; `baseURL`/`trustedOrigins` omitted → autodetected from Request, no `NEXT_PUBLIC_ORIGIN` / `BETTER_AUTH_TRUSTED_ORIGINS` needed.
-
 
 ## Route factory & toolbar (unchanged)
 

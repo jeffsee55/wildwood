@@ -91,7 +91,9 @@ export const loadPlaygroundScenario = async (args: {
   };
 };
 
-export const parsePlaygroundScenarioArgs = (argv: string[]): {
+export const parsePlaygroundScenarioArgs = (
+  argv: string[],
+): {
   remote: PlaygroundRemote;
   scenario: PlaygroundScenarioName;
 } => {
@@ -118,8 +120,7 @@ export const parsePlaygroundScenarioArgs = (argv: string[]): {
     );
   }
 
-  const scenarioArg =
-    keyValues.get("scenario") || "feature-branch-with-changes-since-main";
+  const scenarioArg = keyValues.get("scenario") || "feature-branch-with-changes-since-main";
   const scenarioNames = getPlaygroundScenarioNames();
   if (!scenarioNames.includes(scenarioArg as PlaygroundScenarioName)) {
     throw new Error(

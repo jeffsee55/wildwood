@@ -38,11 +38,9 @@ export const WILDWOOD_ACTIVE_REF_COOKIE = "wildwood-active-ref";
 export const TR33_ACTIVE_REF_COOKIE = WILDWOOD_ACTIVE_REF_COOKIE;
 
 // Header that gates whether the worktree API may set the cookie.
-export const WILDWOOD_SYNC_HOST_ACTIVE_REF_HEADER =
-  "x-wildwood-sync-host-active-ref";
+export const WILDWOOD_SYNC_HOST_ACTIVE_REF_HEADER = "x-wildwood-sync-host-active-ref";
 /** @deprecated use WILDWOOD_SYNC_HOST_ACTIVE_REF_HEADER */
-export const TR33_SYNC_HOST_ACTIVE_REF_HEADER =
-  WILDWOOD_SYNC_HOST_ACTIVE_REF_HEADER;
+export const TR33_SYNC_HOST_ACTIVE_REF_HEADER = WILDWOOD_SYNC_HOST_ACTIVE_REF_HEADER;
 
 // localStorage key (same-origin) for the active ref in embedded editor.
 export const WILDWOOD_ACTIVE_REF_STORAGE_KEY = "wildwood.activeRef";
@@ -73,14 +71,11 @@ export const WILDWOOD_KIT_HOST_REF_CHANNEL = "wildwood-kit-host-ref";
 export const TR33_KIT_HOST_REF_CHANNEL = WILDWOOD_KIT_HOST_REF_CHANNEL;
 
 // Extension host -> Kit page (ref changed / workspace changed).
-export const WILDWOOD_EXTENSION_TO_HOST_REF_CHANNEL =
-  "wildwood-extension-to-host";
+export const WILDWOOD_EXTENSION_TO_HOST_REF_CHANNEL = "wildwood-extension-to-host";
 /** @deprecated */
-export const TR33_EXTENSION_TO_HOST_REF_CHANNEL =
-  WILDWOOD_EXTENSION_TO_HOST_REF_CHANNEL;
+export const TR33_EXTENSION_TO_HOST_REF_CHANNEL = WILDWOOD_EXTENSION_TO_HOST_REF_CHANNEL;
 
-export const WILDWOOD_EXTENSION_WORKSPACE_CHANGED_CHANNEL =
-  "wildwood-extension-workspace-changed";
+export const WILDWOOD_EXTENSION_WORKSPACE_CHANGED_CHANNEL = "wildwood-extension-workspace-changed";
 /** @deprecated */
 export const TR33_EXTENSION_WORKSPACE_CHANGED_CHANNEL =
   WILDWOOD_EXTENSION_WORKSPACE_CHANGED_CHANNEL;
@@ -92,11 +87,9 @@ export const TR33_KIT_CLOSE_MESSAGE = WILDWOOD_KIT_CLOSE_MESSAGE;
 export const WILDWOOD_KIT_BRANCH_CHANGED_MESSAGE = "wildwood-kit-branch-changed";
 /** @deprecated */
 export const TR33_KIT_BRANCH_CHANGED_MESSAGE = WILDWOOD_KIT_BRANCH_CHANGED_MESSAGE;
-export const WILDWOOD_KIT_WORKSPACE_CHANGED_MESSAGE =
-  "wildwood-kit-workspace-changed";
+export const WILDWOOD_KIT_WORKSPACE_CHANGED_MESSAGE = "wildwood-kit-workspace-changed";
 /** @deprecated */
-export const TR33_KIT_WORKSPACE_CHANGED_MESSAGE =
-  WILDWOOD_KIT_WORKSPACE_CHANGED_MESSAGE;
+export const TR33_KIT_WORKSPACE_CHANGED_MESSAGE = WILDWOOD_KIT_WORKSPACE_CHANGED_MESSAGE;
 
 // ---- branch name generator ----------------------------------------------
 
@@ -144,8 +137,7 @@ export const BRANCH_CITIES = [
 ] as const;
 
 export function generateBranchName(): string {
-  const city =
-    BRANCH_CITIES[Math.floor(Math.random() * BRANCH_CITIES.length)]!;
+  const city = BRANCH_CITIES[Math.floor(Math.random() * BRANCH_CITIES.length)]!;
   const suffix = Math.random().toString(36).slice(2, 6);
   return `${city}-${suffix}`;
 }
@@ -158,18 +150,13 @@ export function activeRefSetCookieHeader(
   return `${cookieName}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${ACTIVE_REF_MAX_AGE_SEC}`;
 }
 
-export function clearBranchCookieHeader(
-  cookieName: string = WILDWOOD_BRANCH_COOKIE,
-): string {
+export function clearBranchCookieHeader(cookieName: string = WILDWOOD_BRANCH_COOKIE): string {
   return `${cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
 }
 
 /** All cookie names that should be cleared when exiting preview. */
 export function allBranchCookieNames(): string[] {
-  return [
-    WILDWOOD_BRANCH_COOKIE,
-    ...WILDWOOD_BRANCH_COOKIE_FALLBACKS,
-  ];
+  return [WILDWOOD_BRANCH_COOKIE, ...WILDWOOD_BRANCH_COOKIE_FALLBACKS];
 }
 
 export function branchCookieOptions(ref: string, cookieName = WILDWOOD_BRANCH_COOKIE) {

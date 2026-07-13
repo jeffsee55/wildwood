@@ -78,7 +78,10 @@ const BASE_CSS = `
   .tab[aria-selected=true]{color:#111;border-bottom-color:#111}
 `;
 
-function mergeIntoHeaders(target: Headers, source: HeadersInit | Record<string, string | string[]> | undefined) {
+function mergeIntoHeaders(
+  target: Headers,
+  source: HeadersInit | Record<string, string | string[]> | undefined,
+) {
   if (!source) return;
   if (source instanceof Headers) {
     source.forEach((value, key) => {
@@ -153,12 +156,28 @@ function setStateCookieHeader(state: string, secure: boolean): string {
 }
 
 function clearStateCookieHeader(secure: boolean): string {
-  const attrs = [`${STATE_COOKIE}=`, "Path=/", "Max-Age=0", "HttpOnly", "SameSite=Lax", "Expires=Thu, 01 Jan 1970 00:00:00 GMT"];
+  const attrs = [
+    `${STATE_COOKIE}=`,
+    "Path=/",
+    "Max-Age=0",
+    "HttpOnly",
+    "SameSite=Lax",
+    "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+  ];
   if (secure) attrs.push("Secure");
   return attrs.join("; ");
 }
 
-function setPendingAppCookieHeader(payload: { slug?: string; installUrl?: string; appId?: number | string | null; htmlUrl?: string; repo?: string }, secure: boolean): string {
+function setPendingAppCookieHeader(
+  payload: {
+    slug?: string;
+    installUrl?: string;
+    appId?: number | string | null;
+    htmlUrl?: string;
+    repo?: string;
+  },
+  secure: boolean,
+): string {
   // Non-HttpOnly so JS tab can read it. No private key in here.
   const json = JSON.stringify({ ...payload, at: Date.now() });
   const attrs = [
@@ -172,7 +191,13 @@ function setPendingAppCookieHeader(payload: { slug?: string; installUrl?: string
 }
 
 function clearPendingCookieHeader(secure: boolean): string {
-  const attrs = [`${PENDING_COOKIE}=`, "Path=/", `Max-Age=0`, "SameSite=Lax", "Expires=Thu, 01 Jan 1970 00:00:00 GMT"];
+  const attrs = [
+    `${PENDING_COOKIE}=`,
+    "Path=/",
+    `Max-Age=0`,
+    "SameSite=Lax",
+    "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+  ];
   if (secure) attrs.push("Secure");
   return attrs.join("; ");
 }
@@ -193,7 +218,11 @@ function appendSetCookie(headers: Headers, value: string) {
 }
 
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 type StartBody = {
@@ -216,16 +245,25 @@ export function createGitHubAppManifestRouter(
 ): H3 {
   const router = new H3();
 
-  function resolveOrigin(event: { url: URL; req: { headers: { get(n: string): string | null } } }): string {
+  function resolveOrigin(event: {
+    url: URL;
+    req: { headers: { get(n: string): string | null } };
+  }): string {
     return resolveEventOrigin(event);
   }
 
   /** Prefer explicit user config, then Vercel prod host, then request origin — in that order. */
-  function resolveCanonicalOrigin(event: { url: URL; req: { headers: { get(n: string): string | null } } }): string {
+  function resolveCanonicalOrigin(event: {
+    url: URL;
+    req: { headers: { get(n: string): string | null } };
+  }): string {
     const configured = (process.env.WILDWOOD_ORIGIN ?? process.env.NEXT_PUBLIC_ORIGIN ?? "").trim();
     if (configured) return configured.replace(/\/+$/, "");
 
-    const prodHost = (process.env.VERCEL_PROJECT_PRODUCTION_URL ?? "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    const prodHost = (process.env.VERCEL_PROJECT_PRODUCTION_URL ?? "")
+      .trim()
+      .replace(/^https?:\/\//, "")
+      .replace(/\/+$/, "");
     if (prodHost) return `https://${prodHost}`;
 
     return resolveOrigin(event).replace(/\/+$/, "");
@@ -236,7 +274,10 @@ export function createGitHubAppManifestRouter(
     return "/api/wildwood/github/app-manifest/callback";
   }
 
-  function defaultOrigin(event: { url: URL; req: { headers: { get(n: string): string | null } } }): string {
+  function defaultOrigin(event: {
+    url: URL;
+    req: { headers: { get(n: string): string | null } };
+  }): string {
     const o = resolveOrigin(event);
     return o.replace(/\/+$/, "");
   }
@@ -266,7 +307,10 @@ export function createGitHubAppManifestRouter(
     const origin = resolveCanonicalOrigin(event);
     const redirectPath = defaultRedirectPath();
     const redirectUrl = buildCallbackUrl(origin);
-    const isUsingFallbackOrigin = !process.env.WILDWOOD_ORIGIN && !process.env.NEXT_PUBLIC_ORIGIN && !process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    const isUsingFallbackOrigin =
+      !process.env.WILDWOOD_ORIGIN &&
+      !process.env.NEXT_PUBLIC_ORIGIN &&
+      !process.env.VERCEL_PROJECT_PRODUCTION_URL;
     const manifest = buildWildwoodGitHubAppManifest({
       name: `Wildwood ${client._.git?.config?.repo ?? "Dev"}`,
       url: origin,
@@ -299,8 +343,10 @@ export function createGitHubAppManifestRouter(
             name: String(form.get("name") ?? "").trim() || undefined,
             origin: String(form.get("origin") ?? "").trim() || undefined,
             redirectPath: String(form.get("redirectPath") ?? "").trim() || undefined,
-            contents: (String(form.get("contents") ?? "").trim() as GitHubPermissionLevel) || undefined,
-            pullRequests: (String(form.get("pullRequests") ?? "").trim() as GitHubPermissionLevel) || undefined,
+            contents:
+              (String(form.get("contents") ?? "").trim() as GitHubPermissionLevel) || undefined,
+            pullRequests:
+              (String(form.get("pullRequests") ?? "").trim() as GitHubPermissionLevel) || undefined,
           };
         }
       }
@@ -312,7 +358,7 @@ export function createGitHubAppManifestRouter(
     const canonical = resolveCanonicalOrigin(event);
     const origin = (body.origin?.trim() || canonical || originFromReq).replace(/\/+$/, "");
     const redirectPath = (body.redirectPath?.trim() || defaultRedirectPath()).startsWith("/")
-      ? (body.redirectPath?.trim() || defaultRedirectPath())
+      ? body.redirectPath?.trim() || defaultRedirectPath()
       : `/${(body.redirectPath?.trim() || defaultRedirectPath()).replace(/^\/+/, "")}`;
     const redirectUrl = buildCallbackUrl(origin);
     const oauthCallbackPath = body.oauthCallbackPath?.trim() || "/api/auth/callback/github";
@@ -326,7 +372,9 @@ export function createGitHubAppManifestRouter(
       name,
       url: origin,
       redirectUrl,
-      callbackUrls: [`${origin}${oauthCallbackPath.startsWith("/") ? oauthCallbackPath : `/${oauthCallbackPath}`}`],
+      callbackUrls: [
+        `${origin}${oauthCallbackPath.startsWith("/") ? oauthCallbackPath : `/${oauthCallbackPath}`}`,
+      ],
       webhookUrl: webhookUrl || undefined,
       webhookActive: body.webhookActive ?? true,
       defaultPermissions: {
@@ -411,8 +459,13 @@ export function createGitHubAppManifestRouter(
     const vercelSnippets = vercelEnvAddSnippets(env);
     const exportSnippets = shellExportSnippets(env);
     const dotEnv = formatEnvFileContent(env);
-    const appHtmlUrl = conversion.html_url ?? (conversion.slug ? `https://github.com/settings/apps/${encodeURIComponent(conversion.slug)}` : "");
-    const repoFull = `${client._.git?.config?.org ?? ""}/${client._.git?.config?.repo ?? ""}`.replace(/^\//, "");
+    const appHtmlUrl =
+      conversion.html_url ??
+      (conversion.slug
+        ? `https://github.com/settings/apps/${encodeURIComponent(conversion.slug)}`
+        : "");
+    const repoFull =
+      `${client._.git?.config?.org ?? ""}/${client._.git?.config?.repo ?? ""}`.replace(/^\//, "");
     // Repo-scoped install link — encodes repo in ?state so the UI can guide "Only select repositories → {repo}".
     // Also provide direct repo settings link for one-click when user owns the repo.
     const installUrl = conversion.slug
@@ -420,8 +473,11 @@ export function createGitHubAppManifestRouter(
         ? `https://github.com/apps/${encodeURIComponent(conversion.slug)}/installations/new?state=${encodeURIComponent(repoFull)}`
         : `https://github.com/apps/${encodeURIComponent(conversion.slug)}/installations/new`
       : "";
-    const directRepoInstallUrl = repoFull.includes("/") ? `https://github.com/${repoFull}/settings/installs` : "";
-    const suggestedInstallHint = repoFull && repoFull.includes("/") ? repoFull : client._.git?.config?.repo ?? "your repo";
+    const directRepoInstallUrl = repoFull.includes("/")
+      ? `https://github.com/${repoFull}/settings/installs`
+      : "";
+    const suggestedInstallHint =
+      repoFull && repoFull.includes("/") ? repoFull : (client._.git?.config?.repo ?? "your repo");
     // Single credential set: the GitHub App IS the OAuth app. Conversion returns client_id/client_secret
     // which double as OAuth creds for sign-in. No second OAuth App needed.
     const _publicEnvKeys = [
@@ -448,7 +504,12 @@ export function createGitHubAppManifestRouter(
       return jsonResponse(
         {
           ok: true,
-          conversion: { id: conversion.id, slug: conversion.slug, html_url: conversion.html_url, client_id: conversion.client_id },
+          conversion: {
+            id: conversion.id,
+            slug: conversion.slug,
+            html_url: conversion.html_url,
+            client_id: conversion.client_id,
+          },
           env,
           installUrl,
           htmlUrl: appHtmlUrl,
@@ -576,7 +637,7 @@ export function createGitHubAppManifestRouter(
     <span class="pill" id="pill-step-1" data-active="true" style="cursor:default">Step 1: Save credentials</span>
     <span class="muted">→</span>
     <span class="pill" id="pill-step-2" data-active="false" style="cursor:default">Step 2: Install on repo</span>
-    ${stateValid===false ? '<span class="pill" style="border-color:#f59e0b;color:#92400e">state mismatch (ignored)</span>' : ''}
+    ${stateValid === false ? '<span class="pill" style="border-color:#f59e0b;color:#92400e">state mismatch (ignored)</span>' : ""}
   </div>
   <style>
     #pill-step-1[data-active=true],#pill-step-2[data-active=true]{border-color:#111;background:#111;color:#fff}
@@ -678,7 +739,10 @@ ${stepScript}
       if (raw) parsed = JSON.parse(raw);
     } catch {}
     // Accept query as well for debugging: ?slug=&installUrl=
-    const slug = event.url.searchParams.get("slug")?.trim() || (parsed as { slug?: string } | null)?.slug || undefined;
+    const slug =
+      event.url.searchParams.get("slug")?.trim() ||
+      (parsed as { slug?: string } | null)?.slug ||
+      undefined;
     const installUrl =
       event.url.searchParams.get("installUrl")?.trim() ||
       (parsed as { installUrl?: string } | null)?.installUrl ||
@@ -699,7 +763,10 @@ ${stepScript}
   router.post("/pending/clear", async (event) => {
     const origin = defaultOrigin(event);
     const secure = origin.startsWith("https://");
-    return jsonResponse({ ok: true }, { headers: { "Set-Cookie": clearPendingCookieHeader(secure) } });
+    return jsonResponse(
+      { ok: true },
+      { headers: { "Set-Cookie": clearPendingCookieHeader(secure) } },
+    );
   });
 
   // ── GET /installation — thin proxy: check installation for current repo ───────
@@ -710,7 +777,10 @@ ${stepScript}
       const { GitHubRemote: GR } = await import("@/git/remote/github");
       const remote = client._.git.remote as unknown;
       if (!(remote instanceof GR)) {
-        return jsonResponse({ status: "not_configured", repo: `${client._.git.config.org}/${client._.git.config.repo}` });
+        return jsonResponse({
+          status: "not_configured",
+          repo: `${client._.git.config.org}/${client._.git.config.repo}`,
+        });
       }
       const inst = await (remote as InstanceType<typeof GR>).getRepoInstallationStatus();
       const slug = process.env.GITHUB_APP_SLUG?.trim();
@@ -718,16 +788,30 @@ ${stepScript}
       if (inst.status === "installed") {
         // Avoid duplicate `status` key from spread — `inst` carries `status: "installed"` and `installationId`.
         const { status: _ignored, ...rest } = inst as { status: string; installationId: number };
-        return jsonResponse({ status: "installed", ...rest, repo, installationId: (inst as { installationId: number }).installationId });
+        return jsonResponse({
+          status: "installed",
+          ...rest,
+          repo,
+          installationId: (inst as { installationId: number }).installationId,
+        });
       }
       return jsonResponse({
         status: inst.status,
         repo,
-        installUrl: inst.status === "not_installed" && slug ? `https://github.com/apps/${slug}/installations/new` : undefined,
-        hint: inst.status === "not_installed" ? `Install the GitHub App on ${repo}. Choose "Only select repositories" and pick ${client._.git.config.repo}.` : undefined,
+        installUrl:
+          inst.status === "not_installed" && slug
+            ? `https://github.com/apps/${slug}/installations/new`
+            : undefined,
+        hint:
+          inst.status === "not_installed"
+            ? `Install the GitHub App on ${repo}. Choose "Only select repositories" and pick ${client._.git.config.repo}.`
+            : undefined,
       });
     } catch (e) {
-      return jsonResponse({ status: "error", message: e instanceof Error ? e.message : String(e) }, { status: 500 });
+      return jsonResponse(
+        { status: "error", message: e instanceof Error ? e.message : String(e) },
+        { status: 500 },
+      );
     }
   });
 
@@ -766,19 +850,41 @@ ${stepScript}
       const env = manifestConversionToEnv(conversion) as Record<string, string>;
       const origin = defaultOrigin(event);
       const secure = origin.startsWith("https://");
-      const repoFull2 = `${client._.git?.config?.org ?? ""}/${client._.git?.config?.repo ?? ""}`.replace(/^\//, "");
-      const appHtmlUrl2 = conversion.html_url ?? (conversion.slug ? `https://github.com/settings/apps/${encodeURIComponent(conversion.slug)}` : "");
+      const repoFull2 =
+        `${client._.git?.config?.org ?? ""}/${client._.git?.config?.repo ?? ""}`.replace(/^\//, "");
+      const appHtmlUrl2 =
+        conversion.html_url ??
+        (conversion.slug
+          ? `https://github.com/settings/apps/${encodeURIComponent(conversion.slug)}`
+          : "");
       const installUrl2 = conversion.slug
         ? repoFull2.includes("/")
           ? `https://github.com/apps/${encodeURIComponent(conversion.slug)}/installations/new?state=${encodeURIComponent(repoFull2)}`
           : `https://github.com/apps/${encodeURIComponent(conversion.slug)}/installations/new`
         : undefined;
       const headers = new Headers();
-      headers.set("Set-Cookie", setPendingAppCookieHeader({ slug: conversion.slug, installUrl: installUrl2, htmlUrl: appHtmlUrl2, appId: conversion.id, repo: repoFull2 || undefined }, secure));
+      headers.set(
+        "Set-Cookie",
+        setPendingAppCookieHeader(
+          {
+            slug: conversion.slug,
+            installUrl: installUrl2,
+            htmlUrl: appHtmlUrl2,
+            appId: conversion.id,
+            repo: repoFull2 || undefined,
+          },
+          secure,
+        ),
+      );
       return jsonResponse(
         {
           ok: true,
-          conversion: { id: conversion.id, slug: conversion.slug, html_url: conversion.html_url, client_id: conversion.client_id },
+          conversion: {
+            id: conversion.id,
+            slug: conversion.slug,
+            html_url: conversion.html_url,
+            client_id: conversion.client_id,
+          },
           env,
           installUrl: installUrl2,
           htmlUrl: appHtmlUrl2,
@@ -786,7 +892,10 @@ ${stepScript}
         { headers },
       );
     } catch (err) {
-      return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+      return jsonResponse(
+        { error: err instanceof Error ? err.message : String(err) },
+        { status: 500 },
+      );
     }
   });
 
@@ -807,10 +916,15 @@ ${stepScript}
     try {
       const ct = event.req.headers.get("content-type") ?? "";
       if (ct.includes("application/json")) {
-        const j = (await event.req.json()) as { env?: Record<string, string>; payload?: string | Record<string, string> };
+        const j = (await event.req.json()) as {
+          env?: Record<string, string>;
+          payload?: string | Record<string, string>;
+        };
         if (j.env && typeof j.env === "object") envMap = j.env as Record<string, string>;
-        else if (typeof j.payload === "string") envMap = JSON.parse(j.payload) as Record<string, string>;
-        else if (j.payload && typeof j.payload === "object") envMap = j.payload as Record<string, string>;
+        else if (typeof j.payload === "string")
+          envMap = JSON.parse(j.payload) as Record<string, string>;
+        else if (j.payload && typeof j.payload === "object")
+          envMap = j.payload as Record<string, string>;
       } else {
         const form = await event.req.formData().catch(() => null);
         if (form) {
@@ -825,7 +939,14 @@ ${stepScript}
           if (!envMap) {
             // allow individual fields
             const candidate: Record<string, string> = {};
-            for (const k of ["GITHUB_APP_ID", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_PRIVATE_KEY", "GITHUB_APP_SLUG", "GITHUB_WEBHOOK_SECRET"]) {
+            for (const k of [
+              "GITHUB_APP_ID",
+              "GITHUB_CLIENT_ID",
+              "GITHUB_CLIENT_SECRET",
+              "GITHUB_PRIVATE_KEY",
+              "GITHUB_APP_SLUG",
+              "GITHUB_WEBHOOK_SECRET",
+            ]) {
               const v = form.get(k);
               if (typeof v === "string" && v) candidate[k] = v;
             }
@@ -838,9 +959,12 @@ ${stepScript}
     }
 
     if (!envMap || !envMap.GITHUB_APP_ID || !envMap.GITHUB_PRIVATE_KEY) {
-      return htmlResponse(`<div class="card"><h1>Missing env</h1><p>Provide JSON payload with at least GITHUB_APP_ID and GITHUB_PRIVATE_KEY.</p></div>`, {
-        status: 400,
-      });
+      return htmlResponse(
+        `<div class="card"><h1>Missing env</h1><p>Provide JSON payload with at least GITHUB_APP_ID and GITHUB_PRIVATE_KEY.</p></div>`,
+        {
+          status: 400,
+        },
+      );
     }
 
     // Dynamic import for Node-only fs usage — keep bundlers happy.
@@ -852,7 +976,8 @@ ${stepScript}
     try {
       current = await fs.readFile(envPath, "utf8");
     } catch (e) {
-      if (!(e instanceof Error) || !("code" in e) || (e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      if (!(e instanceof Error) || !("code" in e) || (e as NodeJS.ErrnoException).code !== "ENOENT")
+        throw e;
     }
 
     function q(v: string) {
@@ -884,7 +1009,11 @@ ${stepScript}
     }
 
     return htmlResponse(
-      `<div class="card"><h1>Wrote ${escapeHtml(envPath)}</h1><p>Wrote: ${Object.keys(envMap).map((k) => `<code>${escapeHtml(k)}</code>`).join(", ")}</p><p class="muted">Restart your dev server so env vars reload.</p><p><a class="btn btn-secondary" href="/">Back</a></p></div>`,
+      `<div class="card"><h1>Wrote ${escapeHtml(envPath)}</h1><p>Wrote: ${Object.keys(envMap)
+        .map((k) => `<code>${escapeHtml(k)}</code>`)
+        .join(
+          ", ",
+        )}</p><p class="muted">Restart your dev server so env vars reload.</p><p><a class="btn btn-secondary" href="/">Back</a></p></div>`,
     );
   });
 

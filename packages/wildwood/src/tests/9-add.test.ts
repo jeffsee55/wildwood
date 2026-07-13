@@ -10,8 +10,7 @@ describe("queries", () => {
     await t.helper.resetRepo();
 
     const initialFiles = {
-      "content/docs/getting-started.md":
-        "---\ntitle: Getting Started\n---\n\n# Getting Started",
+      "content/docs/getting-started.md": "---\ntitle: Getting Started\n---\n\n# Getting Started",
     };
     await t.helper.addFilesAndCommit(initialFiles, "Initial commit");
   });

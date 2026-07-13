@@ -56,7 +56,8 @@ export function createHandler(client: WildwoodClient, options?: CreateHandlerOpt
 
   base.use(async (event, next) => {
     const pathname = event.url.pathname;
-    const isVscodeApi = pathname.startsWith("/api/vscode/") || pathname.startsWith("/api/wildwood/vscode/");
+    const isVscodeApi =
+      pathname.startsWith("/api/vscode/") || pathname.startsWith("/api/wildwood/vscode/");
     const origin = event.req.headers.get("origin");
     const corsHeaders: Record<string, string> = isVscodeApi
       ? (vscodeEmbedCorsHeaders(event.req) as Record<string, string>)
@@ -69,7 +70,8 @@ export function createHandler(client: WildwoodClient, options?: CreateHandlerOpt
           Vary: "Origin",
         };
 
-    if (event.req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
+    if (event.req.method === "OPTIONS")
+      return new Response(null, { status: 204, headers: corsHeaders });
     const res = await next();
     if (res instanceof Response && isVscodeApi) return withVscodeEmbedCors(event.req, res);
     if (res instanceof Response) {

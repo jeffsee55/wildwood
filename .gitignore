@@ -1,55 +1,53 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # Dependencies
 node_modules
 .pnp
 .pnp.js
 
-# Local env files
+# Env
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+.env*.local
 
-# Testing
-coverage
-
-# Turbo
+# Turborepo
 .turbo
 
 # Vercel
 .vercel
 
-# Build Outputs
+# Build outputs
 .next/
 out/
 build
 dist
+bundled-extension
+*.tsbuildinfo
+next-env.d.ts
 
+# Databases
+wildwood.db
+wildwood-docs.db
+tr33.db
+tr33-docs.db
+**/wildwood.db
+**/wildwood-docs.db
+drizzle
 
-# Debug
+# Caches & derived
+.wildwood-cache/
+.tr33-cache/
+coverage
+
+# Vendor / heavy generated
+packages/wildwood/vendor/
+packages/kit/src/vscode-web/dist/
+
+# OS / misc
+.DS_Store
+*.pem
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# Misc
-.DS_Store
-*.pem
-
-# Drizzle
-# The auto generated files from drizzle migrations, we don't want to commit these because they we don't plan to expose them as part of the project
-drizzle
-.env*.local
-
-wildwood.db
-packages/wildwood/vendor/
-.wildwood-cache/
-# Legacy cache dir names (safe to delete locally)
-.tr33-cache/
-.tr33-cache/
-tsconfig.tsbuildinfo
-# Legacy DBs
-tr33.db
-
-**/wildwood-docs.db
+.pnpm-debug.log*

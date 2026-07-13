@@ -39,9 +39,7 @@ describe("git", () => {
         schema: z.markdown({
           title: z.filter(z.string()),
           category: z.filter(z.string()).optional(),
-          author: z.lazy(() =>
-            z.connect(author, { referencedAs: "pagesAuthored" }),
-          ),
+          author: z.lazy(() => z.connect(author, { referencedAs: "pagesAuthored" })),
         }),
         match: "**/*.md",
       });
@@ -68,9 +66,7 @@ describe("git", () => {
       const result = await (
         client as unknown as {
           page: {
-            findMany: (
-              opts: object,
-            ) => Promise<{ items: Array<{ title: string }> }>;
+            findMany: (opts: object) => Promise<{ items: Array<{ title: string }> }>;
           };
         }
       ).page.findMany({

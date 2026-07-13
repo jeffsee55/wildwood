@@ -52,7 +52,8 @@ async function tryGetFullBytesFromGen(): Promise<Uint8Array | null> {
   if (!cachedGen) {
     try {
       // Dynamic import avoids static binding to a missing export.
-      const mod = (await import("@/nextjs/bundled-extension-bytes.gen")) as unknown as MaybeFullExports;
+      const mod =
+        (await import("@/nextjs/bundled-extension-bytes.gen")) as unknown as MaybeFullExports;
       cachedGen = mod;
     } catch {
       cachedGen = {} as MaybeFullExports; // mark as tried
@@ -94,9 +95,7 @@ export function extensionAssetContentType(asset: string): string | undefined {
 }
 
 /** Read a wildwood-vscode asset; built-ins are embedded at build time for serverless. */
-export async function readBundledExtensionAsset(
-  asset: string,
-): Promise<Uint8Array | null> {
+export async function readBundledExtensionAsset(asset: string): Promise<Uint8Array | null> {
   const assetPath = String(asset);
   const cached = assetCache.get(assetPath);
   if (cached) {

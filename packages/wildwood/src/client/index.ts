@@ -126,7 +126,9 @@ export const createClient = <Colls extends AnyCollections = AnyCollections>(
 
   if (config) {
     // Config.collections is array of collection metas (not record) in real class.
-    const colls = config.collections as unknown as Array<{ name: string }> | Record<string, { name: string }>;
+    const colls = config.collections as unknown as
+      | Array<{ name: string }>
+      | Record<string, { name: string }>;
     const list: Array<{ name: string }> = Array.isArray(colls) ? colls : Object.values(colls ?? {});
     for (const col of list) {
       if (!col?.name) continue;

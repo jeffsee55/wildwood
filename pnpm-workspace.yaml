@@ -1,8 +1,12 @@
 packages:
-  - 'apps/*'
-  - 'packages/*'
+  - "apps/*"
+  - "packages/*"
 
 catalog:
   drizzle-kit: 1.0.0-beta.20
   drizzle-orm: 1.0.0-beta.20
   neverthrow: 8.1.1
+
+# Files intentionally NOT ignored by oxlint/oxfmt via their own ignorePatterns:
+#   - .next, dist, .turbo etc are in .oxlintrc.json / .oxfmtrc.json ignorePatterns
+#     so pnpm's own --ignore patterns are not duplicated here.

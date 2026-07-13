@@ -31,9 +31,13 @@ const nav = z.collection({
 });
 
 const config = defineConfig({
-  version: "1", collections: {
-   authors, docs, nav
-} });
+  version: "1",
+  collections: {
+    authors,
+    docs,
+    nav,
+  },
+});
 
 const database = createLibsqlClient({
   url: process.env.TURSO_DATABASE_URL || "file:./wildwood-docs.db",

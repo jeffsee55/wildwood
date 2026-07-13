@@ -20,11 +20,12 @@ export const variant = <T extends z.ZodType>(schema: T) => {
 // object shape via `CollectionParams["schema"] extends ZodCodec<..., ZodObject<infer S>>`
 // which is stable through `const` generics.
 
-type InferObjectShapeFromCodec<C> = C extends z.ZodCodec<z.ZodString, z.ZodObject<infer S extends z.core.$ZodLooseShape>>
-  ? S
-  : C extends z.ZodObject<infer S extends z.core.$ZodLooseShape>
+type InferObjectShapeFromCodec<C> =
+  C extends z.ZodCodec<z.ZodString, z.ZodObject<infer S extends z.core.$ZodLooseShape>>
     ? S
-    : z.core.$ZodLooseShape;
+    : C extends z.ZodObject<infer S extends z.core.$ZodLooseShape>
+      ? S
+      : z.core.$ZodLooseShape;
 
 export const connect = <
   C extends CollectionParams,
@@ -54,10 +55,7 @@ export const connect = <
   >;
 };
 
-type UnresolvedConnectionOutput<
-  Name extends string,
-  RA extends string | undefined,
-> = {
+type UnresolvedConnectionOutput<Name extends string, RA extends string | undefined> = {
   _collection: Name;
   _meta: { resolved: false; value: string };
 } & (RA extends string ? { _referencedAs: RA } : {});
@@ -103,10 +101,7 @@ type ResolvedConnectionMetaSchema<CollectionName extends string> = {
  * requiring the collection schema itself to carry it, so the literal frontmatter
  * shape stays intact.
  */
-export const collection = <
-  const Name extends string,
-  const Schema extends z.core.$ZodType,
->(args: {
+export const collection = <const Name extends string, const Schema extends z.core.$ZodType>(args: {
   name: Name;
   match: string;
   basePath?: string;
@@ -151,11 +146,7 @@ export const markdown = <
   shape?: T,
 ) => {
   // Extract links and leafDirectives from shape as they're metadata, not schema fields
-  const {
-    links: _links,
-    leafDirectives: _leafDirectives,
-    ...schemaShape
-  } = shape || ({} as T);
+  const { links: _links, leafDirectives: _leafDirectives, ...schemaShape } = shape || ({} as T);
 
   return z.codec(
     z.string(),
@@ -174,9 +165,7 @@ export const markdown = <
         let ast = tree;
         let frontmatter: Record<string, unknown> = {};
         if (firstChild?.type === "yaml") {
-          frontmatter = z
-            .record(z.string(), z.any())
-            .parse(yaml.load(firstChild.value)) as T;
+          frontmatter = z.record(z.string(), z.any()).parse(yaml.load(firstChild.value)) as T;
 
           ast = { ...tree, children: tree.children.slice(1) };
           ast.raw = toMarkdown({ _body: ast });

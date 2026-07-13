@@ -125,9 +125,10 @@ describe("queries", () => {
       });
       expect(result.items).toHaveLength(1);
       expect(result.items[0]?.docsAuthored).toHaveLength(2);
-      expect(result.items[0]?.docsAuthored?.map((d) => d.title).sort()).toEqual(
-        ["Advanced Guide", "Getting Started"],
-      );
+      expect(result.items[0]?.docsAuthored?.map((d) => d.title).sort()).toEqual([
+        "Advanced Guide",
+        "Getting Started",
+      ]);
     });
 
     it("reverse references support where, limit, offset", async () => {

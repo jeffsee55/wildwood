@@ -83,19 +83,12 @@ export function resolveWildwoodExtensionContext(
     initialRef = getConfig("headRef");
   }
 
-  const extensionParams = extensionUri.query
-    ? new URLSearchParams(extensionUri.query)
-    : null;
+  const extensionParams = extensionUri.query ? new URLSearchParams(extensionUri.query) : null;
   const queryConfigRef =
-    (workspaceQuery
-      ? new URLSearchParams(workspaceQuery).get("baseRef")
-      : undefined) ??
+    (workspaceQuery ? new URLSearchParams(workspaceQuery).get("baseRef") : undefined) ??
     extensionParams?.get("baseRef") ??
     undefined;
-  const configRef =
-    queryConfigRef ??
-    getConfig("baseRef") ??
-    getConfig("ref", "main");
+  const configRef = queryConfigRef ?? getConfig("baseRef") ?? getConfig("ref", "main");
   const currentRef = initialRef ?? configRef;
 
   if (!repo || !configRef || !currentRef) {
@@ -132,8 +125,5 @@ export async function whenWildwoodExtensionContextReady(
     }
   }
 
-  throw (
-    lastError ??
-    new Error("Wildwood: timed out waiting for workspace context")
-  );
+  throw lastError ?? new Error("Wildwood: timed out waiting for workspace context");
 }

@@ -145,7 +145,7 @@ createWildwoodRoute(() => wildwood, {
 ```
 
 - `authenticate` = sign-in/sign-up gate (not distinguished; inspect `provider` if you ever need different rules).
-- `authorize`    = per-action gate (git, content).
+- `authorize` = per-action gate (git, content).
 - No `allowedEmails` array or `NEXT_PUBLIC_ORIGIN` / `BETTER_AUTH_TRUSTED_ORIGINS` env fallbacks inside wildwood — that's userland callback + Request autodetect.
 
 No `getDocsTr33()` getter needed. Core factory stays pure — app owns the one singleton; Next reuses the module across requests. `createClient` self-heals via `findMany → switch → index` on cold cache.

@@ -88,7 +88,7 @@ z.connect(authors, { referencedAs: "authors" })
 z.lazy(() => z.connect(authors)).optional()
 ```
 
-Declares a relation to another collection. Runtime it is `z.custom(()=>true,{params:{__wildwoodConnection,name,referencedAs?}})`. The output type carries `{_collection, _meta:{resolved:false;value:string}} & (referencedAs?). The input is always the frontmatter string (relative path to the target), not an id.
+Declares a relation to another collection. Runtime it is `z.custom(()=>true,{params:{__wildwoodConnection,name,referencedAs?}})`. The output type carries `{\_collection, \_meta:{resolved:false;value:string}} & (referencedAs?). The input is always the frontmatter string (relative path to the target), not an id.
 
 Indexing: when the visitor encounters a connection marker, it records the raw string. Later `config.index` canonicalizes:
 

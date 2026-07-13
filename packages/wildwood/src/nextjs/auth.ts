@@ -64,7 +64,10 @@ create index "verification_identifier_idx" on "verification" ("identifier");
 `.trim();
 
 function splitSqlStatements(sql: string): string[] {
-  return sql.split(/;\s*(?:\n|$)/).map((s) => s.trim()).filter((s) => s && !s.startsWith("--"));
+  return sql
+    .split(/;\s*(?:\n|$)/)
+    .map((s) => s.trim())
+    .filter((s) => s && !s.startsWith("--"));
 }
 
 // ── public types ────────────────────────────────────────────────────────────
@@ -140,7 +143,9 @@ export type WildwoodRouteAuthOptions = {
 
 // ── internal ────────────────────────────────────────────────────────────────
 
-export type WildwoodAuthInstance = { api: { getSession(a: { headers: Headers }): Promise<unknown> } };
+export type WildwoodAuthInstance = {
+  api: { getSession(a: { headers: Headers }): Promise<unknown> };
+};
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
@@ -150,7 +155,9 @@ async function loadBetterAuthDeps() {
     dynamicImport("better-auth") as Promise<{
       betterAuth: (o: BetterAuthOptions) => WildwoodAuthInstance;
     }>,
-    dynamicImport("@libsql/kysely-libsql") as Promise<{ LibsqlDialect: new (a: unknown) => unknown }>,
+    dynamicImport("@libsql/kysely-libsql") as Promise<{
+      LibsqlDialect: new (a: unknown) => unknown;
+    }>,
     dynamicImport("better-auth/next-js") as Promise<{ nextCookies: () => unknown }>,
   ]);
   return { betterAuth, LibsqlDialect, nextCookies };
@@ -160,13 +167,21 @@ type LibsqlClientLike = { execute(s: string): Promise<unknown>; close?(): void }
 
 export type WildwoodAuthDbInput =
   | LibsqlClientLike
-  | { libsqlClient?: LibsqlClientLike | undefined; client?: LibsqlClientLike | undefined; _client?: LibsqlClientLike | undefined }
+  | {
+      libsqlClient?: LibsqlClientLike | undefined;
+      client?: LibsqlClientLike | undefined;
+      _client?: LibsqlClientLike | undefined;
+    }
   | undefined;
 
 function resolveLibsqlClient(db: WildwoodAuthDbInput | undefined): LibsqlClientLike | null {
   if (!db) return null;
   if (typeof (db as LibsqlClientLike).execute === "function") return db as LibsqlClientLike;
-  const holder = db as { libsqlClient?: LibsqlClientLike; client?: LibsqlClientLike; _client?: LibsqlClientLike };
+  const holder = db as {
+    libsqlClient?: LibsqlClientLike;
+    client?: LibsqlClientLike;
+    _client?: LibsqlClientLike;
+  };
   return holder.libsqlClient ?? holder.client ?? holder._client ?? null;
 }
 
@@ -198,16 +213,22 @@ function normalizeGithubProvider(
   }
   // `raw` is { clientId?, clientSecret? } — trim internally so caller doesn't need `.trim()`
   const clientId = typeof raw.clientId === "string" ? raw.clientId.trim() || undefined : undefined;
-  const clientSecret = typeof raw.clientSecret === "string" ? raw.clientSecret.trim() || undefined : undefined;
+  const clientSecret =
+    typeof raw.clientSecret === "string" ? raw.clientSecret.trim() || undefined : undefined;
   if (!clientId || !clientSecret) return undefined;
   return { clientId, clientSecret };
 }
 
-let cachedAuth: { key: string; instance: WildwoodAuthInstance; ensurePromise: Promise<void> | null } | null = null;
+let cachedAuth: {
+  key: string;
+  instance: WildwoodAuthInstance;
+  ensurePromise: Promise<void> | null;
+} | null = null;
 
 function cacheKey(opts: WildwoodRouteAuthOptions): string {
   const g = normalizeGithubProvider(opts);
-  const secretPreview = typeof opts.secret === "string" ? opts.secret.trim().slice(0, 8) : "no-secret";
+  const secretPreview =
+    typeof opts.secret === "string" ? opts.secret.trim().slice(0, 8) : "no-secret";
   const baseLabel =
     typeof opts.baseURL === "string"
       ? opts.baseURL.trim()
@@ -258,7 +279,9 @@ function buildAuthenticateHook(
       const genericCtx = ctx as { request?: Request; context?: { request?: Request } } | null;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const request: Request =
-        (genericCtx as any)?.request ?? (genericCtx as any)?.context?.request ?? new Request("http://localhost");
+        (genericCtx as any)?.request ??
+        (genericCtx as any)?.context?.request ??
+        new Request("http://localhost");
       const provider = providerFromCtx(ctx);
       const result = await authenticate({ user, request, provider });
       if (result instanceof Response) {
@@ -274,7 +297,12 @@ function buildAuthenticateHook(
     create: {
       before: wrap((genericCtx) => {
         try {
-          const ep = (genericCtx as { context?: { request?: Request }; path?: string; request?: { url?: string } }) ?? {};
+          const ep =
+            (genericCtx as {
+              context?: { request?: Request };
+              path?: string;
+              request?: { url?: string };
+            }) ?? {};
           const urlStr =
             (ep as { request?: Request })?.request?.url ??
             (ep as { context?: { request?: Request } })?.context?.request?.url ??
@@ -296,7 +324,10 @@ export async function getOrCreateAuth(opts: {
 }> {
   const authOpts: WildwoodRouteAuthOptions = opts.auth ?? {};
   const maybeClient = resolveLibsqlClient(opts.db);
-  if (!maybeClient) throw new Error("Wildwood auth requires a libsql client — pass createClient({ database }) and forward its db.");
+  if (!maybeClient)
+    throw new Error(
+      "Wildwood auth requires a libsql client — pass createClient({ database }) and forward its db.",
+    );
   const libsqlClient: LibsqlClientLike = maybeClient;
 
   const key = cacheKey(authOpts);
@@ -318,9 +349,10 @@ export async function getOrCreateAuth(opts: {
   const github = githubPair ? { github: githubPair } : undefined;
 
   const rawSocial = authOpts.providers?.socialProviders;
-  const socialProviders = github || rawSocial
-    ? ({ ...(rawSocial ?? {}), ...(github ?? {}) } as BetterAuthSocialProviders)
-    : undefined;
+  const socialProviders =
+    github || rawSocial
+      ? ({ ...(rawSocial ?? {}), ...(github ?? {}) } as BetterAuthSocialProviders)
+      : undefined;
 
   const emailAndPasswordEnabled = Boolean(authOpts.providers?.emailAndPassword);
 
@@ -357,14 +389,20 @@ export async function getOrCreateAuth(opts: {
     appName: appNameTrimmed,
     ...(secretTrimmed ? { secret: secretTrimmed } : {}),
     ...(authOpts.baseURL ? { baseURL: authOpts.baseURL as BetterAuthOptions["baseURL"] } : {}),
-    ...(authOpts.trustedOrigins ? { trustedOrigins: authOpts.trustedOrigins as BetterAuthOptions["trustedOrigins"] } : {}),
+    ...(authOpts.trustedOrigins
+      ? { trustedOrigins: authOpts.trustedOrigins as BetterAuthOptions["trustedOrigins"] }
+      : {}),
     database: {
-      dialect: new (LibsqlDialect as unknown as { new (a: unknown): unknown })({ client: libsqlClient }),
+      dialect: new (LibsqlDialect as unknown as { new (a: unknown): unknown })({
+        client: libsqlClient,
+      }),
       type: "sqlite" as const,
     },
     emailAndPassword: emailAndPasswordEnabled ? { enabled: true } : { enabled: false },
     ...(socialProviders ? { socialProviders } : {}),
-    ...(databaseHooks ? { databaseHooks: { user: databaseHooks } as BetterAuthOptions["databaseHooks"] } : {}),
+    ...(databaseHooks
+      ? { databaseHooks: { user: databaseHooks } as BetterAuthOptions["databaseHooks"] }
+      : {}),
     plugins: [nextCookies()],
   };
 
@@ -398,13 +436,18 @@ export async function getSessionUser(
   auth: WildwoodAuthInstance,
   headers: Headers,
 ): Promise<{ session: unknown; user: WildwoodAuthUser | null } | null> {
-  const s = await (auth as { api: { getSession(a: { headers: Headers }): Promise<unknown> } }).api.getSession({ headers });
+  const s = await (
+    auth as { api: { getSession(a: { headers: Headers }): Promise<unknown> } }
+  ).api.getSession({ headers });
   if (!s) return null;
   return { session: s, user: userFromSession(s) };
 }
 
 /** @deprecated use `authenticate` instead */
-export function isAllowedByEmailList(user: WildwoodAuthUser | null, allowedEmails: string[] | undefined): boolean {
+export function isAllowedByEmailList(
+  user: WildwoodAuthUser | null,
+  allowedEmails: string[] | undefined,
+): boolean {
   if (!allowedEmails) {
     if (process.env.NODE_ENV === "production") return false;
     return !!user;
@@ -433,4 +476,3 @@ export async function evaluateAuthenticate(
   if (result === false) return new Response("Forbidden", { status: 403 });
   return null;
 }
-

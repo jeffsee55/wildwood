@@ -49,8 +49,8 @@ export function PlaygroundAuthPanel({ githubEnabled }: Props) {
           Sign in to Wildwood Play
         </h1>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-          Authentication gates the editor and git mutation APIs. Better Auth
-          tables live in the same app database as the playground.
+          Authentication gates the editor and git mutation APIs. Better Auth tables live in the same
+          app database as the playground.
         </p>
 
         {githubEnabled && (
@@ -81,20 +81,12 @@ export function PlaygroundAuthPanel({ githubEnabled }: Props) {
           )}
           <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400">
             Email
-            <input
-              autoComplete="email"
-              className={inputClass}
-              name="email"
-              required
-              type="email"
-            />
+            <input autoComplete="email" className={inputClass} name="email" required type="email" />
           </label>
           <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400">
             Password
             <input
-              autoComplete={
-                mode === "sign-up" ? "new-password" : "current-password"
-              }
+              autoComplete={mode === "sign-up" ? "new-password" : "current-password"}
               className={inputClass}
               minLength={8}
               name="password"
@@ -114,11 +106,7 @@ export function PlaygroundAuthPanel({ githubEnabled }: Props) {
             disabled={pending}
             type="submit"
           >
-            {pending
-              ? "Working..."
-              : mode === "sign-up"
-                ? "Create account"
-                : "Sign in"}
+            {pending ? "Working..." : mode === "sign-up" ? "Create account" : "Sign in"}
           </button>
         </form>
 
@@ -127,15 +115,11 @@ export function PlaygroundAuthPanel({ githubEnabled }: Props) {
           disabled={pending}
           onClick={() => {
             setError(null);
-            setMode((current) =>
-              current === "sign-in" ? "sign-up" : "sign-in",
-            );
+            setMode((current) => (current === "sign-in" ? "sign-up" : "sign-in"));
           }}
           type="button"
         >
-          {mode === "sign-in"
-            ? "Need an account? Sign up"
-            : "Already have an account? Sign in"}
+          {mode === "sign-in" ? "Need an account? Sign up" : "Already have an account? Sign in"}
         </button>
       </section>
     </main>

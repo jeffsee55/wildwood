@@ -22,17 +22,13 @@ function toError(e: unknown): Error {
  * Returns `Result<string,Error>` for text commands and `Result<Buffer,Error>` for binary.
  * Caller decides which variant to need via return type.
  */
-export async function runGit(
-  opts: GitRunOptions,
-): Promise<Result<string, Error>> {
+export async function runGit(opts: GitRunOptions): Promise<Result<string, Error>> {
   const res = await runGitBuffer(opts);
   if (res.isErr()) return err(res.error);
   return ok(res.value.toString("utf-8"));
 }
 
-export async function runGitBuffer(
-  opts: GitRunOptions,
-): Promise<Result<Buffer, Error>> {
+export async function runGitBuffer(opts: GitRunOptions): Promise<Result<Buffer, Error>> {
   const { cwd, args, input, maxBuffer = 50 * 1024 * 1024 } = opts;
   return new Promise((resolve) => {
     const cp = spawn("git", args, {
@@ -55,9 +51,7 @@ export async function runGitBuffer(
       total += d.length;
       if (total > maxBuffer) {
         cp.kill();
-        finish(
-          err(new Error(`git ${args[0]} exceeded maxBuffer ${maxBuffer}`)),
-        );
+        finish(err(new Error(`git ${args[0]} exceeded maxBuffer ${maxBuffer}`)));
         return;
       }
       chunks.push(d);
@@ -70,14 +64,7 @@ export async function runGitBuffer(
       if (code === 0) {
         finish(ok(Buffer.concat(chunks)));
       } else {
-        finish(
-          err(
-            new Error(
-              stderr.trim() ||
-                `git ${args.join(" ")} failed with code ${code}`,
-            ),
-          ),
-        );
+        finish(err(new Error(stderr.trim() || `git ${args.join(" ")} failed with code ${code}`)));
       }
     });
 
@@ -117,11 +104,7 @@ export const _runGitCommand2 = async (args: {
   return r.value.toString("utf-8").trim();
 };
 
-export const _runGitCommandBuffer = (args: {
-  command: string;
-  cwd: string;
-  stdinInput?: string;
-}) =>
+export const _runGitCommandBuffer = (args: { command: string; cwd: string; stdinInput?: string }) =>
   runGitBuffer({
     cwd: args.cwd,
     args: args.command.split(" "),

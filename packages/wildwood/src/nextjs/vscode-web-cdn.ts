@@ -9,13 +9,10 @@ export type VscodeWebCdn = {
 
 let vscodeWebCdnPromise: Promise<VscodeWebCdn> | null = null;
 
-const VSCODE_WEB_PLATFORM =
-  process.env.WILDWOOD_VSCODE_WEB_PLATFORM || "server-linux-x64-web";
+const VSCODE_WEB_PLATFORM = process.env.WILDWOOD_VSCODE_WEB_PLATFORM || "server-linux-x64-web";
 
 async function fetchLatestVersion(): Promise<string> {
-  const response = await fetch(
-    "https://update.code.visualstudio.com/api/releases/stable",
-  );
+  const response = await fetch("https://update.code.visualstudio.com/api/releases/stable");
   if (!response.ok) {
     throw new Error(`Failed to resolve VS Code version: ${response.status}`);
   }
@@ -44,7 +41,8 @@ async function fetchLatestCommit(): Promise<string> {
 const FALLBACK_VSCODE_COMMIT =
   process.env.WILDWOOD_VSCODE_WEB_COMMIT?.trim() || "8a1aaed389a7bc6a8f2d9dbc2b34635633cf8ff2";
 const FALLBACK_VSCODE_VERSION =
-  process.env.WILDWOOD_VSCODE_WEB_VERSION?.trim() && process.env.WILDWOOD_VSCODE_WEB_VERSION.trim() !== "latest"
+  process.env.WILDWOOD_VSCODE_WEB_VERSION?.trim() &&
+  process.env.WILDWOOD_VSCODE_WEB_VERSION.trim() !== "latest"
     ? process.env.WILDWOOD_VSCODE_WEB_VERSION.trim()
     : "1.105.1";
 
@@ -65,7 +63,10 @@ async function tryFetchLatestVersion(): Promise<string | null> {
     const versions = (await res.json()) as string[];
     return versions[0] ?? null;
   } catch (e) {
-    console.warn(`[wildwood:vscode-cdn] fetchLatestVersion failed, using fallback ${FALLBACK_VSCODE_VERSION}:`, e instanceof Error ? e.message : e);
+    console.warn(
+      `[wildwood:vscode-cdn] fetchLatestVersion failed, using fallback ${FALLBACK_VSCODE_VERSION}:`,
+      e instanceof Error ? e.message : e,
+    );
     return null;
   }
 }
@@ -79,7 +80,10 @@ async function tryFetchLatestCommit(): Promise<string | null> {
     const commits = (await res.json()) as string[];
     return commits[0] ?? null;
   } catch (e) {
-    console.warn(`[wildwood:vscode-cdn] fetchLatestCommit failed, using fallback ${FALLBACK_VSCODE_COMMIT}:`, e instanceof Error ? e.message : e);
+    console.warn(
+      `[wildwood:vscode-cdn] fetchLatestCommit failed, using fallback ${FALLBACK_VSCODE_COMMIT}:`,
+      e instanceof Error ? e.message : e,
+    );
     return null;
   }
 }
@@ -127,10 +131,7 @@ export function vscodeCdnProxyAssetUrl(
 }
 
 /** Proxy `main.vscode-cdn.net` metadata (e.g. marketplace.json) through the embedder origin. */
-export async function proxyMainVscodeCdnAsset(
-  req: Request,
-  assetPath: string,
-): Promise<Response> {
+export async function proxyMainVscodeCdnAsset(req: Request, assetPath: string): Promise<Response> {
   const url = `https://main.vscode-cdn.net/${assetPath.replace(/^\/+/, "")}`;
   const upstream = await fetch(url, {
     headers: { "Accept-Encoding": "identity" },

@@ -77,19 +77,13 @@ export const entrySchema = z.object({
   blob: z.object({
     content: z.string(),
   }),
-  get toConnections(): z.ZodLazy<
-    z.ZodOptional<z.ZodArray<typeof connectionSchema>>
-  > {
+  get toConnections(): z.ZodLazy<z.ZodOptional<z.ZodArray<typeof connectionSchema>>> {
     return z.lazy(() => connectionSchema.array().optional());
   },
-  get fromConnections(): z.ZodLazy<
-    z.ZodOptional<z.ZodArray<typeof connectionSchema>>
-  > {
+  get fromConnections(): z.ZodLazy<z.ZodOptional<z.ZodArray<typeof connectionSchema>>> {
     return z.lazy(() => connectionSchema.array().optional());
   },
-  filters: z
-    .array(z.object({ field: z.string(), value: z.string() }))
-    .optional(),
+  filters: z.array(z.object({ field: z.string(), value: z.string() })).optional(),
 });
 
 const connectionSchema = z.object({
@@ -113,10 +107,7 @@ const connectionSchema = z.object({
 
 type Connection = z.infer<typeof connectionSchema>;
 
-export type Entry = Omit<
-  z.infer<typeof entrySchema>,
-  "toConnections" | "fromConnections"
-> & {
+export type Entry = Omit<z.infer<typeof entrySchema>, "toConnections" | "fromConnections"> & {
   toConnections?: Connection[];
   fromConnections?: Connection[];
 };

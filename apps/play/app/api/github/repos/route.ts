@@ -11,19 +11,26 @@ type GitHubRepo = {
 
 function repoMatches(repo: GitHubRepo, query: string): boolean {
   if (!query) return true;
-  const haystack = `${repo.full_name ?? ""} ${repo.owner?.login ?? ""} ${repo.name ?? ""}`.toLowerCase();
+  const haystack =
+    `${repo.full_name ?? ""} ${repo.owner?.login ?? ""} ${repo.name ?? ""}`.toLowerCase();
   return haystack.includes(query.toLowerCase());
 }
 
 async function getAccessToken(request: Request): Promise<string | null> {
-  const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<Record<string, unknown>>;
+  const dynamicImport = new Function("s", "return import(s)") as (
+    s: string,
+  ) => Promise<Record<string, unknown>>;
   const { betterAuth } = (await dynamicImport("better-auth")) as {
-    betterAuth: (o: unknown) => { api: { getAccessToken(a: unknown): Promise<{ accessToken: string | null }> } };
+    betterAuth: (o: unknown) => {
+      api: { getAccessToken(a: unknown): Promise<{ accessToken: string | null }> };
+    };
   };
   const { LibsqlDialect } = (await dynamicImport("@libsql/kysely-libsql")) as {
     LibsqlDialect: new (o: unknown) => unknown;
   };
-  const { nextCookies } = (await dynamicImport("better-auth/next-js")) as { nextCookies: () => unknown };
+  const { nextCookies } = (await dynamicImport("better-auth/next-js")) as {
+    nextCookies: () => unknown;
+  };
 
   const libsql = createLibsql({
     url: process.env.TURSO_DATABASE_URL?.trim() || "file:./wildwood.db",
@@ -32,7 +39,12 @@ async function getAccessToken(request: Request): Promise<string | null> {
 
   const github =
     process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET
-      ? { github: { clientId: process.env.GITHUB_CLIENT_ID, clientSecret: process.env.GITHUB_CLIENT_SECRET } }
+      ? {
+          github: {
+            clientId: process.env.GITHUB_CLIENT_ID,
+            clientSecret: process.env.GITHUB_CLIENT_SECRET,
+          },
+        }
       : undefined;
 
   const auth = betterAuth({
@@ -48,7 +60,10 @@ async function getAccessToken(request: Request): Promise<string | null> {
   });
 
   try {
-    const result = await auth.api.getAccessToken({ headers: request.headers, body: { providerId: "github" } });
+    const result = await auth.api.getAccessToken({
+      headers: request.headers,
+      body: { providerId: "github" },
+    });
     return result.accessToken ?? null;
   } catch {
     return null;
@@ -80,7 +95,10 @@ export async function GET(request: Request) {
   });
 
   if (!response.ok) {
-    return Response.json({ error: `GitHub repos request failed: ${response.status}` }, { status: response.status });
+    return Response.json(
+      { error: `GitHub repos request failed: ${response.status}` },
+      { status: response.status },
+    );
   }
 
   const repos = ((await response.json()) as GitHubRepo[])

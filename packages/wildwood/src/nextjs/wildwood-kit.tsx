@@ -34,13 +34,17 @@ function trimStr(v: unknown): string | undefined {
 }
 
 export type WildwoodKitHostClient = {
-  _?: {
-    config?: {
-      org?: string | undefined;
-      repo?: string | undefined;
-      ref?: string | undefined;
-    } | undefined;
-  } | undefined;
+  _?:
+    | {
+        config?:
+          | {
+              org?: string | undefined;
+              repo?: string | undefined;
+              ref?: string | undefined;
+            }
+          | undefined;
+      }
+    | undefined;
 } & WildwoodForActiveRef;
 
 function envTrim(name: string): string | undefined {
@@ -48,7 +52,9 @@ function envTrim(name: string): string | undefined {
 }
 
 // Accepts `process.env.X` directly — internal trim everywhere, no caller `.trim()` needed.
-function resolveKitAuthFromEnv(wildwood?: WildwoodKitHostClient | null | undefined): KitAuthConfig | undefined {
+function resolveKitAuthFromEnv(
+  wildwood?: WildwoodKitHostClient | null | undefined,
+): KitAuthConfig | undefined {
   const vercelOrigin = resolveOrigin();
 
   const appSlug = envTrim("GITHUB_APP_SLUG");
@@ -71,7 +77,9 @@ function resolveKitAuthFromEnv(wildwood?: WildwoodKitHostClient | null | undefin
   org = org || envTrim("GITHUB_ORG");
   repo = repo || envTrim("GITHUB_REPO");
   const repoFull = org && repo ? `${org}/${repo}` : undefined;
-  const directRepoInstallUrl = repoFull ? `https://github.com/${repoFull}/settings/installs` : undefined;
+  const directRepoInstallUrl = repoFull
+    ? `https://github.com/${repoFull}/settings/installs`
+    : undefined;
 
   if (!appSlug && !configured && !oAuthReady) {
     return {
@@ -85,7 +93,12 @@ function resolveKitAuthFromEnv(wildwood?: WildwoodKitHostClient | null | undefin
         ...(org ? { org } : {}),
         ...(repo ? { repo } : {}),
         ...(directRepoInstallUrl ? { directRepoInstallUrl } : {}),
-      } as KitAuthConfig["githubApp"] & { repoFull?: string; org?: string; repo?: string; directRepoInstallUrl?: string },
+      } as KitAuthConfig["githubApp"] & {
+        repoFull?: string;
+        org?: string;
+        repo?: string;
+        directRepoInstallUrl?: string;
+      },
       // Keep back-compat flag false — new `oauth.providers` below is the real source.
       githubOAuthEnabled: false,
       oauth: {
@@ -108,7 +121,12 @@ function resolveKitAuthFromEnv(wildwood?: WildwoodKitHostClient | null | undefin
       ...(org ? { org } : {}),
       ...(repo ? { repo } : {}),
       ...(directRepoInstallUrl ? { directRepoInstallUrl } : {}),
-    } as KitAuthConfig["githubApp"] & { repoFull?: string; org?: string; repo?: string; directRepoInstallUrl?: string },
+    } as KitAuthConfig["githubApp"] & {
+      repoFull?: string;
+      org?: string;
+      repo?: string;
+      directRepoInstallUrl?: string;
+    },
     githubOAuthEnabled: githubEnabled,
     oauth: {
       providers: [
@@ -235,7 +253,9 @@ export async function WildwoodKit({
       return cdn.commit?.trim() || FALLBACK_VSCODE_COMMIT;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.warn(`[wildwood:kit] resolveVscodeWebCdn failed, using fallback: ${msg.slice(0, 400)}`);
+      console.warn(
+        `[wildwood:kit] resolveVscodeWebCdn failed, using fallback: ${msg.slice(0, 400)}`,
+      );
       return envTrim("WILDWOOD_VSCODE_WEB_COMMIT") || FALLBACK_VSCODE_COMMIT;
     }
   }
@@ -249,7 +269,9 @@ export async function WildwoodKit({
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (isNextBuildPhase()) {
-        console.warn(`[wildwood:kit] getBranch failed during build, falling back to config ref: ${msg.slice(0, 400)}`);
+        console.warn(
+          `[wildwood:kit] getBranch failed during build, falling back to config ref: ${msg.slice(0, 400)}`,
+        );
         return fallbackRef;
       }
       throw e;
