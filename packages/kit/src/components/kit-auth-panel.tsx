@@ -178,9 +178,13 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
   // Repo-scoped install URL — GitHub's App install page lets you pre-filter by state/repo hint.
   // When the server provides org/repo we link via ?state so the callback and install pages can
   // guide the user to "Only select repositories → {repo}". Falls back to generic picker.
-  const repoFull = (auth as unknown as { repoFull?: string; org?: string; repo?: string }).repoFull?.trim()
-    || ([(auth as unknown as { org?: string }).org, (auth as unknown as { repo?: string }).repo].filter(Boolean).join("/")).trim())
-    || "";
+  const gha = auth.githubApp;
+  const authExtra = auth as unknown as { repoFull?: string; org?: string; repo?: string };
+  const repoFull =
+    gha?.repoFull?.trim() ||
+    authExtra.repoFull?.trim() ||
+    ([gha?.org ?? authExtra.org, gha?.repo ?? authExtra.repo].filter(Boolean).join("/").trim()) ||
+    "";
   const installUrl = auth.githubApp?.appSlug
     ? repoFull
       ? `https://github.com/apps/${auth.githubApp.appSlug}/installations/new?state=${encodeURIComponent(repoFull)}`
