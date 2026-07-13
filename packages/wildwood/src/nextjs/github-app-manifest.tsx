@@ -11,7 +11,8 @@
  *      → returns { id, slug, client_id, client_secret, webhook_secret, pem, html_url }.
  *
  * This module:
- *   - builds manifest JSON with defaults (webhook included per product decision)
+ *   - builds manifest JSON with defaults (webhook opt-in only — omitting it avoids a
+ *     long-lived server-to-server URL and the need for a permanent Vercel bypass secret)
  *   - exchanges code via fetch (no `gh` CLI)
  *   - provides helpers to map conversion → env vars / shell snippets
  *   - provides a callback UI component for the redirect page
@@ -34,7 +35,7 @@ export type WildwoodGitHubAppManifestOptions = {
   redirectUrl: string;
   /** OAuth callback URLs registered on the app. */
   callbackUrls?: string[];
-  /** Webhook URL, if you want webhooks. Default: `${origin}/api/wildwood/github/webhook` */
+  /** Webhook URL — opt-in only. Omit to create app without webhooks (no long-lived URL needed). */
   webhookUrl?: string;
   /** Provide true to auto-activate webhook. */
   webhookActive?: boolean;
@@ -96,7 +97,10 @@ export function buildWildwoodGitHubAppManifest(
   if (!url) throw new Error("buildWildwoodGitHubAppManifest: need `url` or `redirectUrl` to infer origin");
 
   const trimmed = (s: string) => s.trim();
-  const webhookUrl = opts.webhookUrl ?? (origin ? `${origin}/api/wildwood/github/webhook` : undefined);
+  // Webhook is opt-in only — leaving it out means no long-lived server-to-server URL,
+  // which avoids needing a permanent Vercel bypass secret in GitHub's stored config.
+  // If opts.webhookUrl is undefined we don't create hook_attributes at all.
+  const webhookUrl = opts.webhookUrl?.trim() || undefined;
 
   const manifest: WildwoodGitHubAppManifest = {
     name: trimmed(opts.name) || "Wildwood Dev",
@@ -115,7 +119,8 @@ export function buildWildwoodGitHubAppManifest(
         ? { administration: opts.defaultPermissions.administration }
         : {}),
     },
-    default_events: opts.defaultEvents ?? ["pull_request", "push"],
+    // When there's no webhook, no events are needed — GitHub would reject events without a hook url.
+    default_events: opts.defaultEvents ?? (webhookUrl ? ["pull_request", "push"] : []),
   };
 
   if (opts.description) manifest.description = opts.description;
@@ -124,12 +129,6 @@ export function buildWildwoodGitHubAppManifest(
     // Guarantee at least OAuth callback if we can infer it.
     const oauth = origin ? `${origin}/api/auth/callback/github` : null;
     if (oauth) manifest.callback_urls = [oauth];
-  }
-
-  // GitHub requires webhook url when events are non-empty; keep attribute consistent.
-  if (!manifest.default_events.length && manifest.hook_attributes) {
-    // Keep hook_attributes only if you really want webhooks. Per product decision we do.
-    // But if someone passes default_events=[] explicitly and no hook wanted, they'd pass webhookUrl=undefined.
   }
 
   return manifest;

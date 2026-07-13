@@ -173,7 +173,7 @@ Once deployed, the toolbar self-reports unconfigured state so you can create the
 
 1. Open your deployed URL → FAB (bottom right, shows `main` or active ref).
 2. You'll see a highlighted **Set up GitHub App** entry (shown only when no `GITHUB_APP_*` present). Click it → **Create GitHub App** form → Submit.
-3. GitHub shows its review UI (manifest = `contents:write`, `pull_requests:write`, `metadata:read`, webhook URL stable at `/api/wildwood/github/webhook`). Confirm creation.
+3. GitHub shows its review UI (manifest = `contents:write`, `pull_requests:write`, `metadata:read`, no webhook — so no long-lived URL to worry about). Confirm creation.
 4. GitHub redirects to `/api/wildwood/github/app-manifest/callback?code=…&state=…`.
 5. The server verifies `state` cookie (mitigates CSRF), exchanges the single-use `code` via `POST https://api.github.com/app-manifests/:code/conversions`, and renders a credentials page with:
    - `.env.local` tab — copy for local dev.
@@ -199,7 +199,7 @@ The editor's `needs-install` / `needs-setup` guards now clear:
 - `getRepoInstallationStatus()` confirms App installed on `ORG/REPO` (or shows Install link using `GITHUB_APP_SLUG`).
 - `editor-guards` / `editor-bootstrap` return `ready` + `vscodeCommit`.
 
-> Webhook: manifest includes `hook_attributes.url = ${origin}/api/wildwood/github/webhook` (placeholder 501 until wired). Keeping it stable in the manifest avoids recreating the App later.
+> Webhook: opt-in only. By default the manifest omits `hook_attributes` and `default_events`, so no long-lived server-to-server URL is stored in GitHub and no permanent Vercel bypass secret is needed. This lets you create the App from any deployment including protected previews — `redirect_url` is transient (single-use, 1h). Add a webhook later by re-saving the App settings in GitHub with `https://<prod>/api/wildwood/github/webhook` when you wire event handling.
 
 ## 6 — Install the App on your repo
 

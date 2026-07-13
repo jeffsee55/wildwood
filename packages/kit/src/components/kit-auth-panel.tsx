@@ -78,21 +78,21 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
     setOrigin(window.location.origin);
   }, [auth.githubApp?.origin, origin]);
 
-  const manifestPreview = React.useMemo(
-    () => ({
+  const manifestPreview = React.useMemo(() => {
+    const base = {
       name,
       url: origin || "(auto: window.location.origin)",
       redirect_url: `${origin || "https://example.com"}${manifestRedirectPath}`,
       callback_urls: [`${origin || "https://example.com"}${oauthCallbackPath}`],
-      hook_attributes: auth.githubApp?.webhookUrl
-        ? { url: auth.githubApp.webhookUrl, active: true }
-        : { url: `${origin || "https://example.com"}/api/wildwood/github/webhook`, active: true },
       public: false,
       default_permissions: { contents, pull_requests: pullRequests, metadata: "read" },
-      default_events: ["pull_request", "push"],
-    }),
-    [contents, manifestRedirectPath, name, oauthCallbackPath, origin, pullRequests, auth.githubApp?.webhookUrl],
-  );
+      default_events: auth.githubApp?.webhookUrl ? (["pull_request", "push"] as const) : ([] as const),
+    } as Record<string, unknown>;
+    if (auth.githubApp?.webhookUrl) {
+      base.hook_attributes = { url: auth.githubApp.webhookUrl, active: true };
+    }
+    return base;
+  }, [contents, manifestRedirectPath, name, oauthCallbackPath, origin, pullRequests, auth.githubApp?.webhookUrl]);
 
   const signInWithGitHub = React.useCallback(async () => {
     setBusy(true);
@@ -222,7 +222,7 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="font-medium text-popover-foreground">GitHub App manifest</p>
-          <p className="mt-1 text-muted-foreground">Create disposable app, then exchange manifest code (now with webhook).</p>
+          <p className="mt-1 text-muted-foreground">Create disposable app, then exchange manifest code (no webhook — works from preview).</p>
         </div>
         <Button className="h-7 px-2 text-xs" onClick={() => setName(randomAppName())} type="button" variant="secondary">
           <Shuffle className="size-3" />
@@ -254,7 +254,7 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
         <p className="text-[11px] text-muted-foreground">
           Redirect → <code className="font-mono">{manifestRedirectPath}</code>
           <br />
-          Webhook → <code className="font-mono">/api/wildwood/github/webhook</code> (placeholder, 501 until wired)
+          No webhook — creation works from any deploy, including protected previews.
         </p>
       </div>
 

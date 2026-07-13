@@ -13,8 +13,10 @@
  *   /api/wildwood/github/app-manifest/callback
  *
  * State: __wildwood_github_app_state httpOnly cookie to mitigate CSRF / code injection.
- * Webhook: included by default per product decision — manifest includes hook_attributes
- *          pointing to `${origin}/api/wildwood/github/webhook` (placeholder).
+ * Webhook: opt-in only. When absent there is no long-lived server-to-server URL, so no
+ * permanent Vercel protection bypass is needed in GitHub's stored config. `redirect_url`
+ * is transient (single-use, 1h expiry) and may carry a `?x-vercel-protection-bypass=` param
+ * only when called from a protected preview — GitHub discards it after exchange.
  */
 
 import { H3 } from "h3";
@@ -141,6 +143,17 @@ export function createGitHubAppManifestRouter(client: WildwoodClient): H3 {
     return resolveEventOrigin(event);
   }
 
+  /** Prefer explicit user config, then Vercel prod host, then request origin — in that order. */
+  function resolveCanonicalOrigin(event: { url: URL; req: { headers: { get(n: string): string | null } } }): string {
+    const configured = (process.env.WILDWOOD_ORIGIN ?? process.env.NEXT_PUBLIC_ORIGIN ?? "").trim();
+    if (configured) return configured.replace(/\/+$/, "");
+
+    const prodHost = (process.env.VERCEL_PROJECT_PRODUCTION_URL ?? "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    if (prodHost) return `https://${prodHost}`;
+
+    return resolveOrigin(event).replace(/\/+$/, "");
+  }
+
   function defaultRedirectPath() {
     // As requested: bundled callback path.
     return "/api/wildwood/github/app-manifest/callback";
@@ -151,17 +164,47 @@ export function createGitHubAppManifestRouter(client: WildwoodClient): H3 {
     return o.replace(/\/+$/, "");
   }
 
+  /** Build redirect_url, transiently adding Vercel bypass param on previews when available. */
+  function buildCallbackUrl(origin: string): string {
+    const base = `${origin}${defaultRedirectPath()}`;
+    // Only needed when this deployment is a protected preview. `redirect_url` is
+    // discarded by GitHub after the manifest exchange, so the secret is not
+    // stored long-term anywhere, though it briefly appears in browser history.
+    const secret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+    const isPreview = process.env.VERCEL_ENV === "preview";
+    if (!secret || !isPreview) return base;
+    try {
+      const u = new URL(base);
+      if (!u.searchParams.has("x-vercel-protection-bypass")) {
+        u.searchParams.set("x-vercel-protection-bypass", secret);
+      }
+      return u.toString();
+    } catch {
+      return base;
+    }
+  }
+
   // ── GET / — inspect defaults ──────────────────────────────────────
   router.get("/", async (event) => {
-    const origin = defaultOrigin(event);
+    const origin = resolveCanonicalOrigin(event);
     const redirectPath = defaultRedirectPath();
-    const redirectUrl = `${origin}${redirectPath}`;
+    const redirectUrl = buildCallbackUrl(origin);
+    const isUsingFallbackOrigin = !process.env.WILDWOOD_ORIGIN && !process.env.NEXT_PUBLIC_ORIGIN && !process.env.VERCEL_PROJECT_PRODUCTION_URL;
     const manifest = buildWildwoodGitHubAppManifest({
       name: `Wildwood ${client._.git?.config?.repo ?? "Dev"}`,
       url: origin,
       redirectUrl,
     });
-    return jsonResponse({ origin, redirectPath, redirectUrl, manifest });
+    return jsonResponse({
+      origin,
+      redirectPath,
+      redirectUrl,
+      usingFallbackOrigin: isUsingFallbackOrigin,
+      note: isUsingFallbackOrigin
+        ? "No production origin known — callback_urls will point at this preview and expire. Set WILDWOOD_ORIGIN or ensure a production deploy exists."
+        : undefined,
+      manifest,
+    });
   });
 
   // ── POST /start — set state cookie, return manifest + GitHub action URL ──
@@ -188,13 +231,17 @@ export function createGitHubAppManifestRouter(client: WildwoodClient): H3 {
       // keep defaults
     }
 
-    const origin = (body.origin?.trim() || originFromReq).replace(/\/+$/, "");
+    // Prefer canonical origin for stability, allow explicit body.origin override.
+    const canonical = resolveCanonicalOrigin(event);
+    const origin = (body.origin?.trim() || canonical || originFromReq).replace(/\/+$/, "");
     const redirectPath = (body.redirectPath?.trim() || defaultRedirectPath()).startsWith("/")
       ? (body.redirectPath?.trim() || defaultRedirectPath())
       : `/${(body.redirectPath?.trim() || defaultRedirectPath()).replace(/^\/+/, "")}`;
-    const redirectUrl = `${origin}${redirectPath}`;
+    const redirectUrl = buildCallbackUrl(origin);
     const oauthCallbackPath = body.oauthCallbackPath?.trim() || "/api/auth/callback/github";
-    const webhookUrl = body.webhookUrl?.trim() || `${origin}/api/wildwood/github/webhook`;
+    // webhookUrl is opt-in only — if omitted we don't create a webhook at all, which means
+    // no long-lived server-to-server URL to protect and no permanent bypass secret needed.
+    const webhookUrl = body.webhookUrl?.trim() || undefined;
 
     const name = body.name?.trim() || `Wildwood ${client._.git?.config?.repo ?? "Dev"}`;
 
@@ -203,12 +250,12 @@ export function createGitHubAppManifestRouter(client: WildwoodClient): H3 {
       url: origin,
       redirectUrl,
       callbackUrls: [`${origin}${oauthCallbackPath.startsWith("/") ? oauthCallbackPath : `/${oauthCallbackPath}`}`],
-      webhookUrl,
+      webhookUrl: webhookUrl || undefined,
       webhookActive: body.webhookActive ?? true,
       contents: (body.contents as GitHubPermissionLevel) ?? "write",
       pullRequests: (body.pullRequests as GitHubPermissionLevel) ?? "write",
       public: body.public ?? false,
-      defaultEvents: body.events ?? ["pull_request", "push"],
+      defaultEvents: body.events ?? (webhookUrl ? ["pull_request", "push"] : []),
       description: body.description,
     });
 

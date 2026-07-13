@@ -9,6 +9,7 @@ type Props = {
   /** Defaults to bundled callback */
   redirectPath?: string;
   oauthCallbackPath?: string;
+  /** Opt-in only — when omitted app is created with no webhook and no long-lived URL. */
   webhookUrl?: string;
 };
 
@@ -42,10 +43,10 @@ export function WildwoodGitHubAppSetup({
           url: o,
           redirect_url: `${o}${redirectPath}`,
           callback_urls: [`${o}${oauthCallbackPath}`],
-          hook_attributes: { url: webhookUrl ?? `${o}/api/wildwood/github/webhook`, active: true },
+          ...(webhookUrl ? { hook_attributes: { url: webhookUrl, active: true } } : {}),
           public: false,
           default_permissions: { contents: "write", pull_requests: "write", metadata: "read" },
-          default_events: ["pull_request", "push"],
+          default_events: webhookUrl ? ["pull_request", "push"] : [],
         },
         null,
         2,
@@ -101,7 +102,8 @@ export function WildwoodGitHubAppSetup({
       <h2 className="text-base font-semibold">GitHub App setup</h2>
       <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
         Creates a GitHub App via Manifest flow. Redirects to the bundled callback <code>/api/wildwood/github/app-manifest/callback</code> which
-        exchanges the code and shows Vercel CLI + <code>.env.local</code> snippets. Webhook placeholder included per product plan.
+        exchanges the code and shows Vercel CLI + <code>.env.local</code> snippets. No webhook by default — app creation works from any
+        deployment including protected previews.
       </p>
 
       <div className="mt-4 grid gap-3">
