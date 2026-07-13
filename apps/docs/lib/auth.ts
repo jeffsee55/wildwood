@@ -19,7 +19,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqliteDialect } from "kysely";
-import Database from "better-sqlite3";
 
 // Inlined as ultimate fallback so Vercel build never fails on missing FS file.
 // Generated from packages/wildwood/src/sqlite/better-auth-schema.sql
@@ -49,9 +48,23 @@ function resolveFilePath(url: string): string {
 }
 
 function makeBetterSqlite3(dbPath: string) {
+  // Sync optional require — dev only. Production on Vercel uses LibSQL,
+  // so this is never hit there and native build isn't required.
+  // We use createRequire to avoid static import that would force pnpm
+  // to install the native dep on Vercel (causing ERR_PNPM_OUTDATED_LOCKFILE).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const Ctor = (Database as any).default ?? Database;
-  return new Ctor(dbPath);
+  let DatabaseCtor: any;
+  try {
+    // `eval("require")` prevents Turbopack from tracing the dep.
+    const req = eval("require") as NodeRequire;
+    const mod = req("better-sqlite3");
+    DatabaseCtor = (mod as any).default ?? mod;
+  } catch {
+    throw new Error(
+      "better-sqlite3 is required for file: database URLs. Install it locally or set TURSO_DATABASE_URL / WILDWOOD_DOCS_DATABASE_URL for production.",
+    );
+  }
+  return new DatabaseCtor(dbPath);
 }
 
 async function readSchemaSql(): Promise<string> {

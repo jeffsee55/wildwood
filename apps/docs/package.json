@@ -14,7 +14,6 @@
     "@libsql/client": "^0.14.0",
     "@libsql/kysely-libsql": "^0.4.1",
     "better-auth": "^1.6.11",
-    "better-sqlite3": "^9.4.3",
     "kysely": "^0.28.8",
     "wildwood-kit": "workspace:*",
     "wildwood-shared": "workspace:*",
