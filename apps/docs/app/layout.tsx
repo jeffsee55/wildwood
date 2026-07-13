@@ -28,7 +28,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     <html lang="en" className={`${geistMono.variable} antialiased`} suppressHydrationWarning>
       <body className="min-h-screen">
         {/* top rule — man header */}
-        <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80">
           <div className="mx-auto flex h-11 w-full max-w-[112ch] items-center justify-between gap-6 px-6 tabular-nums">
             <div className="flex items-center gap-8">
               <Link
