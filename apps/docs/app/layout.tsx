@@ -17,7 +17,7 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({
   children,
-}) {
+}: Readonly<{ children: React.ReactNode }>) {
   const navRes = await wildwood.nav.findMany({ with: { children: true } });
   const nav = navRes?.items?.[0]
   if (!nav) {
