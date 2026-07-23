@@ -1,4 +1,4 @@
-import { createClient as libsqlCreateClient, type Client as LibsqlClient } from "@libsql/client";
+import type { Client as LibsqlClient } from "@libsql/client";
 import type { WildwoodGitHubAuth } from "@/client/auth";
 import { normalizeProviderConfig, type WildwoodProviderConfig } from "@/client/auth";
 import { Config, type AnyCollections, type DefineConfigInput } from "@/client/config";
@@ -11,21 +11,18 @@ import { LibsqlDatabase } from "@/sqlite/database";
 import type { FindWorktreeEntriesArgs } from "@/types";
 
 /**
- * How to obtain the LibSQL/Turso client. We accept an already-constructed client
- * (tests, advanced hosts) OR a lazy spec (`{ url, authToken }` or a `file:`/url
- * string) that we construct on first query.
+ * The database driver, supplied from userland. Wildwood does NOT construct or
+ * bundle a driver — you pass an already-constructed client (today: a LibSQL /
+ * Turso `@libsql/client` instance). This keeps the native driver out of
+ * Wildwood's dependency graph and lets hosts own the connection.
  *
- * Why a spec and not just a client: constructing the LibSQL client at module
- * scope opens a native/remote handle during Next's build-worker module
- * evaluation (the source of the "id must be a string" crash under
- * `cacheComponents`). Deferring construction keeps importing the module-scope
- * client inert, so it is safe to reference inside `"use cache"` — no separate
- * read-only client factory needed.
+ * Passing a live client is safe at module scope: Wildwood never touches it until
+ * the first query, so importing the module stays inert (safe inside
+ * `"use cache"` and Next's build-worker module evaluation). Just don't perform
+ * the driver's own connection work at module scope if your driver connects
+ * eagerly.
  */
-export type WildwoodDatabaseInput =
-  | LibsqlClient
-  | { url: string; authToken?: string | undefined }
-  | string;
+export type WildwoodDatabaseInput = LibsqlClient;
 
 /**
  * `createClient` captures `Colls` literally from `Config<Colls>` so `FindTypes`
@@ -46,25 +43,21 @@ function isLibsqlClient(input: WildwoodDatabaseInput): input is LibsqlClient {
 }
 
 /**
- * Turn a database input into a lazy, memoized factory. The live client is only
- * constructed on first call — never at module-evaluation time.
+ * Wildwood takes the driver as-is from userland — no construction. Returns the
+ * client (or null when none was passed). The client is only *used* on the first
+ * query, so holding it here at module scope is inert.
  */
 function resolveDatabaseFactory(
   input: WildwoodDatabaseInput | undefined,
 ): (() => LibsqlClient) | null {
   if (input == null) return null;
-  if (typeof input === "string") {
-    const url = input.trim();
-    if (!url) return null;
-    return () => libsqlCreateClient({ url });
-  }
   if (isLibsqlClient(input)) {
     return () => input;
   }
-  const url = input.url?.trim();
-  if (!url) return null;
-  const authToken = input.authToken?.trim() || undefined;
-  return () => libsqlCreateClient({ url, ...(authToken ? { authToken } : {}) });
+  throw new Error(
+    "wildwood: `database` must be a constructed client instance (e.g. `@libsql/client`'s createClient(...)). " +
+      "Passing a connection string or `{ url, authToken }` is no longer supported — construct the driver in userland and pass it in.",
+  );
 }
 
 function emptyConfigStub<Colls extends AnyCollections>(): Config<Colls> {
@@ -257,13 +250,20 @@ export const createClient = <Colls extends AnyCollections = AnyCollections>(
  * GitHub credential object — so there is no separate `defineConfig` step
  * required (though `defineConfig` is still exported for advanced use).
  *
- * Env vars stay explicit in userland:
+ * Bring your own driver — construct the DB client in userland and pass it in:
+ *
+ *   import { createClient as createLibsql } from "@libsql/client";
+ *
+ *   const db = createLibsql({
+ *     url: process.env.TURSO_DATABASE_URL!,
+ *     authToken: process.env.TURSO_AUTH_TOKEN,
+ *   });
  *
  *   export const ww = wildwood({
  *     org: process.env.MY_ORG,
  *     repo: process.env.MY_REPO,
  *     collections: { docs },
- *     database: { url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN },
+ *     database: db,
  *     github: {
  *       appId: process.env.GITHUB_APP_ID,
  *       privateKey: process.env.GITHUB_PRIVATE_KEY,
@@ -274,7 +274,7 @@ export const createClient = <Colls extends AnyCollections = AnyCollections>(
  *   });
  */
 export type WildwoodInput<Colls extends AnyCollections> = DefineConfigInput<Colls> & {
-  /** LibSQL/Turso client, `{ url, authToken }` spec, or a `file:`/url string. */
+  /** The DB driver, constructed in userland (e.g. a `@libsql/client` instance). */
   database?: WildwoodDatabaseInput | undefined;
   /** The single GitHub credential object — reused by git transport and CMS sign-in. */
   github?: WildwoodGitHubAuth | undefined;

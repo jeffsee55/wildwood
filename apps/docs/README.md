@@ -51,14 +51,22 @@ BETTER_AUTH_SECRET=…                   # openssl rand -base64 32
 ALLOWED_EMAILS=you@example.com,other@example.com   # parsed in userland, not wildwood
 ```
 
-Client (`lib/wildwood.ts`) — one flat `wildwood({...})` call. Live handles (LibSQL,
-Octokit) are built lazily on first query, so this module-scope value is safe to
-reference directly inside `"use cache"` (no separate read-only client):
+Client (`lib/wildwood.ts`) — one flat `wildwood({...})` call. Bring your own DB
+driver and pass the constructed client in via `database:`. Live handles (the DB
+client, Octokit) are only touched on first query, so this module-scope value is
+safe to reference directly inside `"use cache"` (no separate read-only client):
 
 ```ts
+import { createClient as createLibsql } from "@libsql/client";
+
+const db = createLibsql({
+  url: process.env.TURSO_DATABASE_URL!,
+  authToken: process.env.TURSO_AUTH_TOKEN,
+});
+
 export const wildwood = createWildwood({
   collections: { authors, docs, nav },
-  database: { url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN },
+  database: db,
   github: {
     type: "app",
     appId: process.env.GITHUB_APP_ID,

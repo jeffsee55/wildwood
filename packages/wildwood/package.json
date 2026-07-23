@@ -46,7 +46,6 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@libsql/client": "catalog:",
     "@libsql/kysely-libsql": "catalog:",
     "@octokit/auth-app": "catalog:",
     "@octokit/graphql": "catalog:",
@@ -80,6 +79,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@libsql/client": "catalog:",
     "@types/better-sqlite3": "^7.6.11",
     "@types/fs-extra": "^11.0.4",
     "@types/js-yaml": "^4.0.9",
@@ -101,9 +101,13 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
+    "@libsql/client": "^0.14.0",
     "next": "^16.0.0"
   },
   "peerDependenciesMeta": {
+    "@libsql/client": {
+      "optional": true
+    },
     "next": {
       "optional": true
     }

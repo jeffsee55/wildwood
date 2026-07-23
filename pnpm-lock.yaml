@@ -422,9 +422,6 @@ importers:
 
   packages/wildwood:
     dependencies:
-      '@libsql/client':
-        specifier: 'catalog:'
-        version: 0.14.0
       '@libsql/kysely-libsql':
         specifier: 'catalog:'
         version: 0.4.1(kysely@0.28.17)
@@ -519,6 +516,9 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
     devDependencies:
+      '@libsql/client':
+        specifier: 'catalog:'
+        version: 0.14.0
       '@types/better-sqlite3':
         specifier: ^7.6.11
         version: 7.6.12
