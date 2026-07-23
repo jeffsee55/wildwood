@@ -1,9 +1,14 @@
 import { createWildwoodRoute } from "wildwood/nextjs/route";
 import { getPlaygroundWildwood } from "@/lib/wildwood";
+import { PLAYGROUND_CONTENT_TAG } from "@/lib/playground-data";
 import { cookiesFromCookieHeader } from "wildwood/nextjs/branch";
 
 /**
  * Single route for play — request-aware because org/repo comes from config cookie.
+ *
+ * Cache tags: `playground` now opts into Data Cache via `cacheComponents: true`
+ * + `"use cache"` + `cacheTag(PLAYGROUND_CONTENT_TAG)` inside `getPlaygroundViewData`.
+ * `revalidateTagName` here is what the mutation hook purges (commit etc).
  *
  * New API:
  * - DB is NOT configured here — auth reuses the DB from `getPlaygroundWildwood()` / wildwood client.
@@ -18,6 +23,7 @@ export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createWildwoodRo
   },
   {
     requestAware: true,
+    revalidateTagName: PLAYGROUND_CONTENT_TAG,
     auth: {
       secret: process.env.BETTER_AUTH_SECRET,
       github: true,

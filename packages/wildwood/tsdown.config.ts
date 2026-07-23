@@ -4,12 +4,18 @@ import path from "node:path";
 
 type ChunkInfo = { name: string; facadeModuleId?: string | null };
 
+// In `--watch` mode (dev), don't clean `dist/` on startup: consumers (e.g.
+// apps' `next.config.ts` importing `wildwood/nextjs/config`) resolve from
+// `dist` and would hit a missing-module race during the empty rebuild window.
+const isWatch = process.argv.includes("--watch");
+
 export default defineConfig([
-  // ── main library (everything except client-boundary) ─────────────────
+  // ── main library (everything except client-boundary) ────────────────
   {
     entry: [
       "src/index.ts",
       "src/nextjs/index.ts",
+      "src/nextjs/config.ts",
       "src/nextjs/handler.ts",
       "src/nextjs/route.ts",
       "src/nextjs/branch.ts",
@@ -23,7 +29,7 @@ export default defineConfig([
     ],
     dts: true,
     outDir: "dist",
-    clean: true,
+    clean: !isWatch,
     exports: true,
     // `wildwood-store` and `wildwood-shared` are pure ESM/JS — always bundle for
     // consumers. Do NOT bundle `wildwood-kit` — it has `'use client'` and must
@@ -53,10 +59,12 @@ export default defineConfig([
       "next/dynamic",
       "next/link",
       "wildwood-kit",
-      // Native / heavy — play-only
+      // Native / heavy — play-only. Also keep any sub-paths external so Turbopack
+      // doesn't trace them through packages/wildwood/dist and emit the
+      // "unexpected file in NFT list" + "id must be string" build-worker crash.
       "better-sqlite3",
       "better-auth",
-      "better-auth/next-js",
+      "better-auth/*",
       "kysely",
       "@libsql/client",
       "@libsql/kysely-libsql",

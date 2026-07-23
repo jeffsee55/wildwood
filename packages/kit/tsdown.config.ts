@@ -29,6 +29,7 @@ function tailwindPlugin(): Plugin {
 export default defineConfig({
   platform: "neutral",
   entry: "./src/lib/index.tsx",
+  tsconfig: "./tsconfig.build.json",
   dts: { build: true },
   exports: true,
   plugins: [tailwindPlugin()],

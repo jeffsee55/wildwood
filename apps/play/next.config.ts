@@ -1,7 +1,7 @@
-import type { NextConfig } from "next";
+import { withWildwood } from "wildwood/nextjs/config";
 
-const nextConfig: NextConfig = {
-  transpilePackages: ["wildwood", "wildwood-kit", "wildwood-shared", "wildwood-store"],
-};
-
-export default nextConfig;
+export default withWildwood({
+  cacheComponents: true,
+  // play bundles `wildwood` from source (workspace) rather than dist.
+  transpilePackages: ["wildwood"],
+});

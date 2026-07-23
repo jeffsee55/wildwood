@@ -147,18 +147,25 @@ export type WildwoodAuthInstance = {
   api: { getSession(a: { headers: Headers }): Promise<unknown> };
 };
 
+// `better-auth` + subpaths must stay opaque to Turbopack with `cacheComponents:true`.
+// Bare `import("better-auth/next-js")` inside `auth.mjs` causes the build worker
+// to crash ("id must be string") when traced from a cached page. We use
+// `new Function` indirection which Turbopack treats as external/opaque and Node
+// evaluates at runtime. `better-auth` lives in the host app's node_modules, not
+// in `packages/wildwood/dist`.
+//
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
+const dynImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
 
 async function loadBetterAuthDeps() {
   const [{ betterAuth }, { LibsqlDialect }, { nextCookies }] = await Promise.all([
-    dynamicImport("better-auth") as Promise<{
+    dynImport("better-auth") as Promise<{
       betterAuth: (o: BetterAuthOptions) => WildwoodAuthInstance;
     }>,
-    dynamicImport("@libsql/kysely-libsql") as Promise<{
+    dynImport("@libsql/kysely-libsql") as Promise<{
       LibsqlDialect: new (a: unknown) => unknown;
     }>,
-    dynamicImport("better-auth/next-js") as Promise<{ nextCookies: () => unknown }>,
+    dynImport("better-auth/next-js") as Promise<{ nextCookies: () => unknown }>,
   ]);
   return { betterAuth, LibsqlDialect, nextCookies };
 }

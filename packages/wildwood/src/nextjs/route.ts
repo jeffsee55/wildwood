@@ -321,20 +321,25 @@ export function createWildwoodRoute(
 
   // Lazy auth singleton — only constructed if auth config is provided AND a request needs it.
   // Keeps `better-auth` out of the bundle for apps without auth.
-  // IMPORTANT: use eval("import") indirection so Turbopack doesn't trace
-  // packages/wildwood/dist/nextjs/auth.mjs → bare `better-auth` at build time.
-  // At build time Turbopack would try to resolve `better-auth` relative to
-  // packages/wildwood/ and fail with "Module not found", even though apps/docs
-  // has better-auth as direct dep. Runtime import works because Vercel λ's
-  // node_modules has it. This is the same fix that made lib/auth.ts self-contained before.
+  //
+  // Previously this used `new Function("return import(s)")` indirection to avoid
+  // Turbopack tracing `better-auth` relative to `packages/wildwood/dist`. That hack
+  // breaks under `cacheComponents: true` (build worker `id` must be a string).
+  // New approach: static bare import is marked `external` in tsdown + `serverExternalPackages`
+  // in app's next.config, so Turbopack keeps it external without needing eval.
+  // `getAuthModule` must not be statically analyzable by Turbopack in the main
+  // chunk (route.mjs). With `cacheComponents:true`, any bare `import("better-auth")`
+  // inside route.mjs — even via `import("./auth.js")` where auth imports better-auth —
+  // is eagerly traced and the build worker crashes with "id must be string".
+  // Solution: use `new Function` indirection that Turbopack treats as opaque,
+  // and Node at runtime evaluates correctly. We do this ONLY for the auth lazy path.
   type AuthBundle = typeof import("./auth");
   let authModulePromise: Promise<AuthBundle> | null = null;
   function getAuthModule(): Promise<AuthBundle> {
     if (!authModulePromise) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
-      // dist auth chunk is sibling of route chunk
-      authModulePromise = dynamicImport("./auth.mjs") as Promise<AuthBundle>;
+      const dyn = new Function("s", "return import(s)") as (s: string) => Promise<any>;
+      authModulePromise = dyn("./auth.mjs") as Promise<AuthBundle>;
     }
     return authModulePromise;
   }
@@ -501,10 +506,11 @@ export function createWildwoodRoute(
     if (!inst) return NextResponse.json({ error: "Auth init failed" }, { status: 500 });
     await inst.ensureAuthSchema();
 
-    // Use eval indirection for same reason — don't let Turbopack trace better-auth/next-js at build.
+    // Same opaque indirection — keeps `better-auth/next-js` out of static graph
+    // so Cache Components build worker doesn't crash on "id must be string".
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
-    const { toNextJsHandler } = (await dynamicImport("better-auth/next-js")) as {
+    const dyn = new Function("s", "return import(s)") as (s: string) => Promise<any>;
+    const { toNextJsHandler } = (await dyn("better-auth/next-js")) as {
       toNextJsHandler: (a: unknown) => {
         GET: (r: Request) => Promise<Response>;
         POST: (r: Request) => Promise<Response>;

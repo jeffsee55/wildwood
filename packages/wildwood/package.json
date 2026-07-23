@@ -5,22 +5,21 @@
   "author": "Jeff See <jeff@wildwood.dev>",
   "license": "MIT",
   "type": "module",
-  "main": "./dist/index.mjs",
   "exports": {
     ".": "./dist/index.mjs",
     "./nextjs": "./dist/nextjs/index.mjs",
     "./nextjs/auth": "./dist/nextjs/auth.mjs",
     "./nextjs/branch": "./dist/nextjs/branch.mjs",
+    "./nextjs/config": "./dist/nextjs/config.mjs",
     "./nextjs/draft": "./dist/nextjs/draft.mjs",
     "./nextjs/handler": "./dist/nextjs/handler.mjs",
     "./nextjs/kit": "./dist/nextjs/kit.mjs",
     "./nextjs/resolve-active-ref": "./dist/nextjs/resolve-active-ref.mjs",
     "./nextjs/route": "./dist/nextjs/route.mjs",
-    "./package.json": "./package.json",
     "./react": "./dist/react/index.mjs",
-    "./react/markdown": "./dist/react/markdown.mjs"
+    "./react/markdown": "./dist/react/markdown.mjs",
+    "./package.json": "./package.json"
   },
-  "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "files": [
     "bundled-extension",
@@ -114,5 +113,12 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "inlinedDependencies": {
+    "@babel/runtime": "7.29.2",
+    "@types/mdast": "4.0.4",
+    "@types/unist": "3.0.3",
+    "@uiw/react-json-view": "2.0.0-alpha.43",
+    "react": "19.2.4"
   }
 }

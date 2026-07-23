@@ -1,6 +1,8 @@
 import { createClient as createLibsqlClient } from "@libsql/client";
 import { createClient, defineConfig, z } from "wildwood";
 
+export const WILDWOOD_CONTENT_TAG = "wildwood:docs-content" as const;
+
 const authors = z.collection({
   name: "authors",
   match: "content/authors/**/*.md",
@@ -30,7 +32,7 @@ const nav = z.collection({
   }),
 });
 
-const config = defineConfig({
+export const config = defineConfig({
   version: "1",
   collections: {
     authors,

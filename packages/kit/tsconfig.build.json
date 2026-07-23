@@ -4,8 +4,6 @@
     "noEmit": false,
     "declaration": true,
     "emitDeclarationOnly": true,
-    "outDir": "./dist",
-    "declarationDir": "./dist",
     "allowImportingTsExtensions": false,
     "paths": {
       "@/*": ["./src/*"]

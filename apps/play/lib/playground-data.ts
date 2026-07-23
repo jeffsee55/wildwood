@@ -1,23 +1,53 @@
-import { type PlaygroundConfig } from "./playground-config";
+import { cacheLife, cacheTag } from "next/cache";
+import { draftMode } from "next/headers";
+import { getBranch } from "wildwood/nextjs/branch";
+
+import { type PlaygroundConfig, stablePlaygroundTag } from "./playground-config";
 import { playDebug, playFailureHeadline, playInfo } from "./playground-log";
 import { buildPlaygroundWildwood } from "./wildwood";
+
+export const PLAYGROUND_CONTENT_TAG = "wildwood:playground-content";
 
 function playgroundDatabaseUrl(): string {
   return process.env.TURSO_DATABASE_URL?.trim() || "file:./wildwood.db";
 }
 
+async function draftActive(): Promise<boolean> {
+  try {
+    return (await draftMode()).isEnabled;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Fetches the `page` collection for the playground. Not wrapped in `"use cache"` or
- * `unstable_cache`: those only run the **inner** callback on a cache **miss**; on a
- * hit the body is skipped (so e.g. `console.log` / `findMany` won’t look “called” every time).
- * Server `console.log` also goes to the **dev terminal**, not the browser console.
+ * Cached playground fetch — `use cache` + `cacheTag` so
+ * `revalidateTag(PLAYGROUND_CONTENT_TAG)` from `createWildwoodRoute`
+ * busts playground previews too. Branch-scoped key via stable tag + ref.
+ *
+ * Previous version deliberately avoided `unstable_cache`. Now that
+ * `cacheComponents: true` is enabled in `apps/play`, `"use cache"` is stable
+ * and draftMode bypass is per-user (no global purge on enter).
  */
 export async function getPlaygroundViewData(
   ref: string,
   config: PlaygroundConfig,
 ): Promise<object> {
+  "use cache";
+  cacheLife("hours");
+  // Tag the view as a whole + branch-aware + config-aware so revalidate can be coarse or fine.
+  cacheTag(
+    PLAYGROUND_CONTENT_TAG,
+    `${PLAYGROUND_CONTENT_TAG}:${ref}`,
+    `${PLAYGROUND_CONTENT_TAG}:${stablePlaygroundTag(config)}`,
+  );
+
+  // Draft bypass is per-user — Next skips Data Cache for this user when enabled.
+  const draft = await draftActive();
+
   playDebug("viewData.start", {
     activeRef: ref,
+    draft,
     nextCwd: process.cwd(),
     nodeEnv: process.env.NODE_ENV,
     libsqlUrl: playgroundDatabaseUrl(),
@@ -89,3 +119,21 @@ export async function getPlaygroundViewData(
     );
   }
 }
+
+/**
+ * Non-cached wrapper used when we explicitly already resolved the branch via cookie.
+ * Keeps old signature for existing call-sites, but now delegates to cached fn.
+ */
+export async function getPlaygroundViewDataForBranch(config: PlaygroundConfig) {
+  // Resolve branch cookie from `next/headers` when available (server render), else config.ref.
+  let branch = config.ref;
+  try {
+    // getBranch expects a WildwoodClient-shaped object with _?.config?.ref; we can pass a stub.
+    const stub = { _: { config: { ref: config.ref } } } as unknown as Parameters<typeof getBranch>[0];
+    branch = await getBranch(stub);
+  } catch {
+    branch = config.ref;
+  }
+  return getPlaygroundViewData(branch, config);
+}
+

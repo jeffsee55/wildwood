@@ -1,10 +1,10 @@
 import { createWildwoodRoute } from "wildwood/nextjs/route";
-import { wildwood } from "@/lib/wildwood";
+import { wildwood, WILDWOOD_CONTENT_TAG } from "@/lib/wildwood";
 
 export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createWildwoodRoute(
   () => wildwood,
   {
-    revalidateTagName: "docs-content",
+    revalidateTagName: WILDWOOD_CONTENT_TAG,
     auth: {
       secret: process.env.BETTER_AUTH_SECRET,
       github: true,
