@@ -15,7 +15,7 @@ Copy `.env.example` → `.env.local` for dev. Wildwood itself reads zero `WILDWO
 
 ### Identity — zero-config on Vercel
 
-`defineConfig({ collections })` alone works when System Envs enabled:
+`wildwood({ collections })` alone works when System Envs enabled:
 
 - `org` → `VERCEL_GIT_REPO_OWNER` → git remote (dev)
 - `repo` → `VERCEL_GIT_REPO_SLUG` → git remote (dev)
@@ -51,18 +51,37 @@ BETTER_AUTH_SECRET=…                   # openssl rand -base64 32
 ALLOWED_EMAILS=you@example.com,other@example.com   # parsed in userland, not wildwood
 ```
 
-Route (`app/api/[...path]/route.ts`):
+Client (`lib/wildwood.ts`) — one flat `wildwood({...})` call. Live handles (LibSQL,
+Octokit) are built lazily on first query, so this module-scope value is safe to
+reference directly inside `"use cache"` (no separate read-only client):
 
 ```ts
-createWildwoodRoute(() => wildwood, {
+export const wildwood = createWildwood({
+  collections: { authors, docs, nav },
+  database: { url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN },
+  github: {
+    type: "app",
+    appId: process.env.GITHUB_APP_ID,
+    privateKey: process.env.GITHUB_PRIVATE_KEY,
+    installationId: process.env.GITHUB_APP_INSTALLATION_ID,
+    clientId: process.env.GITHUB_CLIENT_ID,        // OAuth sign-in — same App
+    clientSecret: process.env.GITHUB_CLIENT_SECRET,
+  },
+});
+```
+
+Route (`app/api/[...path]/route.ts`) — `createCMS` layers writes/auth on the client
+and reuses its single `github` credential object for sign-in (`github: true`):
+
+```ts
+export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createCMS(wildwood, {
   auth: {
-    database: { url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN },
     secret: process.env.BETTER_AUTH_SECRET,
     // baseURL omitted → autodetected from Request (x-forwarded-host/proto + origin)
     // Works for localhost, *.vercel.app previews, custom domains — no NEXT_PUBLIC_ORIGIN needed.
     // trustedOrigins omitted → defaults to derived origin. Map in userland if cross-domain:
     // trustedOrigins: (req) => [new URL(req!.url).origin, "https://studio.myapp.com"]
-    github: { clientId: process.env.GITHUB_CLIENT_ID!, clientSecret: process.env.GITHUB_CLIENT_SECRET! },
+    github: true, // reuses GITHUB_CLIENT_ID/SECRET from the client's `github` object
 
     authenticate: async ({ user }) => {
       const allow = (process.env.ALLOWED_EMAILS ?? "").split(",").map(s=>s.trim().toLowerCase()).filter(Boolean);

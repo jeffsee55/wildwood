@@ -16,7 +16,7 @@ import {
 } from "@/nextjs/read-bundled-extension-asset";
 import { getExtensionNlsJson, getExtensionPackageJson } from "@/nextjs/bundled-extension-bytes.gen";
 import { proxyMainVscodeCdnAsset, resolveVscodeWebCdn } from "@/nextjs/vscode-web-cdn";
-import { z } from "zod/v4";
+import z from "zod/v4";
 import {
   routeParamPath,
   routeParamString,

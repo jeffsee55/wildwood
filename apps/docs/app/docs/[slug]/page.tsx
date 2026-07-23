@@ -4,7 +4,7 @@ import { cacheLife, cacheTag } from "next/cache";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { Markdown } from "wildwood/react/markdown";
-import { WILDWOOD_CONTENT_TAG, createReadClient, getContext } from "@/lib/wildwood";
+import { WILDWOOD_CONTENT_TAG, getContext, wildwood } from "@/lib/wildwood";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -19,8 +19,7 @@ async function getDoc(opts: { slug: string; branch: string; isDraft: boolean }) 
   cacheLife("hours");
   cacheTag(WILDWOOD_CONTENT_TAG, `wildwood:branch:${opts.branch}`, `wildwood:doc:${opts.slug}`);
 
-  const ww = createReadClient();
-  return ww.docs.findFirst({
+  return wildwood.docs.findFirst({
     ref: opts.branch,
     where: { slug: opts.slug },
     with: { author: true },
@@ -32,8 +31,7 @@ export async function generateStaticParams() {
   cacheLife("hours");
   cacheTag(WILDWOOD_CONTENT_TAG);
 
-  const ww = createReadClient();
-  const res = await ww.docs.findMany({ ref: "main" }).catch(() => ({
+  const res = await wildwood.docs.findMany({ ref: "main" }).catch(() => ({
     items: [] as { slug: string }[],
   }));
   return res.items.map(({ slug }) => ({ slug }));
@@ -84,10 +82,14 @@ async function DocsContent({ slug }: { slug: string }) {
           <span className="ml-auto tabular-nums">{doc._meta.path ?? `${slug}.md`}</span>
         </div>
 
-        <h1 className="mt-5! border-0! pt-0! text-[26px]! normal-case! tracking-[-0.02em]!">{doc.title.toLowerCase()}</h1>
+        <h1 className="mt-5! border-0! pt-0! text-[26px]! normal-case! tracking-[-0.02em]!">
+          {doc.title.toLowerCase()}
+        </h1>
 
         {doc.description ? (
-          <p className="mt-3! max-w-[60ch] text-[12.5px]! leading-[1.95]! text-muted-foreground">{doc.description}</p>
+          <p className="mt-3! max-w-[60ch] text-[12.5px]! leading-[1.95]! text-muted-foreground">
+            {doc.description}
+          </p>
         ) : null}
       </header>
 
@@ -105,37 +107,70 @@ async function DocsContent({ slug }: { slug: string }) {
       <footer className="mt-16 border-t border-border pt-6 font-mono text-[11px] leading-[1.9] text-muted-foreground">
         <div className="uppercase tracking-[0.12em]">see also</div>
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-          <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/intro">
+          <Link
+            className="block underline decoration-border underline-offset-4 hover:decoration-foreground"
+            href="/docs/intro"
+          >
             intro
           </Link>
-          <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/configuration">
+          <Link
+            className="block underline decoration-border underline-offset-4 hover:decoration-foreground"
+            href="/docs/configuration"
+          >
             configuration
           </Link>
-          <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/schemas">
+          <Link
+            className="block underline decoration-border underline-offset-4 hover:decoration-foreground"
+            href="/docs/schemas"
+          >
             schemas
           </Link>
-          <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/querying">
+          <Link
+            className="block underline decoration-border underline-offset-4 hover:decoration-foreground"
+            href="/docs/querying"
+          >
             querying
           </Link>
-          <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/variants">
+          <Link
+            className="block underline decoration-border underline-offset-4 hover:decoration-foreground"
+            href="/docs/variants"
+          >
             variants
           </Link>
-          <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/branching">
+          <Link
+            className="block underline decoration-border underline-offset-4 hover:decoration-foreground"
+            href="/docs/branching"
+          >
             branching
           </Link>
-          <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/editor-routes">
+          <Link
+            className="block underline decoration-border underline-offset-4 hover:decoration-foreground"
+            href="/docs/editor-routes"
+          >
             editor-routes
           </Link>
-          <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/kit">
+          <Link
+            className="block underline decoration-border underline-offset-4 hover:decoration-foreground"
+            href="/docs/kit"
+          >
             kit
           </Link>
-          <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/deploy">
+          <Link
+            className="block underline decoration-border underline-offset-4 hover:decoration-foreground"
+            href="/docs/deploy"
+          >
             deploy
           </Link>
-          <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/api">
+          <Link
+            className="block underline decoration-border underline-offset-4 hover:decoration-foreground"
+            href="/docs/api"
+          >
             api
           </Link>
-          <Link className="block underline decoration-border underline-offset-4 hover:decoration-foreground" href="/docs/guides">
+          <Link
+            className="block underline decoration-border underline-offset-4 hover:decoration-foreground"
+            href="/docs/guides"
+          >
             guides
           </Link>
         </div>

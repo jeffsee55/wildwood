@@ -36,6 +36,11 @@ export type WildwoodGitHubAppAuth = {
  * Single resilient shape — not a discriminated union that forces casts.
  * All fields optional, tolerates `string | undefined` from env.
  * Supports both `{ type:"app", app:{...} }` and shorthand `{ appId, privateKey }`.
+ *
+ * This is the ONE GitHub credential object. The read/write git transport uses
+ * `appId`/`privateKey`/`installationId` (or `token`). The CMS layer's GitHub
+ * sign-in (`createCMS({ auth: { github: true } })`) reuses `clientId`/
+ * `clientSecret` from the SAME object — declare your GitHub App once.
  */
 export type WildwoodGitHubAuth = {
   type?: "app" | "token" | "default" | undefined;
@@ -45,6 +50,10 @@ export type WildwoodGitHubAuth = {
   appId?: string | number | undefined;
   privateKey?: string | undefined;
   installationId?: string | number | undefined;
+  // OAuth sign-in creds — used by the CMS layer's better-auth GitHub provider.
+  // Transport (git read/write) ignores these; sign-in ignores app/private key.
+  clientId?: string | undefined;
+  clientSecret?: string | undefined;
 };
 
 export type WildwoodProviderConfig = {
@@ -58,17 +67,27 @@ export function normalizeProviderConfig(
   const gh = input.github;
   if (!gh) return { github: undefined };
 
+  // OAuth sign-in creds live on the same object and are transport-agnostic —
+  // preserve them across every branch so the CMS layer can reuse them.
+  const clientId = trimOrUndefined(gh.clientId);
+  const clientSecret = trimOrUndefined(gh.clientSecret);
+  const oauth = {
+    ...(clientId !== undefined ? { clientId } : {}),
+    ...(clientSecret !== undefined ? { clientSecret } : {}),
+  };
+  const hasOauth = clientId !== undefined || clientSecret !== undefined;
+
   const type =
     typeof gh.type === "string" ? (gh.type.trim() as "app" | "token" | "default") : undefined;
 
   if (type === "token") {
     const token = trimOrUndefined(gh.token);
-    if (!token) return { github: undefined };
-    return { github: { type: "token", token } };
+    if (!token) return hasOauth ? { github: { ...oauth } } : { github: undefined };
+    return { github: { type: "token", token, ...oauth } };
   }
 
   if (type === "default") {
-    return { github: { type: "default" } };
+    return { github: { type: "default", ...oauth } };
   }
 
   // app-shaped: { app: { appId, privateKey, installationId } }
@@ -77,7 +96,7 @@ export function normalizeProviderConfig(
     const privateKey = trimOrUndefined(gh.app.privateKey);
     const installationId = trimStringOrNumber(gh.app.installationId);
     if (!appId && !privateKey && !installationId && type !== "app") {
-      return { github: undefined };
+      return hasOauth ? { github: { ...oauth } } : { github: undefined };
     }
     return {
       github: {
@@ -87,6 +106,7 @@ export function normalizeProviderConfig(
           ...(privateKey !== undefined ? { privateKey } : {}),
           ...(installationId !== undefined ? { installationId } : {}),
         },
+        ...oauth,
       },
     };
   }
@@ -97,7 +117,9 @@ export function normalizeProviderConfig(
     const appId = trimStringOrNumber(gh.appId);
     const privateKey = trimOrUndefined(gh.privateKey);
     const installationId = trimStringOrNumber(gh.installationId);
-    if (!appId && !privateKey && !installationId) return { github: undefined };
+    if (!appId && !privateKey && !installationId) {
+      return hasOauth ? { github: { ...oauth } } : { github: undefined };
+    }
     return {
       github: {
         type: "app",
@@ -106,9 +128,13 @@ export function normalizeProviderConfig(
           ...(privateKey !== undefined ? { privateKey } : {}),
           ...(installationId !== undefined ? { installationId } : {}),
         },
+        ...oauth,
       },
     };
   }
+
+  // Only OAuth creds were provided (sign-in without git App transport).
+  if (hasOauth) return { github: { ...oauth } };
 
   // Fallback: if caller passed raw env values directly (e.g. token string trimmed elsewhere)
   // but we already handled token above, so nothing to do.

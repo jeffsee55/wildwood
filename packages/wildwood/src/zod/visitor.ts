@@ -1,5 +1,5 @@
 import type { Position } from "unist";
-import { z } from "zod/v4";
+import z from "zod/v4";
 import { registry } from "@/zod/extensions";
 
 type ZodVisitorArgs = {

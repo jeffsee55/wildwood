@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { minimatch } from "minimatch";
-import { z } from "zod/v4";
+import z from "zod/v4";
 import {
   resolveOrg as envResolveOrg,
   resolveRepo as envResolveRepo,

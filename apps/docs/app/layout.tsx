@@ -4,12 +4,7 @@ import Link from "next/link";
 import { cacheLife, cacheTag } from "next/cache";
 import { Suspense } from "react";
 import { Toolbar } from "wildwood/nextjs/kit";
-import {
-  WILDWOOD_CONTENT_TAG,
-  createReadClient,
-  getContext,
-  wildwood,
-} from "@/lib/wildwood";
+import { WILDWOOD_CONTENT_TAG, getContext, wildwood } from "@/lib/wildwood";
 import "./globals.css";
 
 const geistMono = Geist_Mono({
@@ -27,8 +22,7 @@ async function getNav(opts: { branch: string; isDraft: boolean }) {
   cacheLife("hours");
   cacheTag(WILDWOOD_CONTENT_TAG, `wildwood:branch:${opts.branch}`);
 
-  const ww = createReadClient();
-  const res = await ww.nav.findMany({ ref: opts.branch, with: { children: true } });
+  const res = await wildwood.nav.findMany({ ref: opts.branch, with: { children: true } });
   return res.items[0] ?? null;
 }
 

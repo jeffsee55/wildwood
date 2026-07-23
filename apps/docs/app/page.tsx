@@ -2,15 +2,14 @@ import Link from "next/link";
 import { cacheLife, cacheTag } from "next/cache";
 import { Suspense } from "react";
 import { Markdown } from "wildwood/react/markdown";
-import { WILDWOOD_CONTENT_TAG, createReadClient, getContext } from "@/lib/wildwood";
+import { WILDWOOD_CONTENT_TAG, getContext, wildwood } from "@/lib/wildwood";
 
 async function getDocsList(opts: { branch: string; isDraft: boolean }) {
   "use cache";
   cacheLife("hours");
   cacheTag(WILDWOOD_CONTENT_TAG, `wildwood:branch:${opts.branch}`);
 
-  const ww = createReadClient();
-  return ww.docs.findMany({ ref: opts.branch });
+  return wildwood.docs.findMany({ ref: opts.branch });
 }
 
 export default function Home() {
@@ -93,7 +92,7 @@ async function HomeContent() {
           </dd>
           <dt className="uppercase tracking-[0.08em] text-muted-foreground">app/api/[...path]/route.ts</dt>
           <dd>
-            one catch-all: <code>createWildwoodRoute</code> owns <code>/git/*</code>, <code>/wildwood/draft</code>,{" "}
+            one catch-all: <code>createCMS</code> owns <code>/git/*</code>, <code>/wildwood/draft</code>,{" "}
             <code>/wildwood/preview</code>
           </dd>
         </dl>

@@ -1,4 +1,4 @@
-import { z } from "zod/v4";
+import z from "zod/v4";
 import type { AnyCollection } from "@/client/config";
 import type { WhereClause, WithClause } from "@/types";
 

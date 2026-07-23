@@ -1,4 +1,4 @@
-import { z as zod } from "zod/v4";
+import zod from "zod/v4";
 import { collection, connect, filter, json, markdown, variant } from "@/zod/extensions";
 
 export {
@@ -10,7 +10,13 @@ export {
   type ConfigObject,
   type DefineConfigInput,
 } from "@/client/config";
-export { createClient, type WildwoodClient } from "@/client/index";
+export {
+  createClient,
+  wildwood,
+  type WildwoodClient,
+  type WildwoodInput,
+  type WildwoodDatabaseInput,
+} from "@/client/index";
 // Provider / git transport types (transport-only, no authz)
 export type {
   WildwoodGitHubAppAuth,

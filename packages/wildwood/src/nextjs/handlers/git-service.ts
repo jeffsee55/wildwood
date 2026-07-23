@@ -1,5 +1,5 @@
 import { H3 } from "h3";
-import { z } from "zod/v4";
+import z from "zod/v4";
 import type { WildwoodClient } from "@/client/index";
 import { gitObjectCacheHeaders } from "@/nextjs/vscode-embed-csp";
 import type { WildwoodAuthAction } from "@/nextjs/auth";

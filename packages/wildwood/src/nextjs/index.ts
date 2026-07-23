@@ -52,6 +52,7 @@ export {
 // but we re-export the same consts under aliases here to keep the top-level
 // barrel deduplicated without TS duplicate-export errors.
 export {
+  createCMS,
   createRoute,
   createWildwoodRoute,
   createWildwoodRouteHandlers,

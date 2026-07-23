@@ -660,3 +660,63 @@ export function createWildwoodRoute(
 
 export const createWildwoodRouteHandlers = createWildwoodRoute;
 export const createRoute = createWildwoodRoute;
+
+/**
+ * Pull the OAuth sign-in creds off the read client's single GitHub credential
+ * object. Lets `createCMS(ww, { auth: { github: true } })` reuse the SAME
+ * `clientId`/`clientSecret` you configured on `wildwood({ github })` — declare
+ * the GitHub App once. Env (`GITHUB_CLIENT_ID`/`SECRET`) still works as a
+ * fallback via `normalizeGithubProvider`.
+ */
+function reuseGithubSignInFromClient(
+  client: WildwoodRouteClientInput,
+  opts: CreateWildwoodRouteOptions,
+): CreateWildwoodRouteOptions {
+  const authOpts = opts.auth;
+  if (!authOpts) return opts;
+
+  // Only inject when sign-in is requested but creds weren't given explicitly.
+  const wantsGithub = authOpts.github === true || opts.providers?.github === true;
+  if (!wantsGithub) return opts;
+
+  const gh = (client as { _?: { provider?: { github?: unknown } } })?._?.provider?.github as
+    | { clientId?: string; clientSecret?: string }
+    | undefined;
+  const clientId = typeof gh?.clientId === "string" ? gh.clientId.trim() || undefined : undefined;
+  const clientSecret =
+    typeof gh?.clientSecret === "string" ? gh.clientSecret.trim() || undefined : undefined;
+  if (!clientId || !clientSecret) return opts;
+
+  return { ...opts, auth: { ...authOpts, github: { clientId, clientSecret } } };
+}
+
+/**
+ * `createCMS(client, options)` — the CMS layer on top of the read client.
+ *
+ * Composes with `wildwood()`:
+ *
+ *   const ww = wildwood({ ...identity, collections, database, github });
+ *   export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } =
+ *     createCMS(ww, { auth: { secret, github: true, authenticate, authorize } });
+ *
+ * It owns everything write/auth related — mutation endpoints, better-auth,
+ * `authenticate`/`authorize`, branch cookie, `revalidateTag`, capabilities —
+ * and reuses `ww`'s single GitHub credential object for sign-in.
+ *
+ * Returns the HTTP handler object (so the one-line destructure above works) with
+ * the read `client` attached as `.client`. Attaching (rather than nesting under
+ * `.route`) keeps the common route-file export a one-liner while still making
+ * the client reachable for server actions / mutation calls:
+ *
+ *   const cms = createCMS(ww, { auth });
+ *   export const { GET, POST } = cms;   // handlers
+ *   // cms.client → the read client
+ */
+export function createCMS<Client extends WildwoodRouteClientInput>(
+  client: Client,
+  opts: CreateWildwoodRouteOptions = {},
+) {
+  const merged = reuseGithubSignInFromClient(client, opts);
+  const handlers = createWildwoodRoute(() => client, merged);
+  return Object.assign(handlers, { client });
+}

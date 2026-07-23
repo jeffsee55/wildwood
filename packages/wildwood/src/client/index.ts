@@ -1,6 +1,7 @@
-import type { Client as LibsqlClient } from "@libsql/client";
+import { createClient as libsqlCreateClient, type Client as LibsqlClient } from "@libsql/client";
+import type { WildwoodGitHubAuth } from "@/client/auth";
 import { normalizeProviderConfig, type WildwoodProviderConfig } from "@/client/auth";
-import { Config, type AnyCollections } from "@/client/config";
+import { Config, type AnyCollections, type DefineConfigInput } from "@/client/config";
 import type { OrmConfig } from "@/client/types";
 import { Git } from "@/git/git";
 import { GitHubRemote } from "@/git/remote/github";
@@ -10,18 +11,61 @@ import { LibsqlDatabase } from "@/sqlite/database";
 import type { FindWorktreeEntriesArgs } from "@/types";
 
 /**
+ * How to obtain the LibSQL/Turso client. We accept an already-constructed client
+ * (tests, advanced hosts) OR a lazy spec (`{ url, authToken }` or a `file:`/url
+ * string) that we construct on first query.
+ *
+ * Why a spec and not just a client: constructing the LibSQL client at module
+ * scope opens a native/remote handle during Next's build-worker module
+ * evaluation (the source of the "id must be a string" crash under
+ * `cacheComponents`). Deferring construction keeps importing the module-scope
+ * client inert, so it is safe to reference inside `"use cache"` — no separate
+ * read-only client factory needed.
+ */
+export type WildwoodDatabaseInput =
+  | LibsqlClient
+  | { url: string; authToken?: string | undefined }
+  | string;
+
+/**
  * `createClient` captures `Colls` literally from `Config<Colls>` so `FindTypes`
  * can infer connections/filters. All fields optional where possible — no
  * required fields that block scaffolding. Provider is git transport only.
- * All `authenticate`/`authorize` lives on `createWildwoodRoute({ auth })`.
+ * All `authenticate`/`authorize` lives on `createCMS({ auth })`.
  *
  * Internally we trim / normalize so callers can pass `process.env.X` directly.
  */
 export type WildwoodCreateClientArgs<Colls extends AnyCollections> = {
   provider?: WildwoodProviderConfig | undefined;
   config?: Config<Colls> | undefined;
-  database?: LibsqlClient | undefined;
+  database?: WildwoodDatabaseInput | undefined;
 };
+
+function isLibsqlClient(input: WildwoodDatabaseInput): input is LibsqlClient {
+  return typeof input === "object" && input !== null && typeof (input as LibsqlClient).execute === "function";
+}
+
+/**
+ * Turn a database input into a lazy, memoized factory. The live client is only
+ * constructed on first call — never at module-evaluation time.
+ */
+function resolveDatabaseFactory(
+  input: WildwoodDatabaseInput | undefined,
+): (() => LibsqlClient) | null {
+  if (input == null) return null;
+  if (typeof input === "string") {
+    const url = input.trim();
+    if (!url) return null;
+    return () => libsqlCreateClient({ url });
+  }
+  if (isLibsqlClient(input)) {
+    return () => input;
+  }
+  const url = input.url?.trim();
+  if (!url) return null;
+  const authToken = input.authToken?.trim() || undefined;
+  return () => libsqlCreateClient({ url, ...(authToken ? { authToken } : {}) });
+}
 
 function emptyConfigStub<Colls extends AnyCollections>(): Config<Colls> {
   // Minimal object that satisfies Config shape without getters colliding.
@@ -81,20 +125,41 @@ function emptyConfigStub<Colls extends AnyCollections>(): Config<Colls> {
   return inst;
 }
 
+/** Internal `_` bag shared by every client. Named so the dts emitter references it. */
+export type WildwoodClientInternals = {
+  config: Config;
+  provider?: WildwoodProviderConfig | undefined;
+  git: Git;
+  logger: Logger;
+  db: LibsqlDatabase;
+};
+
+/**
+ * Explicit return type for `createClient`/`wildwood`, keyed on the literal
+ * collections.
+ *
+ * IMPORTANT: this MUST be an explicit named alias with `OrmConfig<...>` left
+ * unresolved (generic). Without it, the return type is *inferred*, and
+ * `rolldown-plugin-dts` eagerly expands `OrmConfig`'s default type args
+ * (`Opts`/`CM`/`FM`) while bundling `.d.mts`. That expansion overruns the
+ * emitter's depth limit and gets replaced with `/*elided* / any`, which is why
+ * `findFirst()`/`findMany()` degraded to `value: any` for consumers reading the
+ * built types (source-based consumers were unaffected). Referencing `OrmConfig`
+ * by name keeps it lazy in the emitted declarations.
+ */
+export type WildwoodClientFor<Colls extends AnyCollections> = OrmConfig<{
+  [K in keyof Colls as Colls[K]["name"] & string]: Colls[K];
+}> & { _: WildwoodClientInternals };
+
 export const createClient = <Colls extends AnyCollections = AnyCollections>(
   args: WildwoodCreateClientArgs<Colls> = {},
-) => {
+): WildwoodClientFor<Colls> => {
   const normalizedProvider = normalizeProviderConfig(args.provider);
 
   const config = args.config ?? null;
-  const database = args.database ?? null;
+  const databaseFactory = resolveDatabaseFactory(args.database);
 
   const effectiveConfig: Config<Colls> = config ?? emptyConfigStub<Colls>();
-
-  let db: LibsqlDatabase | null = null;
-  if (database) {
-    db = new LibsqlDatabase({ client: database, config: effectiveConfig as Config });
-  }
 
   const useNative = config
     ? typeof config.resolvedLocalPath === "string"
@@ -102,21 +167,43 @@ export const createClient = <Colls extends AnyCollections = AnyCollections>(
       : Boolean(config.wantsLocal ?? config.localPath)
     : false;
 
-  const remote = useNative
-    ? new NativeRemote({ provider: normalizedProvider, config: effectiveConfig as Config })
-    : new GitHubRemote({ provider: normalizedProvider, config: effectiveConfig as Config });
+  // --- Lazy live handles ---------------------------------------------------
+  // Nothing below is constructed until the first query call. This keeps the
+  // module-scope client inert (safe to import into `"use cache"`) and keeps
+  // the LibSQL/Octokit handles out of Next's build-worker module graph.
+  let dbInstance: LibsqlDatabase | null = null;
+  let remoteInstance: GitHubRemote | NativeRemote | null = null;
+  let gitInstance: Git | null = null;
 
-  const git: Git = db
-    ? new Git({ config: effectiveConfig as Config, remote, db })
-    : // scaffold stub — satisfies Git interface at runtime via Error throws; typed as unknown first
-      ({
-        findMany: async () => {
-          throw new Error("wildwood: database not configured. Pass createClient({ database }).");
-        },
-        findFirst: async () => {
-          throw new Error("wildwood: database not configured. Pass createClient({ database }).");
-        },
-      } as unknown as Git);
+  function getDb(): LibsqlDatabase | null {
+    if (dbInstance) return dbInstance;
+    if (!databaseFactory) return null;
+    dbInstance = new LibsqlDatabase({
+      client: databaseFactory(),
+      config: effectiveConfig as Config,
+    });
+    return dbInstance;
+  }
+
+  function getRemote(): GitHubRemote | NativeRemote {
+    if (remoteInstance) return remoteInstance;
+    remoteInstance = useNative
+      ? new NativeRemote({ provider: normalizedProvider, config: effectiveConfig as Config })
+      : new GitHubRemote({ provider: normalizedProvider, config: effectiveConfig as Config });
+    return remoteInstance;
+  }
+
+  function getGit(): Git {
+    if (gitInstance) return gitInstance;
+    const db = getDb();
+    if (!db) {
+      throw new Error(
+        "wildwood: database not configured. Pass a database to wildwood({ database }).",
+      );
+    }
+    gitInstance = new Git({ config: effectiveConfig as Config, remote: getRemote(), db });
+    return gitInstance;
+  }
 
   type Mapped = {
     [K in keyof Colls as Colls[K]["name"] & string]: Colls[K];
@@ -134,23 +221,75 @@ export const createClient = <Colls extends AnyCollections = AnyCollections>(
       if (!col?.name) continue;
       (collections as Record<string, unknown>)[col.name] = {
         findMany: (a: Omit<FindWorktreeEntriesArgs, "collection">) =>
-          git.findMany({ ...a, collection: col.name }),
+          getGit().findMany({ ...a, collection: col.name }),
         findFirst: (a: Omit<FindWorktreeEntriesArgs, "collection"> = {}) =>
-          git.findFirst({ ...(a as FindWorktreeEntriesArgs), collection: col.name }),
+          getGit().findFirst({ ...(a as FindWorktreeEntriesArgs), collection: col.name }),
       };
     }
   }
 
-  return {
-    ...collections,
-    _: {
-      config: effectiveConfig,
-      provider: normalizedProvider,
-      git,
-      logger: new Logger({ name: "wildwood" }),
-      db: db as LibsqlDatabase,
+  // `_` uses lazy getters so consumers (branch/toolbar/route) can read config
+  // and provider without triggering handle construction, while `git`/`db`
+  // still materialize on demand for mutations.
+  const internals = {
+    config: effectiveConfig,
+    provider: normalizedProvider,
+    get git(): Git {
+      return getGit();
+    },
+    logger: new Logger({ name: "wildwood" }),
+    get db(): LibsqlDatabase {
+      return getDb() as LibsqlDatabase;
     },
   };
+
+  return {
+    ...collections,
+    _: internals,
+  } as unknown as WildwoodClientFor<Colls>;
+};
+
+/**
+ * Flat, composable entry point. `wildwood({...})` returns the read client.
+ * The CMS layer wraps it: `createCMS(ww, { ...options })`.
+ *
+ * Everything is one flat bag — identity, collections, database and the single
+ * GitHub credential object — so there is no separate `defineConfig` step
+ * required (though `defineConfig` is still exported for advanced use).
+ *
+ * Env vars stay explicit in userland:
+ *
+ *   export const ww = wildwood({
+ *     org: process.env.MY_ORG,
+ *     repo: process.env.MY_REPO,
+ *     collections: { docs },
+ *     database: { url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN },
+ *     github: {
+ *       appId: process.env.GITHUB_APP_ID,
+ *       privateKey: process.env.GITHUB_PRIVATE_KEY,
+ *       installationId: process.env.GITHUB_APP_INSTALLATION_ID,
+ *       clientId: process.env.GITHUB_CLIENT_ID,
+ *       clientSecret: process.env.GITHUB_CLIENT_SECRET,
+ *     },
+ *   });
+ */
+export type WildwoodInput<Colls extends AnyCollections> = DefineConfigInput<Colls> & {
+  /** LibSQL/Turso client, `{ url, authToken }` spec, or a `file:`/url string. */
+  database?: WildwoodDatabaseInput | undefined;
+  /** The single GitHub credential object — reused by git transport and CMS sign-in. */
+  github?: WildwoodGitHubAuth | undefined;
+};
+
+export const wildwood = <const Colls extends AnyCollections>(
+  input: WildwoodInput<Colls>,
+): WildwoodClientFor<Colls> => {
+  const { database, github, ...configInput } = input;
+  const config = new Config<Colls>(configInput as DefineConfigInput<Colls>);
+  return createClient<Colls>({
+    config,
+    database,
+    provider: github ? { github } : undefined,
+  });
 };
 
 // `WildwoodClient` must be compatible with `createClient()` return which is `OrmConfig<Mapped> & {_:...}`.
