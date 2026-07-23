@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cacheLife, cacheTag } from "next/cache";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { Markdown } from "wildwood/react/markdown";
-import { getCachedDoc, getCachedDocsList } from "@/lib/content";
-import { getRequestContext } from "@/lib/request-context";
+import { WILDWOOD_CONTENT_TAG, createReadClient, getContext } from "@/lib/wildwood";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -14,8 +14,26 @@ function resolveHref(href: string): string {
   return href;
 }
 
+async function getDoc(opts: { slug: string; branch: string; isDraft: boolean }) {
+  "use cache";
+  cacheLife("hours");
+  cacheTag(WILDWOOD_CONTENT_TAG, `wildwood:branch:${opts.branch}`, `wildwood:doc:${opts.slug}`);
+
+  const ww = createReadClient();
+  return ww.docs.findFirst({
+    ref: opts.branch,
+    where: { slug: opts.slug },
+    with: { author: true },
+  });
+}
+
 export async function generateStaticParams() {
-  const res = await getCachedDocsList({ branch: "main", isDraft: false }).catch(() => ({
+  "use cache";
+  cacheLife("hours");
+  cacheTag(WILDWOOD_CONTENT_TAG);
+
+  const ww = createReadClient();
+  const res = await ww.docs.findMany({ ref: "main" }).catch(() => ({
     items: [] as { slug: string }[],
   }));
   return res.items.map(({ slug }) => ({ slug }));
@@ -23,8 +41,8 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
-  const ctx = await getRequestContext();
-  const res = await getCachedDoc({ slug, branch: ctx.branch, isDraft: ctx.isDraft });
+  const { branch, isDraft } = await getContext();
+  const res = await getDoc({ slug, branch, isDraft });
   if (!res.value) return { title: "not found — wildwood(1)" };
   return { title: `${res.value.title} — wildwood(1)`, description: res.value.description };
 }
@@ -52,8 +70,8 @@ function DocsFallback({ slug }: { slug: string }) {
 }
 
 async function DocsContent({ slug }: { slug: string }) {
-  const ctx = await getRequestContext();
-  const res = await getCachedDoc({ slug, branch: ctx.branch, isDraft: ctx.isDraft });
+  const { branch, isDraft } = await getContext();
+  const res = await getDoc({ slug, branch, isDraft });
   const doc = res.value;
   if (!doc) notFound();
 

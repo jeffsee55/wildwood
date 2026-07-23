@@ -1,11 +1,15 @@
 import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import { cacheLife, cacheTag } from "next/cache";
 import { Suspense } from "react";
 import { Toolbar } from "wildwood/nextjs/kit";
-import { getCachedNavOrNull } from "@/lib/content";
-import { getRequestContext } from "@/lib/request-context";
-import { wildwood } from "@/lib/wildwood";
+import {
+  WILDWOOD_CONTENT_TAG,
+  createReadClient,
+  getContext,
+  wildwood,
+} from "@/lib/wildwood";
 import "./globals.css";
 
 const geistMono = Geist_Mono({
@@ -18,27 +22,31 @@ export const metadata: Metadata = {
   description: "Git as content store. Typeset as man page.",
 };
 
-// RootLayout must stay static for cacheComponents: all dynamic work
-// (cookies()/draftMode() via getRequestContext) lives inside Suspense.
-// This also fixes `/_not-found` prerender which uses the root layout but
-// must not block on uncached branch resolution.
-// IMPORTANT: Fallback must be fully static and must NOT render {children},
-// because children (the page) itself accesses dynamic data (branch cookie)
-// and would make the fallback dynamic → build error "Uncached data outside Suspense".
+async function getNav(opts: { branch: string; isDraft: boolean }) {
+  "use cache";
+  cacheLife("hours");
+  cacheTag(WILDWOOD_CONTENT_TAG, `wildwood:branch:${opts.branch}`);
+
+  const ww = createReadClient();
+  const res = await ww.nav.findMany({ ref: opts.branch, with: { children: true } });
+  return res.items[0] ?? null;
+}
+
+// RootLayout stays static; all dynamic work (cookies/draftMode via getContext)
+// lives inside Suspense so cacheComponents can prerender the shell.
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    // suppressHydrationWarning — color-scheme is driven by prefers-color-scheme,
-    // no FOUC toggle. If we add manual theme switching later, inject the
-    // before-paint script here. For now system-only, so pure CSS.
     <html lang="en" className={`${geistMono.variable} antialiased`} suppressHydrationWarning>
       <body className="min-h-screen">
         <Suspense fallback={<FallbackShell />}>
           <DynamicShell>{children}</DynamicShell>
         </Suspense>
 
-        {/* Toolbar is opt-out of typeset; deduce theme from system via CSS */}
+        {/* Toolbar reads cookies (dynamic) → must be inside Suspense. */}
         <div className="not-typeset">
-          <Toolbar wildwood={wildwood} apiBase="/api" />
+          <Suspense fallback={null}>
+            <Toolbar wildwood={wildwood} apiBase="/api" />
+          </Suspense>
         </div>
       </body>
     </html>
@@ -70,8 +78,8 @@ function FallbackShell() {
 }
 
 async function DynamicShell({ children }: { children: React.ReactNode }) {
-  const ctx = await getRequestContext();
-  const nav = await getCachedNavOrNull({ branch: ctx.branch, isDraft: ctx.isDraft });
+  const { branch, isDraft } = await getContext();
+  const nav = await getNav({ branch, isDraft });
 
   if (!nav) {
     return (
@@ -88,7 +96,8 @@ async function DynamicShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const docs = nav.children;
+  type NavDoc = { _meta: { path: string }; slug: string; title: string };
+  const docs = (nav.children ?? []) as NavDoc[];
 
   return (
     <>

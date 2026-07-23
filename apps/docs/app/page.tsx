@@ -1,8 +1,17 @@
 import Link from "next/link";
+import { cacheLife, cacheTag } from "next/cache";
 import { Suspense } from "react";
 import { Markdown } from "wildwood/react/markdown";
-import { getCachedDocsList } from "@/lib/content";
-import { getRequestContext } from "@/lib/request-context";
+import { WILDWOOD_CONTENT_TAG, createReadClient, getContext } from "@/lib/wildwood";
+
+async function getDocsList(opts: { branch: string; isDraft: boolean }) {
+  "use cache";
+  cacheLife("hours");
+  cacheTag(WILDWOOD_CONTENT_TAG, `wildwood:branch:${opts.branch}`);
+
+  const ww = createReadClient();
+  return ww.docs.findMany({ ref: opts.branch });
+}
 
 export default function Home() {
   return (
@@ -21,8 +30,8 @@ function HomeFallback() {
 }
 
 async function HomeContent() {
-  const ctx = await getRequestContext();
-  const r = await getCachedDocsList({ branch: ctx.branch, isDraft: ctx.isDraft });
+  const { branch, isDraft } = await getContext();
+  const r = await getDocsList({ branch, isDraft });
   const current = r.items.toSorted((a, b) => a.title.localeCompare(b.title))[0] ?? null;
 
   return (
