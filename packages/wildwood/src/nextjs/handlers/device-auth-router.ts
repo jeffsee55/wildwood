@@ -357,7 +357,13 @@ function renderConsentPage(): string {
           return;
         }
         var data = await res.json().catch(function(){ return null; });
-        var redirect = data && (data.redirect_uri || data.redirectURI);
+        // better-auth's consent endpoint returns the redirect target under
+        // different keys across versions: redirect_uri (openapi/docs), the
+        // camelCase redirectURI, or -- since 1.7.x -- { redirect: true, url }
+        // from handleRedirect when accept: application/json is set. Accept all
+        // of them so the browser actually navigates to the callback (which
+        // carries the authorization code) instead of showing the fallback error.
+        var redirect = data && (data.redirect_uri || data.redirectURI || (data.redirect ? data.url : null));
         if (res.ok && redirect) { location.href = redirect; return; }
         resultEl.className = 'err';
         resultEl.textContent = (data && (data.error_description || data.error)) || 'Authorization failed.';

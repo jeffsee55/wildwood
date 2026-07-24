@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wildwood": {
+      "type": "http",
+      "url": "https://ww.localhost/api/wildwood/mcp"
+    }
+  }
+}

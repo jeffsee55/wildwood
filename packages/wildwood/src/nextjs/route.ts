@@ -399,8 +399,15 @@ export function createWildwoodRoute(
           throw new Error(
             "Auth requires a database — ensure createClient({ database }) is configured.",
           );
-        // getOrCreateAuth itself is async
-        return await mod.getOrCreateAuth({ auth: authOpts, db: db as never });
+        // getOrCreateAuth itself is async. Pass the resolved MCP path so the
+        // oauth-provider can seed it as an RFC 8707 resource — otherwise the
+        // authorize/token endpoints reject the `resource` param that MCP
+        // clients derive from the protected-resource discovery doc.
+        return await mod.getOrCreateAuth({
+          auth: authOpts,
+          db: db as never,
+          mcpPath: wwPaths.mcp,
+        });
       })();
     }
     return authInstancePromise;
@@ -634,24 +641,15 @@ export function createWildwoodRoute(
       getClient as (r?: Request) => WildwoodRouteClientInput | Promise<WildwoodRouteClientInput>
     )(req)) as WildwoodClient;
 
-    // Local-dev bypass: outside production, skip the OAuth 2.1 bearer-token
-    // guard entirely and invoke the MCP handler with a synthetic dev identity.
-    // Mirrors the other dev-only openings (open client registration, dev
-    // sign-in) so MCP clients that cannot complete the OAuth handshake — e.g.
-    // agents without OAuth support — can still connect against localhost. The
-    // guard is always enforced in production.
-    if (process.env.NODE_ENV !== "production") {
-      const { handleMcpRequest } = await import("./handlers/mcp-server");
-      return handleMcpRequest(req, client as never, {
-        userId: "dev",
-        email: "dev@localhost",
-        scopes: [],
-      });
-    }
-
+    // The token `iss` claim is the better-auth OAuth issuer, which is the auth
+    // base (`${origin}/api/auth`) — NOT the bare origin. This must match the
+    // `issuer` advertised in the `/.well-known/oauth-authorization-server`
+    // discovery doc, or jose's `jwtVerify` rejects every token with
+    // "invalid access token". `audience` stays the MCP resource identifier.
+    const issuer = `${origin}${wwPaths.auth}`;
     const guarded = mod.mcpHandler(
       {
-        verifyOptions: { issuer: origin, audience: resource },
+        verifyOptions: { issuer, audience: resource },
         jwksUrl: `${origin}${wwPaths.auth}/jwks`,
       },
       async (request: Request, jwt: Record<string, unknown>) => {

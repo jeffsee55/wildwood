@@ -428,9 +428,37 @@ function buildAuthenticateHook(
   };
 }
 
+/**
+ * Compute the absolute RFC 8707 resource identifier for the MCP endpoint.
+ *
+ * MCP clients read the protected-resource discovery doc (`resource:
+ * ${origin}${mcpPath}`) and send that exact string as the `resource` param on
+ * the OAuth authorize/token requests. The oauth-provider rejects any `resource`
+ * that isn't a seeded `oauthResource` row (`invalid_target`), so we must seed
+ * the same absolute URL here.
+ *
+ * Only the string form of `baseURL` yields a known origin at boot. When
+ * `baseURL` is autodetected (object form / omitted), we can't know the origin
+ * until a request arrives, so we skip static seeding — configure a string
+ * `baseURL` to enable MCP OAuth in that deployment.
+ */
+function resolveMcpResourceIdentifier(
+  baseURL: WildwoodBaseURL | undefined,
+  mcpPath: string | undefined,
+): string | undefined {
+  if (!mcpPath) return undefined;
+  const base = typeof baseURL === "string" ? baseURL.trim() : "";
+  if (!base) return undefined;
+  const origin = base.replace(/\/+$/, "");
+  const path = mcpPath.startsWith("/") ? mcpPath : `/${mcpPath}`;
+  return `${origin}${path}`;
+}
+
 export async function getOrCreateAuth(opts: {
   auth: WildwoodRouteAuthOptions | undefined;
   db: WildwoodAuthDbInput | undefined;
+  /** Resolved MCP endpoint path (e.g. `/api/wildwood/mcp`) to seed as an OAuth resource. */
+  mcpPath?: string | undefined;
 }): Promise<{
   auth: WildwoodAuthInstance;
   ensureAuthSchema: () => Promise<void>;
@@ -477,6 +505,12 @@ export async function getOrCreateAuth(opts: {
   // Dev-only: production keeps CIMD / session-backed registration as the path,
   // so the prod server never accepts anonymous client records.
   const allowOpenClientRegistration = process.env.NODE_ENV !== "production";
+
+  // RFC 8707 resource: the MCP endpoint must be a known `oauthResource` or the
+  // authorize/token endpoints reject the `resource` param MCP clients send
+  // (`invalid_target`). Seed it from the same origin+path the protected-resource
+  // discovery doc advertises.
+  const mcpResourceIdentifier = resolveMcpResourceIdentifier(authOpts.baseURL, opts.mcpPath);
 
   let authenticate = authOpts.authenticate;
   {
@@ -552,6 +586,16 @@ export async function getOrCreateAuth(opts: {
         // In dev, allow URL-only MCP clients (e.g. fx) to self-register without
         // a session or initial access token. Off in production — see above.
         allowUnauthenticatedClientRegistration: allowOpenClientRegistration,
+        // Seed the MCP endpoint as an RFC 8707 protected resource so token
+        // requests targeting it are accepted. Empty when baseURL isn't a static
+        // string (autodetected origin) — see resolveMcpResourceIdentifier.
+        ...(mcpResourceIdentifier ? { resources: [mcpResourceIdentifier] } : {}),
+        // Self-registered MCP clients (CIMD / DCR) have no `oauthClientResource`
+        // link rows, so per-client resource enforcement would reject them with
+        // `invalid_target` even after the resource is seeded. Disable it: any
+        // enabled resource is requestable by any client, which matches the
+        // single-resource MCP model.
+        enforcePerClientResources: false,
       }) as never,
       // CIMD (Client ID Metadata Documents): lets MCP clients identify
       // themselves with an HTTPS URL `client_id` — no pre-registration, no
