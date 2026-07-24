@@ -14,9 +14,6 @@
   "dependencies": {
     "@babel/runtime": "catalog:",
     "@libsql/client": "catalog:",
-    "@libsql/kysely-libsql": "catalog:",
-    "better-auth": "catalog:",
-    "kysely": "catalog:",
     "next": "catalog:",
     "portless": "^0.15.3",
     "react": "catalog:",

@@ -14,6 +14,7 @@ import type { WildwoodAuthAction } from "@/nextjs/auth";
 import { createGitServiceRouter, type GitServiceAuthorizeFn } from "@/nextjs/handlers/git-service";
 import { createGitHubRouter } from "@/nextjs/handlers/github-router";
 import { createGitHubAppManifestRouter } from "@/nextjs/handlers/github-app-manifest-router";
+import { createDeviceAuthRouter } from "@/nextjs/handlers/device-auth-router";
 import { createVscodeRouter } from "@/nextjs/handlers/vscode-router";
 
 export type CreateHandlerOptions = {
@@ -41,11 +42,13 @@ export function createHandler(client: WildwoodClient, options?: CreateHandlerOpt
     authorize: options?.authorize as never,
   });
   const vscodeRouter = createVscodeRouter(client);
+  const deviceAuthRouter = createDeviceAuthRouter(client);
 
   // Canonical: /api/wildwood/*
   wildwoodNs.mount("/git", gitRouter);
   wildwoodNs.mount("/github", githubRouter);
   wildwoodNs.mount("/github/app-manifest", appManifestRouter);
+  wildwoodNs.mount("/device", deviceAuthRouter);
   wildwoodNs.mount("/vscode", vscodeRouter);
 
   api.mount("/wildwood", wildwoodNs);

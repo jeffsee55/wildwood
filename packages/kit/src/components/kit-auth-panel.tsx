@@ -3,7 +3,7 @@
 import { Loader2, Shuffle } from "lucide-react";
 import * as React from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 type Permission = "read" | "write";
@@ -35,6 +35,18 @@ export type KitAuthConfig = {
   authBase?: string;
   callbackURL?: string;
   userEmail?: string | null;
+  /**
+   * Dev-only email+password sign-in, served by the library at
+   * `/api/wildwood/device/signin`. When enabled, the toolbar surfaces a
+   * first-class "Dev sign-in" action and suppresses GitHub / App-setup UI —
+   * local dev should not need any GitHub-related affordances. Populated by the
+   * server (see `resolveKitAuthFromEnv`) only when NODE_ENV !== "production".
+   */
+  devSignIn?: {
+    enabled: boolean;
+    /** Absolute path to the library-served sign-in page. */
+    url: string;
+  };
   /**
    * New, pluggable OAuth providers. Happy path is single GitHub provider
    * powered by the GitHub App itself (viaGitHubApp=true). Additional
@@ -212,6 +224,38 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
     setOrigin(window.location.origin);
   }, [auth.githubApp?.origin, origin]);
 
+  // Live session resolution. Hosts using the library's auto-`Toolbar` don't
+  // resolve the session server-side, so `auth.userEmail` is undefined even when
+  // a valid cookie exists. Fetch it client-side from better-auth so the panel
+  // reflects reality without the host doing any work. A host-supplied
+  // `auth.userEmail` still wins (SSR-accurate, no flash).
+  const [resolvedEmail, setResolvedEmail] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (auth.userEmail) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(`${authBase}/get-session`, {
+          credentials: "include",
+          headers: { accept: "application/json" },
+        });
+        if (!response.ok) return;
+        const data = (await response.json().catch(() => null)) as {
+          user?: { email?: string | null } | null;
+        } | null;
+        const email = data?.user?.email;
+        if (!cancelled && typeof email === "string" && email) setResolvedEmail(email);
+      } catch {
+        // Best-effort — panel falls back to "Not signed in".
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authBase, auth.userEmail]);
+
+  const userEmail = auth.userEmail ?? resolvedEmail;
+
   const providers = React.useMemo(() => resolveOAuthProviders(auth), [auth]);
 
   const manifestPreview = React.useMemo(() => {
@@ -376,7 +420,7 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
       <div className="rounded-md border border-border bg-background/60 p-2">
         <p className="font-medium text-popover-foreground">Session</p>
         <p className="mt-1 break-all text-muted-foreground">
-          {auth.userEmail ? `Signed in as ${auth.userEmail}` : "Not signed in"}
+          {userEmail ? `Signed in as ${userEmail}` : "Not signed in"}
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           {enabledProviders.length > 0 ? (
@@ -416,7 +460,7 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
               )}
             </div>
           )}
-          {auth.userEmail ? (
+          {userEmail ? (
             <Button
               className="h-8 text-xs"
               disabled={busy}
@@ -548,6 +592,64 @@ export function KitAuthPanel({ auth, mode = "session" }: Props) {
       </p>
     </div>
   );
+
+  // Local dev: a signed-in email+password session is the whole story — no
+  // GitHub / App-setup affordances. The sign-in page itself is library-served.
+  const devSignInSection = auth.devSignIn?.enabled ? (
+    <div className="rounded-md border border-border bg-background/60 p-2">
+      <p className="font-medium text-popover-foreground">Session</p>
+      <p className="mt-1 break-all text-muted-foreground">
+        {userEmail ? `Signed in as ${userEmail}` : "Not signed in"}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {userEmail ? (
+          <Button
+            className="h-8 text-xs"
+            disabled={busy}
+            onClick={signOut}
+            type="button"
+            variant="secondary"
+          >
+            Sign out
+          </Button>
+        ) : (
+          <a
+            className={cn(buttonVariants({ variant: "secondary" }), "h-8 text-xs")}
+            href={auth.devSignIn.url}
+          >
+            Dev sign-in
+          </a>
+        )}
+      </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        Local development sign-in (email + password). GitHub sign-in is used in production.
+      </p>
+    </div>
+  ) : null;
+
+  if (devSignInSection) {
+    return (
+      <div className="w-[min(92vw,24rem)] space-y-3 p-2 text-xs">
+        <div>
+          <p className="text-sm font-semibold text-popover-foreground">Auth (local dev)</p>
+          <p className="mt-1 text-muted-foreground">
+            Sign in with the local dev account to test Wildwood.
+          </p>
+        </div>
+        {devSignInSection}
+        {error ? (
+          <p
+            className={cn(
+              "max-h-32 overflow-auto rounded-md border border-destructive/30 bg-destructive/10 p-2 text-destructive",
+            )}
+            role="alert"
+          >
+            {error}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="w-[min(92vw,24rem)] space-y-3 p-2 text-xs">

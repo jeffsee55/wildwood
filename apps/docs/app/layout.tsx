@@ -53,14 +53,20 @@ function FallbackShell() {
       <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80">
         <div className="mx-auto flex h-11 w-full max-w-[112ch] items-center justify-between gap-6 px-6 tabular-nums">
           <div className="flex items-center gap-8">
-            <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em]">wildwood(1)</span>
+            <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em]">
+              (ww)
+            </span>
           </div>
-          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">MANUAL</span>
+          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+            MANUAL
+          </span>
         </div>
       </header>
       <div className="mx-auto grid w-full max-w-[112ch] grid-cols-1 gap-0 px-6 md:grid-cols-[18rem_1fr]">
         <aside className="border-border py-10 pr-8 max-md:border-b md:sticky md:top-11 md:h-[calc(100svh-2.75rem)] md:overflow-auto md:border-r">
-          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">INDEX</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            INDEX
+          </div>
           <div className="mt-6 h-32 animate-pulse rounded bg-muted/30" />
         </aside>
         <main className="min-w-0 py-10 pl-0 md:pl-10">
@@ -103,13 +109,15 @@ async function DynamicShell({ children }: { children: React.ReactNode }) {
               href="/"
               className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] underline decoration-border underline-offset-4 hover:decoration-foreground"
             >
-              wildwood(1)
+              {`(ww)`}
             </Link>
             <span className="hidden font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground md:inline">
               git as cms · typed · versioned · branchable
             </span>
           </div>
-          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">MANUAL</span>
+          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+            MANUAL
+          </span>
         </div>
       </header>
 
@@ -139,7 +147,10 @@ async function DynamicShell({ children }: { children: React.ReactNode }) {
           <div className="mt-12 border-t border-border pt-8 font-mono text-[11px] leading-[1.9] text-muted-foreground">
             <div className="uppercase tracking-[0.12em]">source</div>
             <div className="mt-2 normal-case tracking-[-0.01em]">
-              <code className="rounded border border-border bg-card px-1 py-0.5 text-[11px]">content/</code> in this repo.
+              <code className="rounded border border-border bg-card px-1 py-0.5 text-[11px]">
+                content/
+              </code>{" "}
+              in this repo.
               <br />
               queries via <code className="text-foreground">wildwood.docs.findMany()</code>.
             </div>

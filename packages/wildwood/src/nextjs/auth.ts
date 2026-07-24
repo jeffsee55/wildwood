@@ -1,16 +1,37 @@
 /**
  * `wildwood/nextjs/auth` — private internal module.
- * Owned by `createWildwoodRoute`. Lazy, no static `better-auth` imports
- * at the top level that Turbopack can trace from `packages/wildwood/dist`.
+ * Owned by `createWildwoodRoute`.
  *
- * We use `new Function("s","return import(s)")` indirection so Turbopack
- * build of `apps/docs` doesn't try to resolve `better-auth` relative to
- * `packages/wildwood/`. At runtime on Vercel λ, node_modules has it.
+ * `better-auth` (+ subpaths) and the libsql dialect are bundled into
+ * `wildwood/dist` (tsdown `noExternal`). This module is itself lazy-loaded via
+ * `import("./auth")` from the always-dynamic CMS route handler, so it never
+ * enters a cached page/layout graph and the bundled auth code stays out of the
+ * `wildwood()` client chunk. `@libsql/client` (the DB driver) stays external —
+ * it's provided by the host app via `createClient({ database })`.
  */
 
-// Keep BetterAuthOptions import lazy — type is optional at build time.
-// We mirror only what we need so missing `better-auth` doesn't break tsc during scaffolding.
-// At runtime we dynamic-import it (see loadBetterAuthDeps).
+import { betterAuth } from "better-auth";
+import { deviceAuthorization, jwt } from "better-auth/plugins";
+import { nextCookies, toNextJsHandler } from "better-auth/next-js";
+import { oauthProvider } from "@better-auth/oauth-provider";
+import { cimd } from "@better-auth/cimd";
+// `mcpHandler` moved out of `@better-auth/oauth-provider` into `@better-auth/mcp`
+// in better-auth 1.7. It's re-exported below so `route.ts` still imports the
+// MCP guard through this single bundled boundary.
+import { mcpHandler } from "@better-auth/mcp";
+import { LibsqlDialect } from "@libsql/kysely-libsql";
+
+// Re-export so `route.ts` builds the Next handler without importing
+// `better-auth/next-js` itself — one bundling boundary, owned here.
+export { toNextJsHandler };
+
+// Re-export the MCP guard through this bundled boundary so `route.ts` never
+// imports `@better-auth/mcp` directly. `mcpHandler` verifies the OAuth 2.1
+// bearer token and, when absent/invalid, returns the 401 + `WWW-Authenticate`
+// discovery response MCP clients follow.
+export { mcpHandler };
+
+// Minimal structural type — we only touch a handful of better-auth options.
 type BetterAuthSocialProviders = Record<string, unknown>;
 type BetterAuthOptions = {
   appName?: string;
@@ -58,9 +79,34 @@ create table "user" ("id" text not null primary key, "name" text not null, "emai
 create table "session" ("id" text not null primary key, "expiresAt" date not null, "token" text not null unique, "createdAt" date not null, "updatedAt" date not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade);
 create table "account" ("id" text not null primary key, "accountId" text not null, "providerId" text not null, "userId" text not null references "user" ("id") on delete cascade, "accessToken" text, "refreshToken" text, "idToken" text, "accessTokenExpiresAt" date, "refreshTokenExpiresAt" date, "scope" text, "password" text, "createdAt" date not null, "updatedAt" date not null);
 create table "verification" ("id" text not null primary key, "identifier" text not null, "value" text not null, "expiresAt" date not null, "createdAt" date not null, "updatedAt" date not null);
+create table "deviceCode" ("id" text not null primary key, "deviceCode" text not null, "userCode" text not null, "userId" text, "expiresAt" date not null, "status" text not null, "lastPolledAt" date, "pollingInterval" integer, "clientId" text, "scope" text);
+create table "jwks" ("id" text not null primary key, "publicKey" text not null, "privateKey" text not null, "createdAt" date not null, "expiresAt" date);
+create table "oauthClient" ("id" text not null primary key, "clientId" text not null unique, "clientSecret" text, "disabled" integer default 0, "skipConsent" integer, "enableEndSession" integer, "subjectType" text, "scopes" text, "userId" text references "user" ("id"), "createdAt" date, "updatedAt" date, "name" text, "uri" text, "icon" text, "contacts" text, "tos" text, "policy" text, "softwareId" text, "softwareVersion" text, "softwareStatement" text, "redirectUris" text not null, "postLogoutRedirectUris" text, "backchannelLogoutUri" text, "backchannelLogoutSessionRequired" integer, "tokenEndpointAuthMethod" text, "jwks" text, "jwksUri" text, "grantTypes" text, "responseTypes" text, "public" integer, "type" text, "requirePKCE" integer, "dpopBoundAccessTokens" integer default 0, "referenceId" text, "metadata" text);
+create table "oauthResource" ("id" text not null primary key, "identifier" text not null unique, "name" text not null, "accessTokenTtl" integer, "refreshTokenTtl" integer, "signingAlgorithm" text, "signingKeyId" text, "allowedScopes" text, "customClaims" text, "dpopBoundAccessTokensRequired" integer default 0, "disabled" integer default 0, "createdAt" date, "updatedAt" date, "policyVersion" integer default 1, "metadata" text);
+create table "oauthClientResource" ("id" text not null primary key, "clientId" text not null references "oauthClient" ("clientId"), "resourceId" text not null references "oauthResource" ("identifier"), "metadata" text, "createdAt" date);
+create table "oauthRefreshToken" ("id" text not null primary key, "token" text not null unique, "clientId" text not null references "oauthClient" ("clientId"), "sessionId" text references "session" ("id") on delete set null, "userId" text not null references "user" ("id"), "referenceId" text, "authorizationCodeId" text, "resources" text, "requestedUserInfoClaims" text, "expiresAt" date, "createdAt" date, "revoked" date, "rotatedAt" date, "rotationReplayResponse" text, "rotationReplayExpiresAt" date, "authTime" date, "confirmation" text, "scopes" text not null);
+create table "oauthAccessToken" ("id" text not null primary key, "token" text unique, "clientId" text not null references "oauthClient" ("clientId"), "sessionId" text references "session" ("id") on delete set null, "userId" text references "user" ("id"), "referenceId" text, "authorizationCodeId" text, "resources" text, "requestedUserInfoClaims" text, "refreshId" text references "oauthRefreshToken" ("id"), "expiresAt" date, "createdAt" date, "revoked" date, "confirmation" text, "scopes" text not null);
+create table "oauthConsent" ("id" text not null primary key, "clientId" text not null references "oauthClient" ("clientId"), "userId" text references "user" ("id"), "referenceId" text, "resources" text, "requestedUserInfoClaims" text, "scopes" text not null, "createdAt" date, "updatedAt" date);
+create table "oauthClientAssertion" ("id" text not null primary key, "expiresAt" date not null);
 create index "session_userId_idx" on "session" ("userId");
 create index "account_userId_idx" on "account" ("userId");
 create index "verification_identifier_idx" on "verification" ("identifier");
+create index "deviceCode_deviceCode_idx" on "deviceCode" ("deviceCode");
+create index "deviceCode_userCode_idx" on "deviceCode" ("userCode");
+create index "oauthClient_userId_idx" on "oauthClient" ("userId");
+create index "oauthClientResource_clientId_idx" on "oauthClientResource" ("clientId");
+create index "oauthClientResource_resourceId_idx" on "oauthClientResource" ("resourceId");
+create index "oauthRefreshToken_clientId_idx" on "oauthRefreshToken" ("clientId");
+create index "oauthRefreshToken_sessionId_idx" on "oauthRefreshToken" ("sessionId");
+create index "oauthRefreshToken_authorizationCodeId_idx" on "oauthRefreshToken" ("authorizationCodeId");
+create index "oauthAccessToken_authorizationCodeId_idx" on "oauthAccessToken" ("authorizationCodeId");
+create index "oauthRefreshToken_userId_idx" on "oauthRefreshToken" ("userId");
+create index "oauthAccessToken_clientId_idx" on "oauthAccessToken" ("clientId");
+create index "oauthAccessToken_sessionId_idx" on "oauthAccessToken" ("sessionId");
+create index "oauthAccessToken_userId_idx" on "oauthAccessToken" ("userId");
+create index "oauthAccessToken_refreshId_idx" on "oauthAccessToken" ("refreshId");
+create index "oauthConsent_clientId_idx" on "oauthConsent" ("clientId");
+create index "oauthConsent_userId_idx" on "oauthConsent" ("userId");
 `.trim();
 
 function splitSqlStatements(sql: string): string[] {
@@ -146,29 +192,6 @@ export type WildwoodRouteAuthOptions = {
 export type WildwoodAuthInstance = {
   api: { getSession(a: { headers: Headers }): Promise<unknown> };
 };
-
-// `better-auth` + subpaths must stay opaque to Turbopack with `cacheComponents:true`.
-// Bare `import("better-auth/next-js")` inside `auth.mjs` causes the build worker
-// to crash ("id must be string") when traced from a cached page. We use
-// `new Function` indirection which Turbopack treats as external/opaque and Node
-// evaluates at runtime. `better-auth` lives in the host app's node_modules, not
-// in `packages/wildwood/dist`.
-//
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const dynImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
-
-async function loadBetterAuthDeps() {
-  const [{ betterAuth }, { LibsqlDialect }, { nextCookies }] = await Promise.all([
-    dynImport("better-auth") as Promise<{
-      betterAuth: (o: BetterAuthOptions) => WildwoodAuthInstance;
-    }>,
-    dynImport("@libsql/kysely-libsql") as Promise<{
-      LibsqlDialect: new (a: unknown) => unknown;
-    }>,
-    dynImport("better-auth/next-js") as Promise<{ nextCookies: () => unknown }>,
-  ]);
-  return { betterAuth, LibsqlDialect, nextCookies };
-}
 
 type LibsqlClientLike = { execute(s: string): Promise<unknown>; close?(): void };
 
@@ -259,12 +282,95 @@ function cacheKey(opts: WildwoodRouteAuthOptions): string {
   ].join("::");
 }
 
+/**
+ * Parse a `create table "name" (...)` statement into its table name and the
+ * list of column definitions (only real columns — table-level constraint
+ * clauses like `foreign key`/`primary key (...)` are skipped). Used to
+ * reconcile pre-existing tables that were created by an older better-auth
+ * schema and are missing columns the current plugin version expects.
+ */
+function parseCreateTable(
+  stmt: string,
+): { table: string; columns: { name: string; def: string }[] } | null {
+  const m = stmt.match(/^create\s+table\s+"([^"]+)"\s*\(([\s\S]*)\)\s*$/i);
+  if (!m) return null;
+  const table = m[1]!;
+  const body = m[2]!;
+  // Split on top-level commas (depth 0 relative to parentheses in column defs
+  // such as `references "user" ("id")`).
+  const parts: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of body) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      parts.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur.trim()) parts.push(cur);
+  const columns: { name: string; def: string }[] = [];
+  for (const raw of parts) {
+    const def = raw.trim();
+    const cm = def.match(/^"([^"]+)"\s+(.+)$/);
+    if (!cm) continue; // table-level constraint, not a column
+    columns.push({ name: cm[1]!, def });
+  }
+  return { table, columns };
+}
+
+/** Existing column names for a table, or null if the table doesn't exist. */
+async function existingColumns(
+  client: LibsqlClientLike,
+  table: string,
+): Promise<Set<string> | null> {
+  try {
+    const res = (await client.execute(`PRAGMA table_info("${table}")`)) as {
+      rows?: Array<Record<string, unknown>> | unknown[];
+    };
+    const rows = (res?.rows ?? []) as Array<Record<string, unknown>>;
+    if (rows.length === 0) return null;
+    const names = new Set<string>();
+    for (const row of rows) {
+      const name = (row as { name?: unknown }).name;
+      if (typeof name === "string") names.add(name);
+    }
+    return names;
+  } catch {
+    return null;
+  }
+}
+
 async function ensureAuthTables(client: LibsqlClientLike): Promise<void> {
   for (const stmt of splitSqlStatements(BETTER_AUTH_SCHEMA_SQL)) {
     try {
       await client.execute(stmt);
     } catch (e) {
       if (!(e instanceof Error) || !/already exists/i.test(e.message)) throw e;
+      // Table already exists from an older schema version — reconcile it by
+      // adding any columns the current plugin schema expects but the live
+      // table is missing. SQLite `ADD COLUMN` is a cheap metadata-only op and
+      // can't add UNIQUE/PRIMARY KEY, so we strip those tokens from the def.
+      const parsed = parseCreateTable(stmt);
+      if (!parsed) continue;
+      const have = await existingColumns(client, parsed.table);
+      if (!have) continue;
+      for (const col of parsed.columns) {
+        if (have.has(col.name)) continue;
+        const addable = col.def
+          .replace(/\bprimary key\b/gi, "")
+          .replace(/\bunique\b/gi, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        try {
+          await client.execute(`ALTER TABLE "${parsed.table}" ADD COLUMN ${addable}`);
+        } catch (addErr) {
+          if (!(addErr instanceof Error) || !/duplicate column/i.test(addErr.message)) throw addErr;
+        }
+      }
     }
   }
 }
@@ -350,7 +456,6 @@ export async function getOrCreateAuth(opts: {
     };
   }
 
-  const { betterAuth, LibsqlDialect, nextCookies } = await loadBetterAuthDeps();
 
   const githubPair = normalizeGithubProvider(authOpts);
   const github = githubPair ? { github: githubPair } : undefined;
@@ -362,6 +467,16 @@ export async function getOrCreateAuth(opts: {
       : undefined;
 
   const emailAndPasswordEnabled = Boolean(authOpts.providers?.emailAndPassword);
+
+  // Open (unauthenticated) Dynamic Client Registration — RFC 7591. MCP clients
+  // like fx present only a URL: they hit `POST /oauth2/register` with no session
+  // and no initial access token, so the oauth-provider's default gate rejects
+  // them with 401 "Authentication required for client registration". Enabling
+  // this lets those clients self-register; token issuance is still gated behind
+  // the login + consent pages, so open registration only creates a client row.
+  // Dev-only: production keeps CIMD / session-backed registration as the path,
+  // so the prod server never accepts anonymous client records.
+  const allowOpenClientRegistration = process.env.NODE_ENV !== "production";
 
   let authenticate = authOpts.authenticate;
   {
@@ -410,10 +525,47 @@ export async function getOrCreateAuth(opts: {
     ...(databaseHooks
       ? { databaseHooks: { user: databaseHooks } as BetterAuthOptions["databaseHooks"] }
       : {}),
-    plugins: [nextCookies()],
+    // NOTE: hardcoded device-authorization spike (RFC 8628). Endpoints are
+    // auto-served by handleAuth at /api/auth/device/{code,token,approve,deny}.
+    //
+    // `oauthProvider` (OAuth 2.1) turns this app into an authorization server so
+    // MCP clients can self-register (RFC 7591 dynamic client registration) and
+    // obtain scoped, JWKS-signed access tokens with only a URL — no static
+    // credentials. It requires `jwt` for the signing keys (`jwks` table + `/jwks`
+    // endpoint). Discovery + `/oauth2/*` endpoints are auto-served under
+    // `/api/auth/*`; the MCP endpoint itself lives at `/api/wildwood/mcp` and is
+    // guarded by `mcpHandler` (see handlers/mcp-router.ts).
+    //
+    // `loginPage`/`consentPage` reuse the library's own device-auth router pages
+    // so nothing bleeds into userland. `nextCookies()` must stay last per
+    // better-auth guidance.
+    plugins: [
+      deviceAuthorization({ verificationUri: "/api/wildwood/device" }),
+      jwt(),
+      oauthProvider({
+        loginPage: "/api/wildwood/device/signin",
+        consentPage: "/api/wildwood/device/consent",
+        // Kept as a fallback for MCP clients that can't yet present a URL
+        // `client_id`. CIMD (below) is the preferred path; DCR may create
+        // duplicate client rows for the same logical client.
+        allowDynamicClientRegistration: true,
+        // In dev, allow URL-only MCP clients (e.g. fx) to self-register without
+        // a session or initial access token. Off in production — see above.
+        allowUnauthenticatedClientRegistration: allowOpenClientRegistration,
+      }) as never,
+      // CIMD (Client ID Metadata Documents): lets MCP clients identify
+      // themselves with an HTTPS URL `client_id` — no pre-registration, no
+      // static credentials. `allowLoopback` is required for local dev because
+      // the dev origin is a loopback host (`ww.localhost`); it stays off in
+      // production so the server never fetches its own loopback interface.
+      cimd({ allowLoopback: true }) as never,
+      nextCookies(),
+    ],
   };
 
-  const instance = betterAuth(baOpts);
+  const instance = (betterAuth as unknown as (o: BetterAuthOptions) => WildwoodAuthInstance)(
+    baOpts,
+  );
 
   let ensurePromise: Promise<void> | null = null;
   function ensureAuthSchema(): Promise<void> {

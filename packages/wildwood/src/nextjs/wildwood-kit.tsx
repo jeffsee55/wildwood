@@ -68,6 +68,15 @@ function resolveKitAuthFromEnv(
   const oAuthReady = !!(clientId && clientSecret);
   const providesOAuth = true as const;
 
+  // Dev-only email+password sign-in, served by the library at
+  // `/api/wildwood/device/signin`. Mirrors the route layer's condition for
+  // enabling better-auth's emailAndPassword provider (dev only). When on, the
+  // toolbar shows a first-class dev sign-in and hides all GitHub UI.
+  const devSignIn =
+    process.env.NODE_ENV !== "production"
+      ? { enabled: true, url: "/api/wildwood/device/signin" }
+      : undefined;
+
   let org: string | undefined;
   let repo: string | undefined;
   try {
@@ -104,6 +113,7 @@ function resolveKitAuthFromEnv(
       oauth: {
         providers: [{ id: "github", name: "GitHub", viaGitHubApp: false, enabled: false }],
       },
+      ...(devSignIn ? { devSignIn } : {}),
     } as KitAuthConfig;
   }
 
@@ -139,6 +149,7 @@ function resolveKitAuthFromEnv(
         },
       ],
     },
+    ...(devSignIn ? { devSignIn } : {}),
   } as KitAuthConfig;
 }
 
@@ -187,6 +198,7 @@ function mergeKitAuth(
     githubOAuthEnabled:
       (override.githubOAuthEnabled as boolean | undefined) ??
       (base.githubOAuthEnabled as boolean | undefined),
+    devSignIn: override.devSignIn ?? base.devSignIn,
   };
 }
 

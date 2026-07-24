@@ -73,12 +73,12 @@ catalog:
   kysely: ^0.28.17
   drizzle-kit: 1.0.0-beta.20
   drizzle-orm: 1.0.0-beta.20
-  better-auth: ^1.6.11
+  better-auth: 1.7.0-rc.1
   "@octokit/auth-app": ^8.2.0
   "@octokit/graphql": ^9.0.3
   "@octokit/rest": 21.0.2
   neverthrow: 8.1.1
-  zod: ^4.1.1
+  zod: ^4.4.3
   "@types/diff3": ^0.0.2
   node-diff3: ^3.2.0
 

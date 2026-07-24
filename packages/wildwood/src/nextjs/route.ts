@@ -37,6 +37,7 @@ import {
   type WildwoodForBranch,
 } from "./branch";
 import { handle as createNextHandle } from "./handler";
+import { resolveWildwoodPaths, type WildwoodWellKnownOptions } from "./config";
 import type { WildwoodClient } from "@/client/index";
 import { activeRefSetCookieHeader, clearBranchCookieHeader } from "wildwood-shared";
 
@@ -72,6 +73,19 @@ export type CreateWildwoodRouteOptions = {
    * Auto-detected when `getClient.length >= 1`, but you can force it.
    */
   requestAware?: boolean;
+
+  /**
+   * Where the Wildwood catch-all is mounted and where the MCP resource / auth
+   * issuer live. Must match the value passed to `wildwoodWellKnown()` in
+   * `next.config` so the rewrite sources and the generated/proxied discovery
+   * docs stay in lockstep.
+   *
+   * String shorthand for `{ base }` (default `/api`); object form sets the MCP
+   * resource path and auth issuer path independently. Everything below —
+   * generated protected-resource metadata, the proxied authorization-server
+   * doc, and the MCP endpoint's OAuth resource/audience — derives from this.
+   */
+  wellKnown?: string | WildwoodWellKnownOptions;
 
   /**
    * Optional auth config. When present, route.ts owns better-auth entirely:
@@ -124,6 +138,25 @@ function cookieHeaderValue(name: string, ref: string, maxAge?: number): string {
 function isAuthPath(pathname: string): boolean {
   // /api/auth/*  (canonical better-auth)  and  /api/wildwood/auth/*  (namespaced alias)
   return /\/auth(?:\/|$)/.test(pathname);
+}
+
+/** The authenticated MCP endpoint — JSON-RPC over Streamable HTTP. */
+function isMcpPath(pathname: string): boolean {
+  return /\/wildwood\/mcp(?:\/|$)/.test(pathname);
+}
+
+/**
+ * MCP OAuth discovery documents. Clients probe these at the ORIGIN ROOT (per the
+ * MCP auth spec + RFC 8414 / RFC 9728), not under `/api/*`. `withWildwood`
+ * rewrites the root `/.well-known/oauth-*` paths into `/api/wildwood/.well-known/*`
+ * so they reach this handler, which proxies them to the better-auth-served
+ * `/api/auth/*` metadata endpoints. We accept both the rewritten form and the
+ * raw root form (in case a host wires routing differently).
+ */
+function isOAuthDiscoveryPath(pathname: string): boolean {
+  return /(?:^|\/)\.well-known\/(oauth-authorization-server|oauth-protected-resource|openid-configuration)/.test(
+    pathname,
+  );
 }
 
 function isCapabilitiesPath(pathname: string): boolean {
@@ -231,6 +264,9 @@ export function createWildwoodRoute(
   const mutationRe = opts.mutationRe ?? DEFAULT_MUTATION_RE;
   const tagStore = opts.revalidateTagStore ?? "default";
   const authOpts = opts.auth;
+  // Absolute URL paths for the MCP resource, auth issuer, and catch-all mount.
+  // Single source of truth shared with `wildwoodWellKnown()` in next.config.
+  const wwPaths = resolveWildwoodPaths(opts.wellKnown);
 
   // For apps where client is static (docs), we cache handler. For per-request clients (play),
   // we detect `getClient.length >= 1` or caller opts requestAware.
@@ -319,27 +355,17 @@ export function createWildwoodRoute(
     return staticHandlerPromise;
   }
 
-  // Lazy auth singleton — only constructed if auth config is provided AND a request needs it.
-  // Keeps `better-auth` out of the bundle for apps without auth.
-  //
-  // Previously this used `new Function("return import(s)")` indirection to avoid
-  // Turbopack tracing `better-auth` relative to `packages/wildwood/dist`. That hack
-  // breaks under `cacheComponents: true` (build worker `id` must be a string).
-  // New approach: static bare import is marked `external` in tsdown + `serverExternalPackages`
-  // in app's next.config, so Turbopack keeps it external without needing eval.
-  // `getAuthModule` must not be statically analyzable by Turbopack in the main
-  // chunk (route.mjs). With `cacheComponents:true`, any bare `import("better-auth")`
-  // inside route.mjs — even via `import("./auth.js")` where auth imports better-auth —
-  // is eagerly traced and the build worker crashes with "id must be string".
-  // Solution: use `new Function` indirection that Turbopack treats as opaque,
-  // and Node at runtime evaluates correctly. We do this ONLY for the auth lazy path.
+  // Lazy auth singleton — only constructed if auth config is provided AND a
+  // request needs it. `./auth` bundles `better-auth` (tsdown `noExternal`), so
+  // this dynamic `import("./auth")` is the single boundary that keeps that code
+  // out of every chunk except this always-dynamic route handler. Cache
+  // Components tracing only concerns the read-only `wildwood()` client, which
+  // imports `./auth` for types only — so nothing auth-related is bundled there.
   type AuthBundle = typeof import("./auth");
   let authModulePromise: Promise<AuthBundle> | null = null;
   function getAuthModule(): Promise<AuthBundle> {
     if (!authModulePromise) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const dyn = new Function("s", "return import(s)") as (s: string) => Promise<any>;
-      authModulePromise = dyn("./auth.mjs") as Promise<AuthBundle>;
+      authModulePromise = import("./auth");
     }
     return authModulePromise;
   }
@@ -506,17 +532,17 @@ export function createWildwoodRoute(
     if (!inst) return NextResponse.json({ error: "Auth init failed" }, { status: 500 });
     await inst.ensureAuthSchema();
 
-    // Same opaque indirection — keeps `better-auth/next-js` out of static graph
-    // so Cache Components build worker doesn't crash on "id must be string".
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const dyn = new Function("s", "return import(s)") as (s: string) => Promise<any>;
-    const { toNextJsHandler } = (await dyn("better-auth/next-js")) as {
-      toNextJsHandler: (a: unknown) => {
+    // `better-auth/next-js` is bundled into `wildwood/dist` via the auth module
+    // (tsdown `noExternal`). We reach it through the already lazy-loaded
+    // `./auth` chunk so there's a single bundling boundary and no extra
+    // per-request dynamic import.
+    const mod = await getAuthModule();
+    const handlers = (
+      mod.toNextJsHandler as (a: unknown) => {
         GET: (r: Request) => Promise<Response>;
         POST: (r: Request) => Promise<Response>;
-      };
-    };
-    const handlers = toNextJsHandler(inst.auth as never);
+      }
+    )(inst.auth as never);
     if (req.method === "GET") return handlers.GET(req);
     if (req.method === "POST") return handlers.POST(req);
     // fall through for other methods
@@ -528,6 +554,120 @@ export function createWildwoodRoute(
     return h(req);
   }
 
+  /** Request origin, honoring proxy headers (dev portless proxy, Vercel). */
+  function requestOrigin(req: Request): string {
+    try {
+      const url = new URL(req.url);
+      const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? url.host;
+      const proto =
+        req.headers.get("x-forwarded-proto") ??
+        (host.startsWith("localhost") || host.startsWith("127.0.0.1") ? "http" : url.protocol.replace(":", ""));
+      return `${proto}://${host}`;
+    } catch {
+      return "http://localhost";
+    }
+  }
+
+  /**
+   * Serve the root `/.well-known/oauth-*` discovery docs. MCP clients only know
+   * the MCP URL, so they probe the origin root; the app's `wildwoodWellKnown()`
+   * rewrite forwards the two path-scoped suffixes into this catch-all.
+   *
+   * Two docs, handled asymmetrically because better-auth serves only one of them:
+   * - `oauth-protected-resource/api/wildwood/mcp` (RFC 9728): better-auth does
+   *   NOT emit this — we GENERATE it here. It advertises the MCP endpoint as its
+   *   own OAuth resource/audience and points at the better-auth issuer.
+   * - `oauth-authorization-server/api/auth` + `openid-configuration` (RFC 8414):
+   *   better-auth serves these natively under `/api/auth/.well-known/*`, so we
+   *   PROXY through to it and relay the body.
+   */
+  async function handleOAuthDiscovery(req: Request): Promise<Response> {
+    if (!authOpts) return NextResponse.json({ error: "Auth not configured" }, { status: 501 });
+    const url = new URL(req.url);
+    const origin = requestOrigin(req);
+
+    // Protected-resource metadata is generated, not proxied — better-auth's
+    // oauth-provider only emits the 401 `WWW-Authenticate` pointer, never this
+    // document. Keep it in lockstep with the `resource`/`issuer` used by
+    // `handleMcp` below (both derive from `${origin}/api`).
+    if (url.pathname.includes("/.well-known/oauth-protected-resource")) {
+      return NextResponse.json(
+        {
+          resource: `${origin}${wwPaths.mcp}`,
+          authorization_servers: [`${origin}${wwPaths.auth}`],
+          bearer_methods_supported: ["header"],
+        },
+        { headers: { "cache-control": "public, max-age=15, stale-while-revalidate=15" } },
+      );
+    }
+
+    // Authorization-server + OpenID docs are served by better-auth under the
+    // BARE `/api/auth/.well-known/<doc-type>` path. The incoming request carries
+    // the RFC 8414 issuer-path suffix (`…/oauth-authorization-server/api/auth`),
+    // which better-auth does not answer — so strip everything after the
+    // document-type segment before proxying. Also normalizes either
+    // `/.well-known/…` (raw root) or `/api/wildwood/.well-known/…` (rewrite).
+    const idx = url.pathname.indexOf("/.well-known/");
+    const wellKnownPath = idx >= 0 ? url.pathname.slice(idx) : url.pathname;
+    const docType = wellKnownPath.replace(/^\/\.well-known\//, "").split("/")[0];
+    const target = `${origin}${wwPaths.auth}/.well-known/${docType}${url.search}`;
+    const proxied = new Request(target, { method: "GET", headers: req.headers });
+    return handleAuth(proxied);
+  }
+
+  /**
+   * Authenticated MCP endpoint. `mcpHandler` verifies the OAuth 2.1 bearer token
+   * (JWKS-signed by the `jwt` plugin) and either returns the 401 + discovery
+   * `WWW-Authenticate` response or invokes our handler with the verified JWT.
+   * The MCP endpoint URL is its own OAuth resource/audience.
+   */
+  async function handleMcp(req: Request): Promise<Response> {
+    if (!authOpts) return NextResponse.json({ error: "Auth not configured" }, { status: 501 });
+    const inst = await getAuthInstance();
+    if (!inst) return NextResponse.json({ error: "Auth init failed" }, { status: 500 });
+    await inst.ensureAuthSchema();
+
+    const origin = requestOrigin(req);
+    const resource = `${origin}${wwPaths.mcp}`;
+    const mod = await getAuthModule();
+    const client = (await (
+      getClient as (r?: Request) => WildwoodRouteClientInput | Promise<WildwoodRouteClientInput>
+    )(req)) as WildwoodClient;
+
+    // Local-dev bypass: outside production, skip the OAuth 2.1 bearer-token
+    // guard entirely and invoke the MCP handler with a synthetic dev identity.
+    // Mirrors the other dev-only openings (open client registration, dev
+    // sign-in) so MCP clients that cannot complete the OAuth handshake — e.g.
+    // agents without OAuth support — can still connect against localhost. The
+    // guard is always enforced in production.
+    if (process.env.NODE_ENV !== "production") {
+      const { handleMcpRequest } = await import("./handlers/mcp-server");
+      return handleMcpRequest(req, client as never, {
+        userId: "dev",
+        email: "dev@localhost",
+        scopes: [],
+      });
+    }
+
+    const guarded = mod.mcpHandler(
+      {
+        verifyOptions: { issuer: origin, audience: resource },
+        jwksUrl: `${origin}${wwPaths.auth}/jwks`,
+      },
+      async (request: Request, jwt: Record<string, unknown>) => {
+        const scopeClaim = typeof jwt.scope === "string" ? jwt.scope : "";
+        const auth = {
+          userId: String(jwt.sub ?? ""),
+          email: typeof jwt.email === "string" ? jwt.email : undefined,
+          scopes: scopeClaim.split(/\s+/).filter(Boolean),
+        };
+        const { handleMcpRequest } = await import("./handlers/mcp-server");
+        return handleMcpRequest(request, client as never, auth);
+      },
+    );
+    return guarded(req);
+  }
+
   async function authorizeGitRequest(req: Request, pathname: string): Promise<Response | null> {
     if (!authOpts) {
       // If auth config absent, still allow if client-level authorize is permissive.
@@ -537,6 +677,14 @@ export function createWildwoodRoute(
 
     // Public read endpoints — no auth needed
     if (req.method === "GET" && (pathname.includes("/git/refs") || pathname.includes("/git/log"))) {
+      return null;
+    }
+
+    // Device-authorization UI pages (verify/approve + dev sign-in) are served by
+    // the library and must be publicly reachable — a device user lands on the
+    // verification_uri before (or in order to) sign in. The pages themselves
+    // call the CSRF-protected better-auth endpoints, which enforce the session.
+    if (req.method === "GET" && /\/wildwood\/device(?:\/|$)/.test(pathname)) {
       return null;
     }
 
@@ -585,6 +733,8 @@ export function createWildwoodRoute(
 
   async function GET(req: Request) {
     const pathname = pathnameOf(req);
+    if (isOAuthDiscoveryPath(pathname)) return handleOAuthDiscovery(req);
+    if (isMcpPath(pathname)) return handleMcp(req);
     if (isCapabilitiesPath(pathname)) return handleCapabilities(req);
     if (isAuthPath(pathname)) return handleAuth(req);
     if (isDraftPath(pathname)) return handleDraft(req);
@@ -603,6 +753,7 @@ export function createWildwoodRoute(
 
   async function POST(req: Request) {
     const pathname = pathnameOf(req);
+    if (isMcpPath(pathname)) return handleMcp(req);
     if (isCapabilitiesPath(pathname)) return handleCapabilities(req);
     if (isAuthPath(pathname)) return handleAuth(req);
     if (isDraftPath(pathname)) return handleDraft(req);

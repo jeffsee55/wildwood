@@ -51,6 +51,28 @@ export default defineConfig([
       "@uiw/react-json-view",
       "@uiw/react-json-view/dark",
       "@uiw/react-json-view/light",
+      // Bundle better-auth (+ subpaths) and the libsql dialect into `dist`.
+      // They're only reached via the lazy `import("./auth")` chunk from the
+      // always-dynamic CMS route handler, so bundling them here does NOT pull
+      // them into the `wildwood()` client graph. This removes the peer-dep +
+      // `serverExternalPackages` dance in consumer apps.
+      "better-auth",
+      "better-auth/next-js",
+      "better-auth/plugins",
+      "better-auth/oauth2",
+      // OAuth 2.1 provider + MCP: reached only via the lazy `import("./auth")`
+      // and `import("./handlers/mcp-server")` chunks from the always-dynamic
+      // route handler, so bundling keeps them out of the client graph while
+      // sparing consumers the peer-dep install.
+      "@better-auth/oauth-provider",
+      // CIMD (Client ID Metadata Documents) + MCP guard live in their own
+      // 1.7 packages now (`mcpHandler`/`requireMcpAuth` moved out of
+      // oauth-provider). Bundled via the same lazy `import("./auth")` chunk.
+      "@better-auth/cimd",
+      "@better-auth/mcp",
+      "@modelcontextprotocol/sdk",
+      "@libsql/kysely-libsql",
+      "kysely",
     ],
     external: [
       "next/headers",
@@ -59,15 +81,10 @@ export default defineConfig([
       "next/dynamic",
       "next/link",
       "wildwood-kit",
-      // Native / heavy — play-only. Also keep any sub-paths external so Turbopack
-      // doesn't trace them through packages/wildwood/dist and emit the
-      // "unexpected file in NFT list" + "id must be string" build-worker crash.
+      // Native / heavy — play-only.
       "better-sqlite3",
-      "better-auth",
-      "better-auth/*",
-      "kysely",
+      // The DB driver is supplied by the host app via createClient({ database }).
       "@libsql/client",
-      "@libsql/kysely-libsql",
       // client-boundary is a separate config below (emits dist/nextjs/client-boundary.*)
       "./client-boundary",
       "../nextjs/client-boundary",
