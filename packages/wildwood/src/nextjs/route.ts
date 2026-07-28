@@ -58,8 +58,18 @@ export type {
   WildwoodTrustedOrigins,
 } from "./auth";
 import type { WildwoodAuthAction } from "./auth";
+import type { McpAuthorizeFn } from "./handlers/mcp-server";
 
 const DEFAULT_MUTATION_RE = /\/git\/(commit|discard|merge|pull|create-branch|switch-branch)\/?$/;
+
+/** Preview token endpoints — create / revoke / preview. */
+function isPreviewTokenPath(pathname: string): boolean {
+  return /\/wildwood\/preview-token(?:\/|$)/.test(pathname);
+}
+
+function isPreviewPath(pathname: string): boolean {
+  return /\/wildwood\/preview(?:\/|$)/.test(pathname) && !isPreviewTokenPath(pathname);
+}
 
 export type CreateWildwoodRouteOptions = {
   revalidateTagName?: string;
@@ -316,6 +326,44 @@ export function createWildwoodRoute(
 
   let staticHandlerPromise: Promise<LazyHandler> | null = null;
 
+  /**
+   * Build an MCP authorizer gate that returns `string | null` (error message
+   * or allow) instead of `Response | null`. The MCP path doesn't have a
+   * session cookie, so we build the user from the JWT and run the same
+   * `authenticate` + `authorize` gates the HTTP API uses.
+   */
+  async function buildMcpAuthorizeForRequest(
+    req: Request,
+    user: { id?: string; email?: string; name?: string | null } | null,
+  ): Promise<McpAuthorizeFn> {
+    if (!authOpts) return async () => null;
+    return async (action: WildwoodAuthAction) => {
+      const mod = await getAuthModule();
+      const authFn = authOpts.authenticate ?? synthesizeAuthenticateFromLegacy(authOpts);
+      if (authFn) {
+        const gate = await mod.evaluateAuthenticate(
+          authFn as never,
+          user as never,
+          req,
+        );
+        if (gate) {
+          if (!user) return "Authentication required";
+          if (gate instanceof Response) return gate.statusText || "Forbidden";
+          return "Forbidden";
+        }
+      }
+      if (!authOpts.authorize) return null;
+      const result = await authOpts.authorize({
+        user: user as never,
+        action: action as never,
+        request: req,
+      });
+      if (result instanceof Response) return result.statusText || "Forbidden";
+      if (result === false) return "Forbidden";
+      return null;
+    };
+  }
+
   function getHandlerFor(req?: Request): Promise<LazyHandler> {
     if (isRequestAware && req) {
       // Per-request client (play) — need per-request authorize that can resolve user for this req.
@@ -423,6 +471,13 @@ export function createWildwoodRoute(
     return res; // { session, user } | null
   }
 
+  /** Resolve the Wildwood client for a request (handles request-aware clients). */
+  async function resolveClient(req: Request): Promise<WildwoodClient> {
+    return (await (
+      getClient as (r?: Request) => WildwoodRouteClientInput | Promise<WildwoodRouteClientInput>
+    )(req)) as WildwoodClient;
+  }
+
   function revalidateContent() {
     revalidateTag(tagName, tagStore as never);
   }
@@ -479,6 +534,95 @@ export function createWildwoodRoute(
       } catch {}
     } catch {}
     return NextResponse.json({ ok: true });
+  }
+
+  /**
+   * Preview-token creation / revocation. Only signed-in non-anonymous users
+   * can create tokens. Revocation deletes the verification row so future link
+   * opens fail.
+   */
+  async function handlePreviewToken(req: Request): Promise<Response> {
+    if (!authOpts) return NextResponse.json({ error: "Auth not configured" }, { status: 501 });
+    const inst = await getAuthInstance();
+    if (!inst) return NextResponse.json({ error: "Auth init failed" }, { status: 500 });
+    await inst.ensureAuthSchema();
+
+    const client = await resolveClient(req);
+    const url = new URL(req.url);
+    const db = client._.db;
+
+    if (req.method === "DELETE") {
+      const token = url.searchParams.get("token")?.trim();
+      if (!token) return NextResponse.json({ error: "Missing ?token=" }, { status: 400 });
+      const { revokePreviewToken } = await import("./handlers/preview-token");
+      await revokePreviewToken({ db, token });
+      return NextResponse.json({ ok: true });
+    }
+
+    if (req.method !== "POST") return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
+
+    // Create: require a signed-in, non-anonymous editor.
+    const authRes = await resolveAuthUserFromRequest(req);
+    const editor = authRes?.user ?? null;
+    if (!editor?.id) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    if (editor.isAnonymous) return NextResponse.json({ error: "Anonymous users cannot create preview tokens" }, { status: 403 });
+
+    const branch = url.searchParams.get("branch")?.trim();
+    if (!branch) return NextResponse.json({ error: "Missing ?branch=" }, { status: 400 });
+
+    const origin = requestOrigin(req);
+    const { createPreviewToken } = await import("./handlers/preview-token");
+    try {
+      const result = await createPreviewToken({
+        auth: inst.auth,
+        db,
+        editor,
+        branch,
+        origin,
+        previewPath: wwPaths.preview,
+      });
+      return NextResponse.json(result);
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
+  }
+
+  /**
+   * Preview link landing. A visitor opens a share link with ?branch=&token=.
+   * We verify the token, mint a session for the branch god-user, set the session
+   * cookie + branch cookie, enable draft mode, and redirect to "/" so the
+   * preview renders. No account needed.
+   */
+  async function handlePreviewLink(req: Request): Promise<Response> {
+    if (!authOpts) return NextResponse.json({ error: "Auth not configured" }, { status: 501 });
+    const inst = await getAuthInstance();
+    if (!inst) return NextResponse.json({ error: "Auth init failed" }, { status: 500 });
+    await inst.ensureAuthSchema();
+
+    const url = new URL(req.url);
+    const branch = url.searchParams.get("branch")?.trim();
+    const token = url.searchParams.get("token")?.trim();
+
+    if (!branch || !token) {
+      return NextResponse.json({ error: "Missing ?branch= or ?token=" }, { status: 400 });
+    }
+
+    const client = await resolveClient(req);
+    const db = client._.db;
+
+    const { verifyPreviewToken } = await import("./handlers/preview-token");
+    const result = await verifyPreviewToken({ auth: inst.auth, db, token });
+
+    if (!result.ok) {
+      return new NextResponse(result.error, { status: 403 });
+    }
+
+    // Set the session cookie + branch cookie + enable draft mode.
+    const headers = new Headers();
+    headers.append("Set-Cookie", result.setCookie);
+    headers.append("Set-Cookie", cookieHeaderValue(cookieName, branch));
+    headers.set("Location", "/");
+    return new NextResponse(null, { status: 302, headers });
   }
 
   async function handleCapabilities(req: Request): Promise<Response> {
@@ -660,7 +804,17 @@ export function createWildwoodRoute(
           scopes: scopeClaim.split(/\s+/).filter(Boolean),
         };
         const { handleMcpRequest } = await import("./handlers/mcp-server");
-        return handleMcpRequest(request, client as never, auth);
+        // Build the per-action authorizer gate so the MCP tools run through the
+        // same authz gate as the HTTP API. The MCP path doesn't have a session
+        // cookie, so we build the user from the JWT (no session) and run the
+        // same `authenticate` + `authorize` gates the HTTP API uses.
+        const mcpUser = auth.userId ? { id: auth.userId, email: auth.email } : null;
+        const authorizeForMcp = await buildMcpAuthorizeForRequest(request, mcpUser);
+        return handleMcpRequest(request, client as never, auth, authorizeForMcp, {
+          origin,
+          previewPath: wwPaths.preview,
+          auth: inst.auth,
+        });
       },
     );
     return guarded(req);
@@ -736,6 +890,8 @@ export function createWildwoodRoute(
     if (isCapabilitiesPath(pathname)) return handleCapabilities(req);
     if (isAuthPath(pathname)) return handleAuth(req);
     if (isDraftPath(pathname)) return handleDraft(req);
+    if (isPreviewTokenPath(pathname)) return handlePreviewToken(req);
+    if (isPreviewPath(pathname)) return handlePreviewLink(req);
     if (isExitPreviewPath(pathname)) return handleExitPreview();
     const gate = await authorizeGitRequest(req, pathname);
     if (gate) return gate;
@@ -755,6 +911,7 @@ export function createWildwoodRoute(
     if (isCapabilitiesPath(pathname)) return handleCapabilities(req);
     if (isAuthPath(pathname)) return handleAuth(req);
     if (isDraftPath(pathname)) return handleDraft(req);
+    if (isPreviewTokenPath(pathname)) return handlePreviewToken(req);
     if (isExitPreviewPath(pathname)) return handleExitPreview();
 
     const gate = await authorizeGitRequest(req, pathname);

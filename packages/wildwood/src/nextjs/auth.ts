@@ -11,7 +11,7 @@
  */
 
 import { betterAuth } from "better-auth";
-import { deviceAuthorization, jwt } from "better-auth/plugins";
+import { anonymous, deviceAuthorization, jwt } from "better-auth/plugins";
 import { nextCookies, toNextJsHandler } from "better-auth/next-js";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { cimd } from "@better-auth/cimd";
@@ -57,6 +57,8 @@ export type WildwoodAuthUser = {
   email?: string;
   name?: string;
   image?: string | null;
+  /** True when the user is a per-branch god-user created by the preview-token flow. */
+  isAnonymous?: boolean;
 };
 
 export type WildwoodAuthAction =
@@ -75,7 +77,7 @@ export type WildwoodAuthAction =
 
 // Inlined schema — avoids fs at runtime, no NFT file.
 const BETTER_AUTH_SCHEMA_SQL = `
-create table "user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" integer not null, "image" text, "createdAt" date not null, "updatedAt" date not null);
+create table "user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" integer not null, "image" text, "isAnonymous" integer default 0, "createdAt" date not null, "updatedAt" date not null);
 create table "session" ("id" text not null primary key, "expiresAt" date not null, "token" text not null unique, "createdAt" date not null, "updatedAt" date not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade);
 create table "account" ("id" text not null primary key, "accountId" text not null, "providerId" text not null, "userId" text not null references "user" ("id") on delete cascade, "accessToken" text, "refreshToken" text, "idToken" text, "accessTokenExpiresAt" date, "refreshTokenExpiresAt" date, "scope" text, "password" text, "createdAt" date not null, "updatedAt" date not null);
 create table "verification" ("id" text not null primary key, "identifier" text not null, "value" text not null, "expiresAt" date not null, "createdAt" date not null, "updatedAt" date not null);
@@ -574,6 +576,7 @@ export async function getOrCreateAuth(opts: {
     // so nothing bleeds into userland. `nextCookies()` must stay last per
     // better-auth guidance.
     plugins: [
+      anonymous(),
       deviceAuthorization({ verificationUri: "/api/wildwood/device" }),
       jwt(),
       oauthProvider({
@@ -632,6 +635,7 @@ export function userFromSession(session: unknown): WildwoodAuthUser | null {
     email: typeof rec.email === "string" ? rec.email : undefined,
     name: typeof rec.name === "string" ? rec.name : undefined,
     image: typeof rec.image === "string" ? rec.image : null,
+    isAnonymous: typeof rec.isAnonymous === "boolean" ? rec.isAnonymous : undefined,
   };
 }
 

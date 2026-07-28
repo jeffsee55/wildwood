@@ -750,6 +750,111 @@ export class Trees {
     return { rootOid, trees: newOids };
   }
 
+  /**
+   * Remove entries from a tree, computing new tree objects without the entry.
+   * Mirrors `applyEntriesToTree` but removes instead of adds. If the entry
+   * doesn't exist, the tree is unchanged. Empty intermediate directories are
+   * pruned up the chain.
+   */
+  async removeEntriesFromTree({
+    rootTreeOid,
+    paths,
+  }: {
+    rootTreeOid: string;
+    paths: string[];
+  }): Promise<string> {
+    let rootOid = rootTreeOid;
+
+    for (const path of paths) {
+      const segments = path.split("/");
+      const fileName = segments[segments.length - 1];
+      const dirs = segments.slice(0, -1);
+
+      // Walk the directory chain to find the leaf tree.
+      const chain: { oid: string; name: string }[] = [];
+      let treeOid = rootOid;
+      let missing = false;
+      for (const name of dirs) {
+        const tree = await this.getTree(treeOid);
+        if (!tree) {
+          throw new Error(`Tree not found while removing entry "${path}" at "${name}" (${treeOid})`);
+        }
+        const child = tree[name];
+        if (child && child.type === "tree") {
+          chain.push({ oid: treeOid, name });
+          treeOid = child.oid;
+        } else {
+          // Entry not present — nothing to remove.
+          missing = true;
+          break;
+        }
+      }
+
+      if (missing) continue;
+
+      const leaf = await this.getTree(treeOid);
+      if (!leaf) {
+        throw new Error(`Tree not found while removing entry "${path}" (${treeOid})`);
+      }
+
+      if (!(fileName in leaf)) {
+        // Entry not present in the leaf — nothing to remove.
+        continue;
+      }
+
+      // Remove the file from the leaf.
+      const updatedLeaf = { ...leaf };
+      delete updatedLeaf[fileName];
+      let newOid = await calculateTreeOid(updatedLeaf);
+      await this.persistTree(newOid, updatedLeaf);
+
+      // Track whether the current node (the one we just processed) is empty.
+      // If it is, we prune it from the parent as we walk up the chain.
+      let currentEntries = updatedLeaf;
+
+      // Walk up the chain, updating parent entries.
+      for (let i = chain.length - 1; i >= 0; i--) {
+        const { oid: parentOid, name } = chain[i];
+        const parent = await this.getTree(parentOid);
+        if (!parent) throw new Error(`Parent not found: ${parentOid}`);
+        const parentEntry = parent[name];
+        if (!parentEntry || parentEntry.type !== "tree") {
+          // Parent entry is no longer a tree — skip.
+          continue;
+        }
+
+        let updatedParent: TreeEntries;
+        if (Object.keys(currentEntries).length === 0) {
+          // The child is empty — prune it from the parent.
+          updatedParent = { ...parent };
+          delete updatedParent[name];
+          if (Object.keys(updatedParent).length === 0) {
+            // Prune empty parents up the chain.
+            const emptyParent = {} as TreeEntries;
+            newOid = await calculateTreeOid(emptyParent);
+            await this.persistTree(newOid, emptyParent);
+            currentEntries = emptyParent;
+            continue;
+          }
+          newOid = await calculateTreeOid(updatedParent);
+          await this.persistTree(newOid, updatedParent);
+          currentEntries = updatedParent;
+          continue;
+        }
+        updatedParent = {
+          ...parent,
+          [name]: { type: "tree" as const, oid: newOid },
+        };
+        newOid = await calculateTreeOid(updatedParent);
+        await this.persistTree(newOid, updatedParent);
+        currentEntries = updatedParent;
+      }
+      rootOid = newOid;
+    }
+
+    return rootOid;
+  }
+
   async findMergeBase(args: { oursOid: string; theirsOid: string }): Promise<CommitNode | null> {
     const { oursOid, theirsOid } = args;
     const getCommit = (oid: string) => this.gitable.getCommit(oid);

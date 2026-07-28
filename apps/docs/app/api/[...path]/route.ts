@@ -36,6 +36,10 @@ export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createCMS(wildwo
     },
 
     authorize: async ({ user, action }) => {
+      // Anonymous (per-branch god-user) sessions from preview links are read-only.
+      if (user?.isAnonymous) {
+        return false;
+      }
       if (action.type === "content.update" || action.type === "content.delete") return true;
       if (action.type === "git.commit" && action.ref === "main") return !!user;
       return true;

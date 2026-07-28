@@ -52,10 +52,15 @@ type WildwoodWellKnownOptions = {
    * Defaults to `${base}/auth`.
    */
   auth?: string;
+  /**
+   * URL path of the preview-link landing route — where share-link visitors land.
+   * Defaults to `${base}/wildwood/preview`.
+   */
+  preview?: string;
 };
 
 /** Fully-resolved discovery paths — every field an absolute URL path. */
-type WildwoodPaths = { base: string; mcp: string; auth: string };
+type WildwoodPaths = { base: string; mcp: string; auth: string; preview: string };
 
 /** Normalize to an absolute path: ensure a single leading slash, no trailing slash. */
 function absPath(p: string): string {
@@ -75,7 +80,8 @@ function resolveWildwoodPaths(options: string | WildwoodWellKnownOptions = "/api
   const base = absPath(opts.base ?? "/api");
   const mcp = absPath(opts.mcp ?? `${base}/wildwood/mcp`);
   const auth = absPath(opts.auth ?? `${base}/auth`);
-  return { base, mcp, auth };
+  const preview = absPath(opts.preview ?? `${base}/wildwood/preview`);
+  return { base, mcp, auth, preview };
 }
 
 /**
