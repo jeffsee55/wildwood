@@ -2,6 +2,7 @@ import { createClient as createLibsql } from "@libsql/client";
 import { draftMode } from "next/headers";
 import { wildwood as createWildwood, z } from "wildwood";
 import { getBranch } from "wildwood/nextjs/branch";
+import { ensureDraftModeFromBranchCookie } from "wildwood/nextjs/draft";
 
 export const WILDWOOD_CONTENT_TAG = "wildwood:docs-content" as const;
 
@@ -79,10 +80,20 @@ export type RequestContext = { branch: string; isDraft: boolean };
  * dynamic APIs into the cached function.
  */
 export async function getContext(): Promise<RequestContext> {
+  // Re-enable draft mode if the branch cookie exists but draft mode was lost
+  // (e.g. after a redeploy). The branch cookie is the source of truth.
+  const fromBranchCookie = await ensureDraftModeFromBranchCookie(wildwood);
+
   let isDraft = false;
   try {
     isDraft = (await draftMode()).isEnabled;
   } catch {}
+
+  // If draft mode is off but the branch cookie says we're in preview, trust
+  // the branch cookie. This keeps the editing session sticky across redeploys.
+  if (!isDraft && fromBranchCookie) {
+    isDraft = true;
+  }
 
   const branch = await getBranch(wildwood, { draftModeEnabled: isDraft });
   return { branch, isDraft };

@@ -72,6 +72,7 @@ export {
   createDraftRoute,
   createDraftRouteHandlers,
   draftRoute,
+  ensureDraftModeFromBranchCookie,
   type CreateDraftRouteOptions,
 } from "./draft";
 

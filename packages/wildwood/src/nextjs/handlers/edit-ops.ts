@@ -38,6 +38,13 @@ export type EditOpContext = {
    * message to deny. Transport-agnostic so it can be used by both REST and MCP.
    */
   authorize: (action: WildwoodAuthAction) => Promise<string | null>;
+  /**
+   * Called after a successful mutation (add, commit, delete, push, merge).
+   * The HTTP API uses this to call `revalidateTag()`; the MCP server passes
+   * a no-op or a fetch-based revalidation hook. Without this, edits made via
+   * MCP don't invalidate the Next.js cache.
+   */
+  onMutate?: () => void;
 };
 
 /**
@@ -104,7 +111,9 @@ async function run<T>(
   const protectedRefGuard = guardProtectedRef(ctx.client, action);
   if (protectedRefGuard) return fail(protectedRefGuard);
   try {
-    return await fn();
+    const result = await fn();
+    if (result.ok) ctx.onMutate?.();
+    return result;
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
   }
@@ -229,6 +238,7 @@ export async function createBranch(
   if (denied) return fail(denied);
   try {
     await git.createBranch({ name: args.name, base });
+    ctx.onMutate?.();
     return ok({ ref: args.name, base });
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
@@ -247,6 +257,7 @@ export async function switchBranch(
   if (denied) return fail(denied);
   try {
     await git.switch({ ref: refName });
+    ctx.onMutate?.();
     return ok({ ref: refName });
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
@@ -313,6 +324,7 @@ export async function push(
       ref: args.ref,
       ...(args.pr ? { pr: args.pr as never } : {}),
     });
+    ctx.onMutate?.();
     return ok({
       ok: true,
       commitOid: result.commitOid,
@@ -342,6 +354,7 @@ export async function pull(
       commit: (pullResult as never as { commit: never }).commit,
     });
     await git.db.refs.setTreeOid({ ref: args.ref, treeOid: successResult.commit.treeOid });
+    ctx.onMutate?.();
     return ok({ ok: true, commitOid: successResult.commit.oid });
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
@@ -397,6 +410,7 @@ export async function merge(
         pullError,
       );
     }
+    ctx.onMutate?.();
     return ok({
       ok: true,
       pr: { number: pr.number, url: pr.url },
@@ -428,6 +442,7 @@ export async function merge(
         ref: configRef,
         treeOid: (localMerge as { commit: { treeOid: string } }).commit.treeOid,
       });
+      ctx.onMutate?.();
       return ok({
         ok: true,
         pr: null,
@@ -464,6 +479,7 @@ export async function createPr(
         body: args.body?.trim() || defaultBody,
       });
     }
+    ctx.onMutate?.();
     return ok({ ok: true, pr: { number: pr.number, url: pr.url } });
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
@@ -529,6 +545,7 @@ export async function deleteFiles(
     await git.db.refs.setTreeOid({ ref: args.ref, treeOid: newRootTreeOid });
     await git.db.refs.updateVersions({ ref: args.ref, versions: [git.config.version] });
 
+    ctx.onMutate?.();
     return ok({ rootTreeOid });
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));

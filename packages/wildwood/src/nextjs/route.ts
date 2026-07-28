@@ -814,6 +814,7 @@ export function createWildwoodRoute(
           origin,
           previewPath: wwPaths.preview,
           auth: inst.auth,
+          onMutate: revalidateContent,
         });
       },
     );

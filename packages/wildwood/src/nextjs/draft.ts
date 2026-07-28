@@ -29,7 +29,7 @@
 
 import { cookies, draftMode } from "next/headers";
 import { type NextRequest, NextResponse } from "next/server";
-import { WILDWOOD_BRANCH_COOKIE, WILDWOOD_BRANCH_COOKIE_FALLBACKS } from "./branch";
+import { WILDWOOD_BRANCH_COOKIE, WILDWOOD_BRANCH_COOKIE_FALLBACKS, type WildwoodForBranch } from "./branch";
 
 export type CreateDraftRouteOptions = {
   /**
@@ -94,3 +94,58 @@ export function createDraftRoute(opts: CreateDraftRouteOptions = {}) {
 /** Aliases for discoverability. */
 export const createDraftRouteHandlers = createDraftRoute;
 export const draftRoute = createDraftRoute;
+
+/**
+ * Re-enable draft mode when the branch cookie exists but draft mode was lost
+ * (e.g. after a redeploy — the `__prerender_bypass` cookie is signed with a
+ * random value per build, so the old cookie no longer matches).
+ *
+ * The branch cookie (`x-wildwood-branch`) persists across redeploys since it's
+ * a regular cookie with a 7-day max-age. If it exists and differs from the
+ * configured ref, we know the user is in a preview session and should re-enable
+ * draft mode.
+ *
+ * Call this from a server component or route handler (e.g. inside `getContext`)
+ * before reading `draftMode().isEnabled` — it will set the new bypass cookie
+ * on the response so subsequent renders work.
+ *
+ * @returns `true` if the caller is in a preview session (branch cookie present),
+ *   `false` otherwise. This is the "source of truth" — prefer it over
+ *   `draftMode().isEnabled` for deciding whether to target a branch.
+ */
+export async function ensureDraftModeFromBranchCookie(
+  wildwood: WildwoodForBranch,
+): Promise<boolean> {
+  const { WILDWOOD_BRANCH_COOKIE } = await import("./branch");
+  const configRef = wildwood?._?.config?.ref;
+  const trimmedConfigRef = typeof configRef === "string" ? configRef.trim() : "";
+
+  let branchCookie: string | undefined;
+  try {
+    const jar = await cookies();
+    branchCookie = jar.get(WILDWOOD_BRANCH_COOKIE)?.value;
+  } catch {
+    // Not in a server component context (e.g. client component).
+    return false;
+  }
+
+  // No branch cookie → not in preview mode.
+  const trimmedBranch = branchCookie?.trim();
+  if (!trimmedBranch) return false;
+
+  // Branch cookie matches config ref → not in preview mode either.
+  if (trimmedBranch === trimmedConfigRef) return false;
+
+  // Branch cookie exists and differs from config ref → re-enable draft mode.
+  try {
+    const dm = await draftMode();
+    if (!dm.isEnabled) {
+      dm.enable();
+    }
+  } catch {
+    // Can't enable draft mode in this context — still return true so the
+    // caller knows the branch should be targeted.
+  }
+
+  return true;
+}

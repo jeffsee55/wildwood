@@ -76,6 +76,8 @@ export type McpServerContext = {
   previewPath: string;
   /** Auth instance, for creating preview tokens (needs DB access). */
   auth: unknown;
+  /** Called after a successful mutation so the route layer can revalidate cache. */
+  onMutate?: () => void;
 };
 
 function textResult(data: unknown) {
@@ -107,6 +109,7 @@ function buildEditOpContext(
   client: WildwoodClient,
   auth: McpAuthContext,
   authorize: McpAuthorizeFn,
+  onMutate?: () => void,
 ): EditOpContext {
   return {
     client,
@@ -116,6 +119,7 @@ function buildEditOpContext(
       name: undefined,
     },
     authorize,
+    ...(onMutate ? { onMutate } : {}),
   };
 }
 
@@ -139,7 +143,7 @@ export function buildWildwoodMcpServer(
     version: "0.1.0",
   });
 
-  const ctx = buildEditOpContext(client, auth, authorize);
+  const ctx = buildEditOpContext(client, auth, authorize, serverCtx.onMutate);
 
   // ── read ────────────────────────────────────────────────────────────────
 
