@@ -18,13 +18,6 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return { beforeFiles: wildwoodWellKnown("/api"), afterFiles: [], fallback: [] };
   },
-
-  typescript: {
-    // pnpm monorepo auto-install path ("It looks like you're trying to use TS... Installing")
-    // triggers a second build worker with bad args and crashes with "id must be string".
-    // We have our own `pnpm tsc --noEmit` via `turbo run typecheck`; skip during build.
-    ignoreBuildErrors: true,
-  },
 };
 
 export default nextConfig;
