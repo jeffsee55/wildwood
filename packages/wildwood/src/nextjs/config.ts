@@ -16,8 +16,8 @@ const WILDWOOD_TRANSPILE_PACKAGES = ["wildwood-kit", "wildwood-shared", "wildwoo
  * `node_modules` and are loaded at runtime, never bundled into RSC payloads.
  *
  * `better-auth` + the libsql dialect are NOT here: they're bundled into
- * `wildwood/dist` (tsdown `noExternal`) and reached only via the lazy
- * `import("./auth")` chunk, so consumer apps need no better-auth peer dep.
+ * `wildwood/dist` (tsdown `noExternal`), so consumer apps need no
+ * better-auth peer dep.
  * `@libsql/client` stays external — the app supplies the DB driver instance.
  */
 const WILDWOOD_SERVER_EXTERNAL_PACKAGES = ["@libsql/client", "h3", "minimatch"];

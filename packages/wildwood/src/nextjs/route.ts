@@ -9,7 +9,7 @@
  * What it owns:
  * - /api/wildwood/*  (git, github, vscode) via H3 handler
  * - /api/wildwood/draft  + /api/wildwood/preview  (draft/preview toggle, per-user)
- * - /api/auth/*  + /api/wildwood/auth/*  (better-auth, lazy-loaded)
+ * - /api/auth/*  + /api/wildwood/auth/*  (better-auth)
  * - /api/wildwood/auth/capabilities  (Kit can hide edit buttons pre-flight)
  * - branch cookie + revalidateTag on mutations
  *
@@ -58,6 +58,9 @@ export type {
   WildwoodTrustedOrigins,
 } from "./auth";
 import type { WildwoodAuthAction } from "./auth";
+import * as authModule from "./auth";
+import { revokePreviewToken, createPreviewToken, verifyPreviewToken } from "./handlers/preview-token";
+import { handleMcpRequest } from "./handlers/mcp-server";
 import type { McpAuthorizeFn } from "./handlers/mcp-server";
 
 const DEFAULT_MUTATION_RE = /\/git\/(commit|discard|merge|pull|create-branch|switch-branch)\/?$/;
@@ -99,7 +102,7 @@ export type CreateWildwoodRouteOptions = {
 
   /**
    * Optional auth config. When present, route.ts owns better-auth entirely:
-   * - /api/auth/* and /api/wildwood/auth/* → better-auth handler (lazy, no static import)
+   * - /api/auth/* and /api/wildwood/auth/* → better-auth handler
    * - git endpoints → session → authenticate → authorize gate
    * - /api/wildwood/auth/capabilities → pre-flight for Kit
    *
@@ -297,7 +300,7 @@ export function createWildwoodRoute(
     return async (innerReq: Request, action: WildwoodAuthAction) => {
       const authRes = await resolveAuthUserFromRequest(innerReq ?? req);
       const user = authRes?.user ?? null;
-      const mod = await getAuthModule();
+      const mod = authModule;
 
       const authFn = authOpts.authenticate ?? synthesizeAuthenticateFromLegacy(authOpts);
       if (authFn) {
@@ -338,7 +341,7 @@ export function createWildwoodRoute(
   ): Promise<McpAuthorizeFn> {
     if (!authOpts) return async () => null;
     return async (action: WildwoodAuthAction) => {
-      const mod = await getAuthModule();
+      const mod = authModule;
       const authFn = authOpts.authenticate ?? synthesizeAuthenticateFromLegacy(authOpts);
       if (authFn) {
         const gate = await mod.evaluateAuthenticate(
@@ -403,20 +406,7 @@ export function createWildwoodRoute(
     return staticHandlerPromise;
   }
 
-  // Lazy auth singleton — only constructed if auth config is provided AND a
-  // request needs it. `./auth` bundles `better-auth` (tsdown `noExternal`), so
-  // this dynamic `import("./auth")` is the single boundary that keeps that code
-  // out of every chunk except this always-dynamic route handler. Cache
-  // Components tracing only concerns the read-only `wildwood()` client, which
-  // imports `./auth` for types only — so nothing auth-related is bundled there.
-  type AuthBundle = typeof import("./auth");
-  let authModulePromise: Promise<AuthBundle> | null = null;
-  function getAuthModule(): Promise<AuthBundle> {
-    if (!authModulePromise) {
-      authModulePromise = import("./auth");
-    }
-    return authModulePromise;
-  }
+  type AuthBundle = typeof authModule;
 
   // getOrCreateAuth is async — unwrap to avoid Promise<Promise<>>.
   let authInstancePromise: Promise<Awaited<ReturnType<AuthBundle["getOrCreateAuth"]>>> | null =
@@ -442,7 +432,8 @@ export function createWildwoodRoute(
     if (!authOpts) return null;
     if (!authInstancePromise) {
       authInstancePromise = (async () => {
-        const [mod, db] = await Promise.all([getAuthModule(), getDbForAuth()]);
+        const mod = authModule;
+        const db = await getDbForAuth();
         if (!db)
           throw new Error(
             "Auth requires a database — ensure createClient({ database }) is configured.",
@@ -466,7 +457,7 @@ export function createWildwoodRoute(
     const inst = await getAuthInstance();
     if (!inst) return null;
     await inst.ensureAuthSchema();
-    const mod = await getAuthModule();
+    const mod = authModule;
     const res = await mod.getSessionUser(inst.auth as never, req.headers as unknown as Headers);
     return res; // { session, user } | null
   }
@@ -554,7 +545,6 @@ export function createWildwoodRoute(
     if (req.method === "DELETE") {
       const token = url.searchParams.get("token")?.trim();
       if (!token) return NextResponse.json({ error: "Missing ?token=" }, { status: 400 });
-      const { revokePreviewToken } = await import("./handlers/preview-token");
       await revokePreviewToken({ db, token });
       return NextResponse.json({ ok: true });
     }
@@ -571,7 +561,6 @@ export function createWildwoodRoute(
     if (!branch) return NextResponse.json({ error: "Missing ?branch=" }, { status: 400 });
 
     const origin = requestOrigin(req);
-    const { createPreviewToken } = await import("./handlers/preview-token");
     try {
       const result = await createPreviewToken({
         auth: inst.auth,
@@ -610,7 +599,6 @@ export function createWildwoodRoute(
     const client = await resolveClient(req);
     const db = client._.db;
 
-    const { verifyPreviewToken } = await import("./handlers/preview-token");
     const result = await verifyPreviewToken({ auth: inst.auth, db, token });
 
     if (!result.ok) {
@@ -633,7 +621,7 @@ export function createWildwoodRoute(
 
     const authRes = await resolveAuthUserFromRequest(req);
     const user = authRes?.user ?? null;
-    const mod = await getAuthModule();
+    const mod = authModule;
 
     // authenticate gate — who may have a session at all.
     // New: single callback `authenticate`. Deprecated legacy `allowedEmails` / `isAllowed`
@@ -684,10 +672,8 @@ export function createWildwoodRoute(
     await inst.ensureAuthSchema();
 
     // `better-auth/next-js` is bundled into `wildwood/dist` via the auth module
-    // (tsdown `noExternal`). We reach it through the already lazy-loaded
-    // `./auth` chunk so there's a single bundling boundary and no extra
-    // per-request dynamic import.
-    const mod = await getAuthModule();
+    // (tsdown `noExternal`) — one bundling boundary, owned by `./auth`.
+    const mod = authModule;
     const handlers = (
       mod.toNextJsHandler as (a: unknown) => {
         GET: (r: Request) => Promise<Response>;
@@ -780,7 +766,7 @@ export function createWildwoodRoute(
 
     const origin = requestOrigin(req);
     const resource = `${origin}${wwPaths.mcp}`;
-    const mod = await getAuthModule();
+    const mod = authModule;
     const client = (await (
       getClient as (r?: Request) => WildwoodRouteClientInput | Promise<WildwoodRouteClientInput>
     )(req)) as WildwoodClient;
@@ -803,7 +789,6 @@ export function createWildwoodRoute(
           email: typeof jwt.email === "string" ? jwt.email : undefined,
           scopes: scopeClaim.split(/\s+/).filter(Boolean),
         };
-        const { handleMcpRequest } = await import("./handlers/mcp-server");
         // Build the per-action authorizer gate so the MCP tools run through the
         // same authz gate as the HTTP API. The MCP path doesn't have a session
         // cookie, so we build the user from the JWT (no session) and run the
@@ -843,7 +828,7 @@ export function createWildwoodRoute(
 
     const authRes = await resolveAuthUserFromRequest(req);
     const user = authRes?.user ?? null;
-    const mod = await getAuthModule();
+    const mod = authModule;
 
     // 1) authenticate gate — who may have a session at all.
     {

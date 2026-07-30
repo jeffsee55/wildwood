@@ -116,7 +116,6 @@ export const draftRoute = createDraftRoute;
 export async function ensureDraftModeFromBranchCookie(
   wildwood: WildwoodForBranch,
 ): Promise<boolean> {
-  const { WILDWOOD_BRANCH_COOKIE } = await import("./branch");
   const configRef = wildwood?._?.config?.ref;
   const trimmedConfigRef = typeof configRef === "string" ? configRef.trim() : "";
 

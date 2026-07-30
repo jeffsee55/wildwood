@@ -72,9 +72,11 @@ async function tryGetFullBytesFromGen(): Promise<Uint8Array | null> {
 const assetCache = new Map<string, Uint8Array>();
 
 function extensionAssetRoots(): string[] {
-  // Filesystem fallback is dev-only convenience; production reads exclusively
-  // from embedded bytes. No `require("wildwood/package.json")` or `import.meta`
-  // URL tricks — those break when Next.js bundles the handler.
+  // Filesystem fallback is dev-only; production reads exclusively from
+  // embedded bytes. The dev-only gate also keeps these cwd-relative paths out
+  // of production bundles, where they'd make Next's file tracing (NFT) crawl
+  // the entire project.
+  if (process.env.NODE_ENV === "production") return [];
   return [
     join(process.cwd(), "packages", "wildwood", "bundled-extension"),
     join(process.cwd(), "node_modules", "wildwood", "bundled-extension"),

@@ -3,11 +3,8 @@
  * Owned by `createWildwoodRoute`.
  *
  * `better-auth` (+ subpaths) and the libsql dialect are bundled into
- * `wildwood/dist` (tsdown `noExternal`). This module is itself lazy-loaded via
- * `import("./auth")` from the always-dynamic CMS route handler, so it never
- * enters a cached page/layout graph and the bundled auth code stays out of the
- * `wildwood()` client chunk. `@libsql/client` (the DB driver) stays external —
- * it's provided by the host app via `createClient({ database })`.
+ * `wildwood/dist` (tsdown `noExternal`). `@libsql/client` (the DB driver)
+ * stays external — it's provided by the host app via `createClient({ database })`.
  */
 
 import { betterAuth } from "better-auth";
