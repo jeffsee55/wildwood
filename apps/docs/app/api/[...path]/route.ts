@@ -18,7 +18,15 @@ export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createCMS(wildwo
     // In dev the app is served through the portless proxy origin, which better-auth
     // must trust for CSRF-protected endpoints (e.g. device approval). PORTLESS_URL
     // is set by `portless ww`; fall back to the localhost proxy origin.
-    baseURL: isDev ? (process.env.PORTLESS_URL ?? "https://ww.localhost") : undefined,
+    // In production better-auth 1.7.x requires an explicit baseURL (it no longer
+    // derives the origin from the request) — without it, init throws
+    // `TypeError: Invalid URL` and every route 500s. Derive from Vercel's env.
+    baseURL: isDev
+      ? (process.env.PORTLESS_URL ?? "https://ww.localhost")
+      : (process.env.BETTER_AUTH_URL ??
+        (process.env.VERCEL_PROJECT_PRODUCTION_URL
+          ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+          : undefined)),
     trustedOrigins: isDev
       ? [process.env.PORTLESS_URL ?? "https://ww.localhost", "https://ww.localhost"]
       : undefined,
