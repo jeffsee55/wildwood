@@ -83,6 +83,10 @@ export class GitHubRemote extends Remote {
     graphqlClient: typeof graphql;
     octokit: Octokit;
   }> | null = null;
+  private repositoryIdentityPromise: Promise<{
+    provider: "github";
+    externalId: string;
+  }> | null = null;
   private owner: string;
   private repo: string;
 
@@ -95,6 +99,25 @@ export class GitHubRemote extends Remote {
 
   override hasCredentials(): boolean {
     return Boolean(this.provider?.github);
+  }
+
+  /** Immutable GitHub repository identity used by project-scoped authorization. */
+  async getRepositoryIdentity(): Promise<{ provider: "github"; externalId: string }> {
+    if (!this.repositoryIdentityPromise) {
+      this.repositoryIdentityPromise = (async () => {
+        const { octokit } = await this.getGitHubClient();
+        const { data } = await octokit.repos.get({ owner: this.owner, repo: this.repo });
+        return { provider: "github" as const, externalId: data.node_id };
+      })();
+    }
+    try {
+      return await this.repositoryIdentityPromise;
+    } catch (error) {
+      // A transient GitHub failure should not permanently pin this client to
+      // its mutable owner/repository fallback identity.
+      this.repositoryIdentityPromise = null;
+      throw error;
+    }
   }
 
   private async getGitHubClient(): Promise<{

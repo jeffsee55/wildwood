@@ -1,56 +1,16 @@
 import { createCMS } from "wildwood/nextjs/route";
 import { wildwood, WILDWOOD_CONTENT_TAG } from "@/lib/wildwood";
 
-// Local-only sign-in. GitHub App OAuth creds are too sensitive to keep in a
-// local .env, so in development we enable better-auth's email+password provider,
-// which backs the library's dev sign-in page (fixed identities, hardcoded
-// non-secret password — see the Kit toolbar's "Dev sign-in", served at
-// /api/wildwood/device/signin). Never enabled in production — there, GitHub App
-// OAuth is the only sign-in path.
+// Local development keeps the fixed Better Auth identities exposed by the dev
+// sign-in page. Production reuses the GitHub credentials already present on the
+// Wildwood client; auth itself has no environment-variable configuration.
 const isDev = process.env.NODE_ENV !== "production";
 
 export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createCMS(wildwood, {
   revalidateTagName: WILDWOOD_CONTENT_TAG,
+  dangerouslyAllowDatabaseReset: true,
   auth: {
-    secret: process.env.BETTER_AUTH_SECRET,
-    github: true,
+    bootstrap: { owner: "jeffsee.55@gmail.com" },
     providers: isDev ? { emailAndPassword: true } : undefined,
-    // In dev the app is served through the portless proxy origin, which better-auth
-    // must trust for CSRF-protected endpoints (e.g. device approval). PORTLESS_URL
-    // is set by `portless ww`; fall back to the localhost proxy origin.
-    // In production better-auth 1.7.x requires an explicit baseURL (it no longer
-    // derives the origin from the request) — without it, init throws
-    // `TypeError: Invalid URL` and every route 500s. Derive from Vercel's env.
-    baseURL: isDev
-      ? (process.env.PORTLESS_URL ?? "https://ww.localhost")
-      : (process.env.BETTER_AUTH_URL ??
-        (process.env.VERCEL_PROJECT_PRODUCTION_URL
-          ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-          : undefined)),
-    trustedOrigins: isDev
-      ? [process.env.PORTLESS_URL ?? "https://ww.localhost", "https://ww.localhost"]
-      : undefined,
-    authenticate: async ({ user }) => {
-      const raw = process.env.ALLOWED_EMAILS ?? "";
-      const allow = raw
-        .split(",")
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
-      if (allow.length === 0) {
-        if (process.env.NODE_ENV === "production") return false;
-        return !!user.email;
-      }
-      return allow.includes(user.email?.toLowerCase() ?? "");
-    },
-
-    authorize: async ({ user, action }) => {
-      // Anonymous (per-branch god-user) sessions from preview links are read-only.
-      if (user?.isAnonymous) {
-        return false;
-      }
-      if (action.type === "content.update" || action.type === "content.delete") return true;
-      if (action.type === "git.commit" && action.ref === "main") return !!user;
-      return true;
-    },
   },
 });

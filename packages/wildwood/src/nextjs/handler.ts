@@ -25,6 +25,8 @@ export type CreateHandlerOptions = {
    * `client` / provider never owns this; it's route-owned.
    */
   authorize?: GitServiceAuthorizeFn;
+  /** Require immutable Git object reads to include and prove reachability from `?ref=`. */
+  requireRefForObjectReads?: boolean;
   /** Same gate for GitHub App manifest routes that need git-write-level authz. */
   authorizeAppManifest?: (req: Request, action: WildwoodAuthAction) => Promise<Response | null>;
 };
@@ -36,7 +38,10 @@ export function createHandler(client: WildwoodClient, options?: CreateHandlerOpt
 
   // Injector is optional — when absent (tests / direct usage without route),
   // git routes allow (route layer still gates at Next boundary when configured).
-  const gitRouter = createGitServiceRouter(client, { authorize: options?.authorize });
+  const gitRouter = createGitServiceRouter(client, {
+    authorize: options?.authorize,
+    requireRefForObjectReads: options?.requireRefForObjectReads,
+  });
   const githubRouter = createGitHubRouter(client);
   const appManifestRouter = createGitHubAppManifestRouter(client, {
     authorize: options?.authorize as never,

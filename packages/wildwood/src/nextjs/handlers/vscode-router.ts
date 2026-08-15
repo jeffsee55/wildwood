@@ -6,7 +6,6 @@ import {
   VSCODE_EMBED_HTML_RESPONSE_HEADERS,
   vscodeEmbedCorsHeaders,
   vscodeEmbedEditorCacheHeaders,
-  gitObjectCacheHeaders,
   vscodeWebStaticCacheHeaders,
   withVscodeEmbedCors,
 } from "@/nextjs/vscode-embed-csp";
@@ -248,18 +247,6 @@ export function createVscodeRouter(client: WildwoodClient): H3 {
         });
       return serveWildwoodExtensionAsset(event as H3EventLite, asset);
     });
-
-  vscode.get("/object-tree/:oid", async (event) => {
-    const oid = routeParamString(
-      (event.context.params as Record<string, unknown>)?.oid as string | number | undefined,
-    );
-    if (!oid) return new Response("Missing oid", { status: 400 });
-    const tree = await git.getTree(oid);
-    if (!tree) return new Response("Not found", { status: 404 });
-    return new Response(JSON.stringify(tree), {
-      headers: { "Content-Type": "application/json", ...gitObjectCacheHeaders(oid) },
-    });
-  });
 
   const vscodeCdn = new H3();
   vscodeCdn.get("/:commit/**:asset", async (event) => {

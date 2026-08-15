@@ -69,6 +69,19 @@ export {
 } from "./route";
 
 export {
+  WILDWOOD_PERMISSIONS,
+  type WildwoodBootstrapConfig,
+  type WildwoodBootstrapOwner,
+  type WildwoodAgentSession,
+  type WildwoodGrant,
+  type WildwoodGrantConstraints,
+  type WildwoodPermission,
+  type WildwoodProject,
+  type WildwoodProjectInput,
+  type WildwoodRefSelector,
+} from "./access";
+
+export {
   createDraftRoute,
   createDraftRouteHandlers,
   draftRoute,

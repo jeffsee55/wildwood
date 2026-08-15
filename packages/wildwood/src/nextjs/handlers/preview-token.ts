@@ -8,27 +8,25 @@
  *
  * ## How it works
  *
- * Each branch maps to its own "god-user" (an anonymous better-auth user with
- * `isAnonymous: true`). The branch identity is encoded in the user's email as a
- * stable, derivable slug:
+ * Each link maps to its own anonymous Better Auth identity (a user with
+ * `isAnonymous: true`). Per-link identities ensure revoking one link also
+ * removes authority from sessions created through that link, without affecting
+ * another link for the same branch.
  *
  *   branch: feat/add-auth      → user: preview-branch-feat-add-auth@wildwood.local
  *   branch: agent/mcp-tools    → user: preview-branch-agent-mcp-tools@wildwood.local
  *
- * Two completely separate users → two completely separate session pools → no
- * cross-contamination between branches. Revoking one branch's link / sessions
- * does not affect other branches.
+ * Two links → two separate identities, grants, and session pools.
  *
  * ## Persistence
  *
- * - **Branch god-user**: a `user` row with `isAnonymous = true`. Created on
- *   first preview-token request for a branch; reused on subsequent requests. One
- *   row per branch — stable, findable by email.
+ * - **Link preview identity**: a `user` row with `isAnonymous = true`. One row
+ *   per link, carrying no authority on its own.
  * - **Capability token**: a `verification` row (`identifier:
  *   preview-token:<random>`, `value: { branch, scope: "read" }`, `expiresAt`).
  *   One row per link. Verifiable by identifier.
  * - **Visitor sessions**: normal `session` rows, each linked to the branch
- *   god-user's `id`. One row per visitor (each opens the link → new session).
+ *   preview identity's `id`. One row per visitor (each opens the link → new session).
  *
  * All three use existing better-auth tables — no migrations needed.
  *
@@ -36,30 +34,36 @@
  *
  * Editor (signed-in real user):
  *   POST /api/wildwood/preview-token?branch=feat/add-auth
- *     → find-or-create god-user for branch
+ *     → find-or-create the anonymous identity and an exact-ref read grant
  *     → mint capability token (verification row)
  *     → returns { url: https://<host>/preview?branch=&token= }
  *
  * Visitor (no account):
  *   GET  /api/wildwood/preview?branch=feat/add-auth&token=<random>
  *     → verify token (not expired, not revoked)
- *     → sign in anonymously under the branch god-user
+ *     → sign in anonymously under the branch preview identity
  *     → set session cookie + branch cookie
  *     → redirect to "/" so the preview renders
  *
  * Revocation:
  *   DELETE /api/wildwood/preview-token?token=<random>  → delete verification row
  *   Future link visits fail (token gone); existing sessions can be nuked via
- *   revokeSessions({ userId: <branch-god-user-id> }).
+ *   revokeSessions({ userId: <branch-preview-user-id> }).
  */
 
 import type { WildwoodClient } from "@/client/index";
 import type { WildwoodAuthInstance, WildwoodAuthUser } from "@/nextjs/auth";
-import { NextResponse } from "next/server";
+import {
+  createGrant,
+  listActiveGrants,
+  revokeGrant,
+  type WildwoodAccessDb,
+  type WildwoodProject,
+} from "@/nextjs/access";
 
-/** Prefix for the branch god-user emails. */
+/** Prefix for anonymous branch-preview identity emails. */
 const PREVIEW_USER_EMAIL_PREFIX = "preview-branch-";
-/** Domain for the branch god-user emails. Not a real mailbox. */
+/** Domain for anonymous branch-preview identity emails. Not a real mailbox. */
 const PREVIEW_USER_EMAIL_DOMAIN = "wildwood.local";
 /** Prefix for capability tokens in the `verification` table. */
 const PREVIEW_TOKEN_IDENTIFIER_PREFIX = "preview-token:";
@@ -68,7 +72,7 @@ const DEFAULT_TOKEN_TTL_SEC = 7 * 24 * 60 * 60;
 /** Default session expiry for preview visitors: 7 days in seconds. */
 const DEFAULT_SESSION_TTL_SEC = 7 * 24 * 60 * 60;
 
-/** Derive the stable "god-user" email for a branch. */
+/** Legacy stable identity email retained for verifying older preview tokens. */
 export function previewUserEmailForBranch(branch: string): string {
   const slug = branch
     .toLowerCase()
@@ -77,17 +81,26 @@ export function previewUserEmailForBranch(branch: string): string {
   return `${PREVIEW_USER_EMAIL_PREFIX}${slug}@${PREVIEW_USER_EMAIL_DOMAIN}`;
 }
 
-/** Check if an email looks like a branch god-user email. */
+/** Check if an email looks like an anonymous branch-preview identity. */
 export function isPreviewUserEmail(email: string | undefined): boolean {
   if (!email) return false;
-  return email.startsWith(PREVIEW_USER_EMAIL_PREFIX) && email.endsWith(`@${PREVIEW_USER_EMAIL_DOMAIN}`);
+  return (
+    email.startsWith(PREVIEW_USER_EMAIL_PREFIX) && email.endsWith(`@${PREVIEW_USER_EMAIL_DOMAIN}`)
+  );
 }
 
-/** Extract the branch name from a branch god-user email, or null. */
+/** Extract the branch name from an anonymous preview identity email, or null. */
 export function branchFromPreviewUserEmail(email: string | undefined): string | null {
   if (!isPreviewUserEmail(email)) return null;
-  const core = email!.slice(PREVIEW_USER_EMAIL_PREFIX.length, -`@${PREVIEW_USER_EMAIL_DOMAIN}`.length);
+  const core = email!.slice(
+    PREVIEW_USER_EMAIL_PREFIX.length,
+    -`@${PREVIEW_USER_EMAIL_DOMAIN}`.length,
+  );
   return core.replace(/-/g, "/");
+}
+
+function previewUserEmailForToken(token: string): string {
+  return `${PREVIEW_USER_EMAIL_PREFIX}${token.toLowerCase()}@${PREVIEW_USER_EMAIL_DOMAIN}`;
 }
 
 /** Generate a random token (URL-safe, 32 bytes). */
@@ -119,6 +132,13 @@ export type PreviewTokenResult = {
   url: string;
   branch: string;
   expiresAt: number; // epoch ms
+  grantId?: string;
+};
+
+type ManagedPreviewAccess = {
+  db: WildwoodAccessDb;
+  project: WildwoodProject;
+  parentGrantId?: string;
 };
 
 /**
@@ -137,46 +157,75 @@ export async function createPreviewToken(args: {
   previewPath: string;
   /** Token TTL in seconds. Defaults to 7 days. */
   ttlSec?: number;
+  /** Managed ref authority to create alongside the Better Auth preview identity. */
+  access?: ManagedPreviewAccess;
 }): Promise<PreviewTokenResult> {
   // Only non-anonymous (real) users can create preview tokens.
   if (args.editor.isAnonymous) {
     throw new Error("Anonymous users cannot create preview tokens.");
   }
+  if (args.access && !args.editor.id) {
+    throw new Error("Managed preview tokens require an authenticated editor id.");
+  }
   const ttlSec = args.ttlSec ?? DEFAULT_TOKEN_TTL_SEC;
   const expiresAt = Date.now() + ttlSec * 1000;
 
-  const email = previewUserEmailForBranch(args.branch);
+  const token = randomToken();
+  const email = previewUserEmailForToken(token);
 
-  // Find-or-create the per-branch god-user. We go through the better-auth API
-  // so the user row + isAnonymous flag land in the right place without touching
-  // schema internals. If a user with this email already exists (from a prior
-  // token for the same branch), we reuse it.
-  const godUser = await findOrCreatePreviewUser(args.auth, args.db, email, args.branch);
+  // Create the per-link anonymous identity in Better Auth's user table.
+  const previewUser = await findOrCreatePreviewUser(args.auth, args.db, email, args.branch);
+
+  const grant = args.access
+    ? await createGrant({
+        db: args.access.db,
+        project: args.access.project,
+        grant: {
+          subjectType: "anonymous",
+          subjectId: previewUser.id,
+          permissions: ["content.read"],
+          refs: [{ type: "exact", ref: args.branch }],
+          kind: "share",
+          issuedBy: args.editor.id!,
+          parentGrantId: args.access.parentGrantId,
+          expiresAt: new Date(expiresAt).toISOString(),
+        },
+      })
+    : undefined;
 
   // Mint a capability token in the verification table. The identifier is the
   // token itself (prefixed for namespacing). The value carries the branch +
   // scope so the verify path can reconstruct everything from one row.
-  const token = randomToken();
   const identifier = `${PREVIEW_TOKEN_IDENTIFIER_PREFIX}${token}`;
-  const value = JSON.stringify({ branch: args.branch, scope: "read" });
+  const value = JSON.stringify({
+    branch: args.branch,
+    scope: "read",
+    subjectId: previewUser.id,
+    grantId: grant?.id,
+  });
 
-  await executeSql(args.db, `insert into "verification" ("identifier", "value", "expiresAt", "createdAt", "updatedAt") values (?, ?, ?, ?, ?)`, [
-    identifier,
-    value,
-    new Date(expiresAt).toISOString(),
-    new Date().toISOString(),
-    new Date().toISOString(),
-  ]);
+  await executeSql(
+    args.db,
+    `insert into "verification" ("id", "identifier", "value", "expiresAt", "createdAt", "updatedAt") values (?, ?, ?, ?, ?, ?)`,
+    [
+      randomToken().slice(0, 16),
+      identifier,
+      value,
+      new Date(expiresAt).toISOString(),
+      new Date().toISOString(),
+      new Date().toISOString(),
+    ],
+  );
 
   const url = new URL(`${args.origin}${args.previewPath}`);
   url.searchParams.set("branch", args.branch);
   url.searchParams.set("token", token);
 
-  return { token, url: url.toString(), branch: args.branch, expiresAt };
+  return { token, url: url.toString(), branch: args.branch, expiresAt, grantId: grant?.id };
 }
 
 /**
- * Verify a preview-share token and mint a session for the branch god-user.
+ * Verify a preview-share token and mint a session for the branch preview identity.
  * Called by the preview route when a visitor opens a share link. Returns the
  * session + branch so the route can set cookies and redirect.
  */
@@ -184,6 +233,7 @@ export async function verifyPreviewToken(args: {
   auth: WildwoodAuthInstance;
   db: WildwoodClient["_"]["db"];
   token: string;
+  access?: Omit<ManagedPreviewAccess, "parentGrantId">;
 }): Promise<{ ok: true; branch: string; setCookie: string } | { ok: false; error: string }> {
   const identifier = `${PREVIEW_TOKEN_IDENTIFIER_PREFIX}${args.token}`;
 
@@ -208,7 +258,7 @@ export async function verifyPreviewToken(args: {
 
   if (Date.now() > expiresAt) return { ok: false, error: "Token expired." };
 
-  let parsed: { branch?: string; scope?: string };
+  let parsed: { branch?: string; scope?: string; subjectId?: string; grantId?: string };
   try {
     parsed = JSON.parse(String(row.value));
   } catch {
@@ -216,13 +266,35 @@ export async function verifyPreviewToken(args: {
   }
   if (!parsed.branch) return { ok: false, error: "Token has no branch." };
 
-  const email = previewUserEmailForBranch(parsed.branch);
-  const godUser = await findOrCreatePreviewUser(args.auth, args.db, email, parsed.branch);
+  if (args.access) {
+    if (!parsed.subjectId || !parsed.grantId) {
+      return { ok: false, error: "Token has no managed access grant." };
+    }
+    const active = await listActiveGrants({
+      db: args.access.db,
+      project: args.access.project,
+      subjectType: "anonymous",
+      subjectId: parsed.subjectId,
+    });
+    if (!active.some((grant) => grant.id === parsed.grantId)) {
+      return { ok: false, error: "Token access was revoked or expired." };
+    }
+  }
 
-  // Mint a session for the god-user. The visitor gets a real better-auth
-  // session, scoped to the branch god-user. The session cookie is set by the
+  const previewUser = parsed.subjectId
+    ? await findPreviewUserById(args.db, parsed.subjectId)
+    : await findOrCreatePreviewUser(
+        args.auth,
+        args.db,
+        previewUserEmailForBranch(parsed.branch),
+        parsed.branch,
+      );
+  if (!previewUser) return { ok: false, error: "Preview identity not found." };
+
+  // Mint a session for the preview identity. The visitor gets a real Better Auth
+  // session backed by an exact-ref grant. The session cookie is set by the
   // route via the returned setCookie header.
-  const session = await createSessionForUser(args.db, godUser.id, parsed.branch);
+  const session = await createSessionForUser(args.db, previewUser.id);
 
   return {
     ok: true,
@@ -233,32 +305,61 @@ export async function verifyPreviewToken(args: {
 
 /**
  * Revoke a preview-share token by deleting its verification row. Existing
- * sessions for the branch god-user are NOT affected — only future link opens.
+ * sessions for the branch preview identity are NOT affected — only future link opens.
  */
 export async function revokePreviewToken(args: {
   db: WildwoodClient["_"]["db"];
   token: string;
+  branch?: string;
+  access?: Omit<ManagedPreviewAccess, "parentGrantId"> & { actorId: string };
 }): Promise<{ ok: true }> {
   const identifier = `${PREVIEW_TOKEN_IDENTIFIER_PREFIX}${args.token}`;
+  if (args.access) {
+    const result = (await executeSql(
+      args.db,
+      `select "value" from "verification" where "identifier" = ?`,
+      [identifier],
+    )) as { rows?: Array<Record<string, unknown>> };
+    const value = result.rows?.[0]?.value;
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value) as { branch?: string; grantId?: string };
+        if (args.branch && parsed.branch !== args.branch) {
+          throw new Error("Token is not valid for this branch");
+        }
+        if (parsed.grantId) {
+          await revokeGrant({
+            db: args.access.db,
+            project: args.access.project,
+            grantId: parsed.grantId,
+            actorId: args.access.actorId,
+          });
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message === "Token is not valid for this branch") {
+          throw error;
+        }
+        // Deleting a corrupt token still revokes the credential itself.
+      }
+    }
+  }
   await executeSql(args.db, `delete from "verification" where "identifier" = ?`, [identifier]);
   return { ok: true };
 }
 
 // ── internal helpers ────────────────────────────────────────────────────
 
-/** Find-or-create the per-branch anonymous user via better-auth's admin API. */
+/** Find-or-create an anonymous preview identity in Better Auth's user table. */
 async function findOrCreatePreviewUser(
-  auth: WildwoodAuthInstance,
+  _auth: WildwoodAuthInstance,
   db: WildwoodClient["_"]["db"],
   email: string,
   branch: string,
 ): Promise<{ id: string; email: string }> {
   // Try to find existing user by email.
-  const rows = (await executeSql(
-    db,
-    `select "id" from "user" where "email" = ?`,
-    [email],
-  )) as { rows?: Array<Record<string, unknown>> };
+  const rows = (await executeSql(db, `select "id" from "user" where "email" = ?`, [email])) as {
+    rows?: Array<Record<string, unknown>>;
+  };
   const existing = rows?.rows?.[0];
   if (existing && typeof existing.id === "string") {
     return { id: existing.id, email };
@@ -286,11 +387,25 @@ async function findOrCreatePreviewUser(
   return { id, email };
 }
 
+async function findPreviewUserById(
+  db: WildwoodClient["_"]["db"],
+  userId: string,
+): Promise<{ id: string; email: string } | null> {
+  const result = (await executeSql(
+    db,
+    `select "id", "email" from "user" where "id" = ? and "isAnonymous" = 1 limit 1`,
+    [userId],
+  )) as { rows?: Array<Record<string, unknown>> };
+  const row = result.rows?.[0];
+  return row && typeof row.id === "string" && typeof row.email === "string"
+    ? { id: row.id, email: row.email }
+    : null;
+}
+
 /** Create a session for a user by inserting directly into the session table. */
 async function createSessionForUser(
   db: WildwoodClient["_"]["db"],
   userId: string,
-  branch: string,
 ): Promise<{ setCookie: string; token: string }> {
   const token = randomToken();
   const sessionId = randomToken().slice(0, 16);
@@ -318,7 +433,9 @@ async function createSessionForUser(
 
 /** Execute SQL via the libsql client. Works for both the wildwood DB and auth. */
 async function executeSql(
-  db: { client?: { execute(s: string | { sql: string; args: unknown[] }): Promise<unknown> } } | unknown,
+  db:
+    | { client?: { execute(s: string | { sql: string; args: unknown[] }): Promise<unknown> } }
+    | unknown,
   sql: string,
   args: unknown[],
 ): Promise<unknown> {
@@ -326,9 +443,7 @@ async function executeSql(
   // underlying client is the same libsql client passed to createClient. We
   // access it via the `client` property if available, otherwise treat `db` as
   // the client directly.
-  const client =
-    (db as { client?: LibsqlClientLike })?.client ??
-    (db as LibsqlClientLike);
+  const client = (db as { client?: LibsqlClientLike })?.client ?? (db as LibsqlClientLike);
   if (!client || typeof client.execute !== "function") {
     throw new Error("preview-token: could not resolve libsql client for SQL execution");
   }

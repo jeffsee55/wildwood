@@ -36,6 +36,18 @@ export type {
   WildwoodTrustedOrigins,
 } from "@/nextjs/auth";
 export {
+  WILDWOOD_PERMISSIONS,
+  type WildwoodBootstrapConfig,
+  type WildwoodBootstrapOwner,
+  type WildwoodAgentSession,
+  type WildwoodGrant,
+  type WildwoodGrantConstraints,
+  type WildwoodPermission,
+  type WildwoodProject,
+  type WildwoodProjectInput,
+  type WildwoodRefSelector,
+} from "@/nextjs/access";
+export {
   getVercelSystemEnv,
   isVercel,
   parseGitRemoteUrl,

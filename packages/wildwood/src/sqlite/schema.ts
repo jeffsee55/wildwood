@@ -1,4 +1,9 @@
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import * as accessSchema from "./access-schema";
+import * as authSchema from "./auth-schema";
+
+export * from "./access-schema";
+export * from "./auth-schema";
 
 export const _commits = sqliteTable(
   "_commits",
@@ -135,6 +140,8 @@ export const schema = {
   entries,
   filters,
   connections,
+  ...authSchema,
+  ...accessSchema,
 };
 
 export type Schema = typeof schema;

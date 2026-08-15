@@ -19,12 +19,12 @@
  *   previews (*.vercel.app), custom domains — no env mapping needed.
  * - trustedOrigins optional. Defaults to derived baseURL origin. Accepts
  *   static string[] or `(req)=>string[]|Promise<string[]>` for userland mapping.
- * - No env fallbacks inside wildwood — host maps env → explicit options.
+ * - No auth env fallbacks inside wildwood; credentials come from explicit client config.
  *   DB is not configured here; it's reused from `createClient({ database })`.
  *   GitHub sign-in is `github: true | { clientId, clientSecret }` — `true`
- *   reuses the same GitHub App creds used for git writes
- *   (GITHUB_CLIENT_ID/SECRET from App manifest). No separate WILDWOOD_GITHUB_*
- *   envs. Auth: `authenticate` = sign-in/sign-up gate, `authorize` = per-action gate.
+ *   reuses the same explicit GitHub App creds used for git writes.
+ *   Auth: `authenticate` = sign-in/sign-up gate, `authorize` = an optional
+ *   additional per-action restriction.
  */
 
 import { cookies } from "next/headers";
@@ -38,6 +38,7 @@ import {
 } from "./branch";
 import { handle as createNextHandle } from "./handler";
 import { resolveWildwoodPaths, type WildwoodWellKnownOptions } from "./config";
+import { renderCmsDatabasePage } from "./cms-database-page";
 import type { WildwoodClient } from "@/client/index";
 import { activeRefSetCookieHeader, clearBranchCookieHeader } from "wildwood-shared";
 
@@ -57,9 +58,42 @@ export type {
   WildwoodRouteAuthOptions,
   WildwoodTrustedOrigins,
 } from "./auth";
+export type {
+  WildwoodBootstrapConfig,
+  WildwoodAgentSession,
+  WildwoodGrant,
+  WildwoodGrantConstraints,
+  WildwoodPermission,
+  WildwoodProject,
+  WildwoodProjectInput,
+  WildwoodRefSelector,
+} from "./access";
 import type { WildwoodAuthAction } from "./auth";
 import * as authModule from "./auth";
-import { revokePreviewToken, createPreviewToken, verifyPreviewToken } from "./handlers/preview-token";
+import {
+  WILDWOOD_PERMISSIONS,
+  authorizeManagedAction,
+  authorizeManagedPermission,
+  createAgentSession,
+  createContributorAccess,
+  createMergeApprovalRequest,
+  decideApprovalRequest,
+  ensureBootstrapOwner,
+  listApprovalRequests,
+  listProjectGrants,
+  revokeGrant,
+  resolveProject,
+  selectorsMatch,
+  verifyAgentSession,
+  type WildwoodAccessDb,
+  type WildwoodPermission,
+  type WildwoodProject,
+} from "./access";
+import {
+  revokePreviewToken,
+  createPreviewToken,
+  verifyPreviewToken,
+} from "./handlers/preview-token";
 import { handleMcpRequest } from "./handlers/mcp-server";
 import type { McpAuthorizeFn } from "./handlers/mcp-server";
 
@@ -80,6 +114,13 @@ export type CreateWildwoodRouteOptions = {
   legacyCookieNames?: readonly string[];
   mutationRe?: RegExp;
   revalidateTagStore?: "default" | "layout";
+  /**
+   * Exposes the bootstrap-owner-only `/wildwood/cms/database` management page
+   * and destructive `POST /wildwood/access/reset` prototype action.
+   * This destroys every user, session, grant, approval, and indexed Git value
+   * in the shared database. Never enable it for a stable production system.
+   */
+  dangerouslyAllowDatabaseReset?: boolean;
   /**
    * When true, `getClient` is called per-request with Request.
    * Needed for apps like `play` where org/repo comes from a cookie.
@@ -109,23 +150,17 @@ export type CreateWildwoodRouteOptions = {
    * DB is NOT configured here — it's re-used from `createClient({ database })`
    * which is already the Turso/LibSQL client. No `database:` field.
    *
-   * GitHub sign-in: `github: true` reuses GITHUB_CLIENT_ID/SECRET from the same
-   * GitHub App that provides git writes. Only pass `{ clientId, clientSecret }`
-   * if sign-in creds differ. `false` / omitted disables GitHub sign-in.
+   * Managed GitHub sign-in reuses the explicit credentials on the same GitHub
+   * App config that provides git writes. Only pass `{ clientId, clientSecret }`
+   * if sign-in creds differ. `false` disables GitHub sign-in.
    * Future: `providers: { gitlab: true, google: true }`.
    *
-   * No env fallbacks inside wildwood — host maps env → explicit options.
+   * No auth env fallbacks inside wildwood.
    * `baseURL`/`trustedOrigins` optional: autodetected from Request.
    *
-   * Example (zero-config host):
+   * Example:
    *   createWildwoodRoute(() => wildwood, {
-   *     auth: {
-   *       secret: process.env.BETTER_AUTH_SECRET!,
-   *       github: true, // or { clientId, clientSecret } if different from git App
-   *
-   *       authenticate: async ({ user }) => allowList.has(user.email?.toLowerCase() ?? ""),
-   *       authorize: async ({ user, action }) => !!user,
-   *     },
+   *     auth: { bootstrap: { owner: "owner@example.com" } },
    *   })
    */
   auth?: import("./auth").WildwoodRouteAuthOptions;
@@ -176,6 +211,14 @@ function isCapabilitiesPath(pathname: string): boolean {
   return (
     pathname.endsWith("/auth/capabilities") || pathname.endsWith("/wildwood/auth/capabilities")
   );
+}
+
+function isAccessPath(pathname: string): boolean {
+  return /\/wildwood\/access(?:\/|$)/.test(pathname);
+}
+
+function isCmsDatabasePath(pathname: string): boolean {
+  return /\/wildwood\/cms\/database\/?$/.test(pathname);
 }
 
 function isDraftPath(pathname: string): boolean {
@@ -277,6 +320,7 @@ export function createWildwoodRoute(
   const mutationRe = opts.mutationRe ?? DEFAULT_MUTATION_RE;
   const tagStore = opts.revalidateTagStore ?? "default";
   const authOpts = opts.auth;
+  const managedAuth = authOpts?.bootstrap;
   // Absolute URL paths for the MCP resource, auth issuer, and catch-all mount.
   // Single source of truth shared with `wildwoodWellKnown()` in next.config.
   const wwPaths = resolveWildwoodPaths(opts.wellKnown);
@@ -284,6 +328,77 @@ export function createWildwoodRoute(
   // For apps where client is static (docs), we cache handler. For per-request clients (play),
   // we detect `getClient.length >= 1` or caller opts requestAware.
   const isRequestAware = (opts as { requestAware?: boolean }).requestAware || getClient.length >= 1;
+
+  async function accessContext(client: WildwoodClient): Promise<{
+    db: WildwoodAccessDb;
+    project: WildwoodProject;
+  }> {
+    const config = client._.config;
+    const db = client._.db.client as unknown as WildwoodAccessDb;
+    const remote = client._.git.remote as unknown as {
+      getRepositoryIdentity?: () => Promise<{ provider: string; externalId: string }>;
+    };
+    let repositoryIdentity: { provider: string; externalId: string } | undefined;
+    try {
+      repositoryIdentity = await remote.getRepositoryIdentity?.();
+    } catch {
+      // Local/native remotes and temporarily unavailable GitHub APIs still resolve
+      // by canonical name; a later successful request binds the immutable id.
+    }
+    return {
+      db,
+      project: await resolveProject({
+        db,
+        project: {
+          provider: repositoryIdentity?.provider ?? "github",
+          externalId: repositoryIdentity?.externalId,
+          org: config.org,
+          repo: config.repo,
+          configRef: config.ref,
+        },
+      }),
+    };
+  }
+
+  async function evaluateManagedAccess(
+    client: WildwoodClient,
+    user: import("./auth").WildwoodAuthUser | null,
+    action: WildwoodAuthAction,
+  ): Promise<Response | null> {
+    if (!managedAuth) return null;
+    const { db, project } = await accessContext(client);
+    const decision = await authorizeManagedAction({ db, project, user, action });
+    if (decision.allowed) return null;
+    return new Response(decision.reason, {
+      status: user ? 403 : 401,
+      statusText: user ? "Forbidden" : "Unauthorized",
+    });
+  }
+
+  async function databaseOwnerGate(args: {
+    db: WildwoodAccessDb;
+    project: WildwoodProject;
+    user: import("./auth").WildwoodAuthUser | null;
+  }): Promise<Response | null> {
+    const isBootstrapOwner =
+      Boolean(args.user?.email) &&
+      args.user!.email!.trim().toLowerCase() === managedAuth?.owner.trim().toLowerCase();
+    if (!isBootstrapOwner) {
+      return NextResponse.json(
+        { error: "Only the configured bootstrap owner can manage the database" },
+        { status: args.user ? 403 : 401 },
+      );
+    }
+    const decision = await authorizeManagedPermission({
+      db: args.db,
+      project: args.project,
+      user: args.user,
+      permission: "access.manage",
+    });
+    return decision.allowed
+      ? null
+      : NextResponse.json({ error: decision.reason }, { status: args.user ? 403 : 401 });
+  }
 
   // Shared authorizer injected into H3 git handlers — only owns authz lives here.
   // H3 routers may not have request yet when constructed, so we build an
@@ -301,6 +416,12 @@ export function createWildwoodRoute(
       const authRes = await resolveAuthUserFromRequest(innerReq ?? req);
       const user = authRes?.user ?? null;
       const mod = authModule;
+
+      if (managedAuth) {
+        const client = await resolveClient(innerReq ?? req);
+        const managedGate = await evaluateManagedAccess(client, user, action);
+        if (managedGate) return managedGate;
+      }
 
       const authFn = authOpts.authenticate ?? synthesizeAuthenticateFromLegacy(authOpts);
       if (authFn) {
@@ -337,18 +458,48 @@ export function createWildwoodRoute(
    */
   async function buildMcpAuthorizeForRequest(
     req: Request,
-    user: { id?: string; email?: string; name?: string | null } | null,
+    user: import("./auth").WildwoodAuthUser | null,
   ): Promise<McpAuthorizeFn> {
     if (!authOpts) return async () => null;
     return async (action: WildwoodAuthAction) => {
       const mod = authModule;
-      const authFn = authOpts.authenticate ?? synthesizeAuthenticateFromLegacy(authOpts);
+      if (managedAuth) {
+        const client = await resolveClient(req);
+        const managedGate = await evaluateManagedAccess(client, user as never, action);
+        if (managedGate) {
+          if (
+            user?.managedSubjectType === "agent" &&
+            user.id &&
+            action.type === "git.merge" &&
+            action.sourceCommit
+          ) {
+            const approval = await createMergeApprovalRequest({
+              ...(await accessContext(client)),
+              requestedBy: user.id,
+              sourceRef: action.ref,
+              sourceCommit: action.sourceCommit,
+              reason: action.message,
+            });
+            const approvalUrl = `${requestOrigin(req)}${wwPaths.base}/wildwood/access/approvals/${approval.id}`;
+            return JSON.stringify({
+              error: "approval_required",
+              approvalId: approval.id,
+              approvalUrl,
+              sourceRef: approval.sourceRef,
+              targetRef: approval.targetRef,
+              sourceCommit: approval.sourceCommit,
+              expiresAt: approval.expiresAt,
+            });
+          }
+          return (await managedGate.text()) || managedGate.statusText || "Forbidden";
+        }
+      }
+      const authFn =
+        user?.managedSubjectType === "agent"
+          ? null
+          : (authOpts.authenticate ?? synthesizeAuthenticateFromLegacy(authOpts));
       if (authFn) {
-        const gate = await mod.evaluateAuthenticate(
-          authFn as never,
-          user as never,
-          req,
-        );
+        const gate = await mod.evaluateAuthenticate(authFn as never, user as never, req);
         if (gate) {
           if (!user) return "Authentication required";
           if (gate instanceof Response) return gate.statusText || "Forbidden";
@@ -378,7 +529,7 @@ export function createWildwoodRoute(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return createNextHandle(
           client as unknown as WildwoodForBranch as unknown as WildwoodClient,
-          { authorize: authorize as any },
+          { authorize: authorize as any, requireRefForObjectReads: Boolean(managedAuth) },
         );
       })();
     }
@@ -399,7 +550,7 @@ export function createWildwoodRoute(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return createNextHandle(
           client as unknown as WildwoodForBranch as unknown as WildwoodClient,
-          { authorize: gitAuthorizeForH3 as any },
+          { authorize: gitAuthorizeForH3 as any, requireRefForObjectReads: Boolean(managedAuth) },
         );
       })();
     }
@@ -413,12 +564,12 @@ export function createWildwoodRoute(
     null;
   let dbForAuthPromise: Promise<unknown> | null = null;
 
-  function getDbForAuth(): Promise<unknown> {
+  function getDbForAuth(req?: Request): Promise<unknown> {
     if (dbForAuthPromise) return dbForAuthPromise;
     dbForAuthPromise = (async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const maybeWithReq = getClient as unknown as (r?: Request | undefined) => any;
-      const c = await maybeWithReq();
+      const c = await maybeWithReq(req);
       const rawDb =
         (c as { _?: { db?: { client?: unknown; libsqlClient?: unknown } | unknown } })?._?.db ??
         (c as { db?: unknown })?.db ??
@@ -428,12 +579,12 @@ export function createWildwoodRoute(
     return dbForAuthPromise;
   }
 
-  async function getAuthInstance() {
+  async function getAuthInstance(req?: Request) {
     if (!authOpts) return null;
     if (!authInstancePromise) {
       authInstancePromise = (async () => {
         const mod = authModule;
-        const db = await getDbForAuth();
+        const db = await getDbForAuth(req);
         if (!db)
           throw new Error(
             "Auth requires a database — ensure createClient({ database }) is configured.",
@@ -454,11 +605,16 @@ export function createWildwoodRoute(
 
   async function resolveAuthUserFromRequest(req: Request) {
     if (!authOpts) return null;
-    const inst = await getAuthInstance();
+    const inst = await getAuthInstance(req);
     if (!inst) return null;
     await inst.ensureAuthSchema();
     const mod = authModule;
     const res = await mod.getSessionUser(inst.auth as never, req.headers as unknown as Headers);
+    if (managedAuth && res?.user) {
+      const client = await resolveClient(req);
+      const { db, project } = await accessContext(client);
+      await ensureBootstrapOwner({ db, project, bootstrap: managedAuth, user: res.user });
+    }
     return res; // { session, user } | null
   }
 
@@ -534,7 +690,7 @@ export function createWildwoodRoute(
    */
   async function handlePreviewToken(req: Request): Promise<Response> {
     if (!authOpts) return NextResponse.json({ error: "Auth not configured" }, { status: 501 });
-    const inst = await getAuthInstance();
+    const inst = await getAuthInstance(req);
     if (!inst) return NextResponse.json({ error: "Auth init failed" }, { status: 500 });
     await inst.ensureAuthSchema();
 
@@ -542,23 +698,71 @@ export function createWildwoodRoute(
     const url = new URL(req.url);
     const db = client._.db;
 
+    const authRes = await resolveAuthUserFromRequest(req);
+    const editor = authRes?.user ?? null;
+    if (!editor?.id)
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    if (editor.isAnonymous)
+      return NextResponse.json(
+        { error: "Anonymous users cannot manage preview tokens" },
+        { status: 403 },
+      );
+
     if (req.method === "DELETE") {
       const token = url.searchParams.get("token")?.trim();
       if (!token) return NextResponse.json({ error: "Missing ?token=" }, { status: 400 });
-      await revokePreviewToken({ db, token });
+      const branch = url.searchParams.get("branch")?.trim();
+      if (managedAuth) {
+        const access = await accessContext(client);
+        const decision = await authorizeManagedPermission({
+          ...access,
+          user: editor,
+          permission: "access.revoke",
+          ref: branch,
+        });
+        if (!decision.allowed)
+          return NextResponse.json({ error: decision.reason }, { status: 403 });
+      }
+      const access = managedAuth ? await accessContext(client) : undefined;
+      try {
+        await revokePreviewToken({
+          db,
+          token,
+          branch,
+          access: access ? { ...access, actorId: editor.id } : undefined,
+        });
+      } catch (error) {
+        return NextResponse.json(
+          { error: error instanceof Error ? error.message : String(error) },
+          { status: 403 },
+        );
+      }
       return NextResponse.json({ ok: true });
     }
 
-    if (req.method !== "POST") return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
-
-    // Create: require a signed-in, non-anonymous editor.
-    const authRes = await resolveAuthUserFromRequest(req);
-    const editor = authRes?.user ?? null;
-    if (!editor?.id) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
-    if (editor.isAnonymous) return NextResponse.json({ error: "Anonymous users cannot create preview tokens" }, { status: 403 });
+    if (req.method !== "POST")
+      return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
 
     const branch = url.searchParams.get("branch")?.trim();
     if (!branch) return NextResponse.json({ error: "Missing ?branch=" }, { status: 400 });
+
+    let previewAccess:
+      | (Awaited<ReturnType<typeof accessContext>> & { parentGrantId?: string })
+      | undefined;
+    if (managedAuth) {
+      const access = await accessContext(client);
+      const decision = await authorizeManagedPermission({
+        ...access,
+        user: editor,
+        permission: "branch.share",
+        ref: branch,
+      });
+      if (!decision.allowed) return NextResponse.json({ error: decision.reason }, { status: 403 });
+      const parent = decision.grants.find(
+        (grant) => grant.permissions.includes("branch.share") && selectorsMatch(grant.refs, branch),
+      );
+      previewAccess = { ...access, parentGrantId: parent?.id };
+    }
 
     const origin = requestOrigin(req);
     try {
@@ -569,10 +773,14 @@ export function createWildwoodRoute(
         branch,
         origin,
         previewPath: wwPaths.preview,
+        access: previewAccess,
       });
       return NextResponse.json(result);
     } catch (e) {
-      return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+      return NextResponse.json(
+        { error: e instanceof Error ? e.message : String(e) },
+        { status: 500 },
+      );
     }
   }
 
@@ -584,7 +792,7 @@ export function createWildwoodRoute(
    */
   async function handlePreviewLink(req: Request): Promise<Response> {
     if (!authOpts) return NextResponse.json({ error: "Auth not configured" }, { status: 501 });
-    const inst = await getAuthInstance();
+    const inst = await getAuthInstance(req);
     if (!inst) return NextResponse.json({ error: "Auth init failed" }, { status: 500 });
     await inst.ensureAuthSchema();
 
@@ -599,16 +807,24 @@ export function createWildwoodRoute(
     const client = await resolveClient(req);
     const db = client._.db;
 
-    const result = await verifyPreviewToken({ auth: inst.auth, db, token });
+    const result = await verifyPreviewToken({
+      auth: inst.auth,
+      db,
+      token,
+      access: managedAuth ? await accessContext(client) : undefined,
+    });
 
     if (!result.ok) {
       return new NextResponse(result.error, { status: 403 });
+    }
+    if (result.branch !== branch) {
+      return new NextResponse("Token is not valid for this branch", { status: 403 });
     }
 
     // Set the session cookie + branch cookie + enable draft mode.
     const headers = new Headers();
     headers.append("Set-Cookie", result.setCookie);
-    headers.append("Set-Cookie", cookieHeaderValue(cookieName, branch));
+    headers.append("Set-Cookie", cookieHeaderValue(cookieName, result.branch));
     headers.set("Location", "/");
     return new NextResponse(null, { status: 302, headers });
   }
@@ -635,24 +851,34 @@ export function createWildwoodRoute(
       }
     }
 
-    if (!authOpts.authorize) {
-      return NextResponse.json({ allowed: !!user, capabilities: { [intent]: !!user } });
-    }
-
     // Map intent query to an action for pre-flight.
     // Supports `intent=content.update&path=docs/intro.md` and git actions via `intent=git.commit&ref=main`
-    let action: WildwoodAuthAction | { type: "content.update"; path: string } = {
+    const requestedRef = url.searchParams.get("ref") ?? (await resolveClient(req))._.config.ref;
+    let action: WildwoodAuthAction = {
       type: "content.update",
+      ref: requestedRef,
       path: actionPath || intent,
     };
     if (intent.startsWith("git.")) {
-      const ref = url.searchParams.get("ref") ?? "main";
+      const ref = requestedRef;
       const maybe = gitActionFromPathname(`/api/wildwood/git/${intent.slice(4)}`, {
         ref,
         path: actionPath,
       });
       if (maybe) action = maybe;
       else action = { type: "git.commit", ref, message: "" } as WildwoodAuthAction;
+    }
+
+    if (managedAuth) {
+      const client = await resolveClient(req);
+      const managedGate = await evaluateManagedAccess(client, user, action);
+      if (managedGate) {
+        return NextResponse.json({ allowed: false, capabilities: { [intent]: false }, user });
+      }
+    }
+
+    if (!authOpts.authorize) {
+      return NextResponse.json({ allowed: !!user, capabilities: { [intent]: !!user }, user });
     }
 
     const result = await authOpts.authorize({
@@ -665,9 +891,336 @@ export function createWildwoodRoute(
     return NextResponse.json({ allowed, capabilities: { [intent]: allowed }, user });
   }
 
+  async function handleCmsDatabase(req: Request): Promise<Response> {
+    if (!managedAuth || !opts.dangerouslyAllowDatabaseReset) {
+      return new Response("Not found", { status: 404 });
+    }
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      return new Response("Method not allowed", { status: 405 });
+    }
+    const authRes = await resolveAuthUserFromRequest(req);
+    const user = authRes?.user ?? null;
+    const client = await resolveClient(req);
+    const { db, project } = await accessContext(client);
+    const gate = await databaseOwnerGate({ db, project, user });
+    if (gate) return gate;
+
+    const pathname = new URL(req.url).pathname;
+    const endpoint = pathname.replace(/\/wildwood\/cms\/database\/?$/, "/wildwood/access/reset");
+    const html = renderCmsDatabasePage({
+      endpoint,
+      project: { org: project.org, repo: project.repo },
+      stats: await client._.db.stats(),
+    });
+    return new Response(req.method === "HEAD" ? null : html, {
+      headers: {
+        "cache-control": "private, no-store",
+        "content-security-policy":
+          "default-src 'none'; connect-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+        "content-type": "text/html; charset=utf-8",
+        "x-content-type-options": "nosniff",
+      },
+    });
+  }
+
+  async function handleAccess(req: Request): Promise<Response> {
+    if (!managedAuth) {
+      return NextResponse.json({ error: "Managed access is not configured" }, { status: 501 });
+    }
+    const authRes = await resolveAuthUserFromRequest(req);
+    const user = authRes?.user ?? null;
+    const client = await resolveClient(req);
+    const { db, project } = await accessContext(client);
+    const accessPathname = new URL(req.url).pathname;
+
+    if (/\/wildwood\/access\/reset\/?$/.test(accessPathname)) {
+      if (!opts.dangerouslyAllowDatabaseReset) {
+        return NextResponse.json({ error: "Database reset is not enabled" }, { status: 404 });
+      }
+      const gate = await databaseOwnerGate({ db, project, user });
+      if (gate) return gate;
+      if (req.method === "GET") {
+        const capabilityOnly = new URL(req.url).searchParams.get("capability") === "1";
+        return NextResponse.json(
+          {
+            allowed: true,
+            database: {
+              resetEnabled: true,
+              ...(capabilityOnly ? {} : { stats: await client._.db.stats() }),
+            },
+            project: {
+              id: project.id,
+              org: project.org,
+              repo: project.repo,
+            },
+          },
+          { headers: { "cache-control": "private, no-store" } },
+        );
+      }
+      if (req.method !== "POST" && req.method !== "DELETE") {
+        return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
+      }
+      let body: unknown;
+      try {
+        body = await req.json();
+      } catch {
+        return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+      }
+      if ((body as { confirm?: unknown }).confirm !== "wipe all wildwood data") {
+        return NextResponse.json(
+          { error: 'Expected { "confirm": "wipe all wildwood data" }' },
+          { status: 400 },
+        );
+      }
+
+      if (req.headers.get("accept")?.includes("application/x-ndjson")) {
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            const emit = (event: unknown) => {
+              try {
+                controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+              } catch {
+                // The reset continues if the browser disconnects after authorizing it.
+              }
+            };
+            const close = () => {
+              try {
+                controller.close();
+              } catch {
+                // Already closed by the runtime or disconnected client.
+              }
+            };
+            void (async () => {
+              try {
+                await client._.db.reset({
+                  preserveAuthSettings: true,
+                  onProgress: emit,
+                });
+                revalidateContent();
+                emit({ phase: "complete", signedOut: true });
+              } catch (error) {
+                emit({
+                  phase: "error",
+                  message: error instanceof Error ? error.message : "Database reset failed",
+                });
+              } finally {
+                close();
+              }
+            })();
+          },
+        });
+        return new Response(stream, {
+          headers: {
+            "cache-control": "private, no-store",
+            "content-type": "application/x-ndjson; charset=utf-8",
+            "x-accel-buffering": "no",
+            "x-content-type-options": "nosniff",
+          },
+        });
+      }
+
+      // Keep the persisted signing secret aligned with this warm runtime. User
+      // identities and sessions are still deleted, so the caller must sign in
+      // again and will reclaim the bootstrap owner grant from scratch.
+      await client._.db.reset({ preserveAuthSettings: true });
+      revalidateContent();
+      return NextResponse.json(
+        { ok: true, signedOut: true },
+        { headers: { "cache-control": "private, no-store" } },
+      );
+    }
+
+    const approvalMatch = accessPathname.match(/\/wildwood\/access\/approvals(?:\/([^/]+))?\/?$/);
+    if (approvalMatch) {
+      const decisionGate = await authorizeManagedPermission({
+        db,
+        project,
+        user,
+        permission: "approval.decide",
+      });
+      if (!decisionGate.allowed) {
+        return NextResponse.json({ error: decisionGate.reason }, { status: user ? 403 : 401 });
+      }
+      const approvalId = approvalMatch[1] ? decodeURIComponent(approvalMatch[1]) : undefined;
+      if (req.method === "GET") {
+        const status = new URL(req.url).searchParams.get("status") ?? "pending";
+        if (!["pending", "approved", "denied", "expired"].includes(status)) {
+          return NextResponse.json({ error: "Unknown approval status" }, { status: 400 });
+        }
+        const approvals = await listApprovalRequests({
+          db,
+          project,
+          status: approvalId
+            ? undefined
+            : (status as "pending" | "approved" | "denied" | "expired"),
+        });
+        if (approvalId) {
+          const approval = approvals.find((candidate) => candidate.id === approvalId);
+          return approval
+            ? NextResponse.json({ approval })
+            : NextResponse.json({ error: "Approval request not found" }, { status: 404 });
+        }
+        return NextResponse.json({ approvals });
+      }
+      if (req.method !== "POST" || !approvalId) {
+        return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
+      }
+      let body: unknown;
+      try {
+        body = await req.json();
+      } catch {
+        return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+      }
+      const requestedDecision = (body as { decision?: unknown }).decision;
+      if (requestedDecision !== "approve" && requestedDecision !== "deny") {
+        return NextResponse.json(
+          { error: 'Expected { "decision": "approve" | "deny" }' },
+          { status: 400 },
+        );
+      }
+      try {
+        const approval = await decideApprovalRequest({
+          db,
+          project,
+          approvalId,
+          actorId: user!.id!,
+          decision: requestedDecision,
+        });
+        return NextResponse.json({ approval });
+      } catch (error) {
+        return NextResponse.json(
+          { error: error instanceof Error ? error.message : String(error) },
+          { status: 409 },
+        );
+      }
+    }
+
+    if (/\/wildwood\/access\/agent\/?$/.test(accessPathname)) {
+      if (req.method !== "POST") {
+        return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
+      }
+      let body: unknown;
+      try {
+        body = await req.json();
+      } catch {
+        return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+      }
+      const input = body as { ref?: unknown; permissions?: unknown; ttlSeconds?: unknown };
+      if (typeof input.ref !== "string" || !input.ref.trim()) {
+        return NextResponse.json({ error: 'Expected a non-empty "ref"' }, { status: 400 });
+      }
+      const permissions = input.permissions ?? undefined;
+      if (
+        permissions !== undefined &&
+        (!Array.isArray(permissions) ||
+          permissions.some(
+            (permission) =>
+              typeof permission !== "string" ||
+              !(WILDWOOD_PERMISSIONS as readonly string[]).includes(permission),
+          ))
+      ) {
+        return NextResponse.json(
+          { error: '"permissions" contains an unknown permission' },
+          {
+            status: 400,
+          },
+        );
+      }
+      if (
+        input.ttlSeconds !== undefined &&
+        (typeof input.ttlSeconds !== "number" || !Number.isFinite(input.ttlSeconds))
+      ) {
+        return NextResponse.json({ error: '"ttlSeconds" must be a number' }, { status: 400 });
+      }
+      try {
+        const session = await createAgentSession({
+          db,
+          project,
+          user: user!,
+          ref: input.ref.trim(),
+          permissions: permissions as WildwoodPermission[] | undefined,
+          ttlSeconds: input.ttlSeconds as number | undefined,
+        });
+        return NextResponse.json(
+          {
+            agentId: session.agentId,
+            token: session.token,
+            expiresAt: session.expiresAt,
+            grant: session.grant,
+            mcp: wwPaths.mcp,
+          },
+          { status: 201, headers: { "cache-control": "no-store" } },
+        );
+      } catch (error) {
+        return NextResponse.json(
+          { error: error instanceof Error ? error.message : String(error) },
+          { status: user ? 403 : 401 },
+        );
+      }
+    }
+
+    const required =
+      req.method === "GET"
+        ? "access.inspect"
+        : req.method === "DELETE"
+          ? "access.revoke"
+          : "access.manage";
+    const decision = await authorizeManagedPermission({ db, project, user, permission: required });
+    if (!decision.allowed) {
+      return NextResponse.json({ error: decision.reason }, { status: user ? 403 : 401 });
+    }
+
+    if (req.method === "GET") {
+      const grants = await listProjectGrants({
+        db,
+        project,
+        includeRevoked: new URL(req.url).searchParams.get("history") === "true",
+      });
+      return NextResponse.json({ grants });
+    }
+
+    if (req.method === "DELETE") {
+      const grantId = new URL(req.url).searchParams.get("grant")?.trim();
+      if (!grantId) return NextResponse.json({ error: "Missing ?grant=" }, { status: 400 });
+      const revoked = await revokeGrant({ db, project, grantId, actorId: user!.id! });
+      if (!revoked) return NextResponse.json({ error: "Grant not found" }, { status: 404 });
+      return NextResponse.json({ ok: true });
+    }
+
+    if (req.method === "POST") {
+      let body: unknown;
+      try {
+        body = await req.json();
+      } catch {
+        return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+      }
+      const input = body as { type?: unknown; userId?: unknown };
+      if (
+        input.type !== "contributor" ||
+        typeof input.userId !== "string" ||
+        !input.userId.trim()
+      ) {
+        return NextResponse.json(
+          { error: 'Expected { "type": "contributor", "userId": "..." }' },
+          { status: 400 },
+        );
+      }
+      const grants = await createContributorAccess({
+        db,
+        project,
+        userId: input.userId.trim(),
+        issuedBy: user!.id!,
+      });
+      return NextResponse.json({ grants }, { status: 201 });
+    }
+
+    return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
+  }
+
   async function handleAuth(req: Request): Promise<Response> {
     if (!authOpts) return NextResponse.json({ error: "Auth not configured" }, { status: 501 });
-    const inst = await getAuthInstance();
+    const inst = await getAuthInstance(req);
     if (!inst) return NextResponse.json({ error: "Auth init failed" }, { status: 500 });
     await inst.ensureAuthSchema();
 
@@ -698,7 +1251,9 @@ export function createWildwoodRoute(
       const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? url.host;
       const proto =
         req.headers.get("x-forwarded-proto") ??
-        (host.startsWith("localhost") || host.startsWith("127.0.0.1") ? "http" : url.protocol.replace(":", ""));
+        (host.startsWith("localhost") || host.startsWith("127.0.0.1")
+          ? "http"
+          : url.protocol.replace(":", ""));
       return `${proto}://${host}`;
     } catch {
       return "http://localhost";
@@ -760,7 +1315,7 @@ export function createWildwoodRoute(
    */
   async function handleMcp(req: Request): Promise<Response> {
     if (!authOpts) return NextResponse.json({ error: "Auth not configured" }, { status: 501 });
-    const inst = await getAuthInstance();
+    const inst = await getAuthInstance(req);
     if (!inst) return NextResponse.json({ error: "Auth init failed" }, { status: 500 });
     await inst.ensureAuthSchema();
 
@@ -770,6 +1325,43 @@ export function createWildwoodRoute(
     const client = (await (
       getClient as (r?: Request) => WildwoodRouteClientInput | Promise<WildwoodRouteClientInput>
     )(req)) as WildwoodClient;
+
+    const bearer = req.headers
+      .get("authorization")
+      ?.match(/^Bearer\s+(.+)$/i)?.[1]
+      ?.trim();
+    if (managedAuth && bearer?.startsWith("wwa_")) {
+      const access = await accessContext(client);
+      const credential = await verifyAgentSession({ ...access, token: bearer });
+      if (!credential) {
+        return NextResponse.json(
+          { error: "Agent credential is invalid, expired, or revoked" },
+          { status: 401, headers: { "cache-control": "no-store" } },
+        );
+      }
+      const agentUser: import("./auth").WildwoodAuthUser = {
+        id: credential.agentId,
+        name: "Wildwood agent",
+        managedSubjectType: "agent",
+      };
+      const authorizeForMcp = await buildMcpAuthorizeForRequest(req, agentUser);
+      return handleMcpRequest(
+        req,
+        client as never,
+        {
+          userId: credential.agentId,
+          scopes: credential.grant.permissions,
+        },
+        authorizeForMcp,
+        {
+          origin,
+          previewPath: wwPaths.preview,
+          auth: inst.auth,
+          access,
+          onMutate: revalidateContent,
+        },
+      );
+    }
 
     // The token `iss` claim is the better-auth OAuth issuer, which is the auth
     // base (`${origin}/api/auth`) — NOT the bare origin. This must match the
@@ -799,6 +1391,7 @@ export function createWildwoodRoute(
           origin,
           previewPath: wwPaths.preview,
           auth: inst.auth,
+          access: managedAuth ? await accessContext(client) : undefined,
           onMutate: revalidateContent,
         });
       },
@@ -813,8 +1406,12 @@ export function createWildwoodRoute(
       return null;
     }
 
-    // Public read endpoints — no auth needed
-    if (req.method === "GET" && (pathname.includes("/git/refs") || pathname.includes("/git/log"))) {
+    // Legacy callback mode kept these reads public. Managed grants fail closed.
+    if (
+      !managedAuth &&
+      req.method === "GET" &&
+      (pathname.includes("/git/refs") || pathname.includes("/git/log"))
+    ) {
       return null;
     }
 
@@ -843,12 +1440,9 @@ export function createWildwoodRoute(
       }
     }
 
-    // 2) authorize gate — what may this (already authenticated) session do?
-    if (!authOpts.authorize) return null;
-
     // Try to parse body for ref/paths to give authorize full context — best-effort, don't consume.
     let bodyHint: unknown;
-    if (req.method === "POST") {
+    if (req.method !== "GET" && req.method !== "HEAD") {
       try {
         bodyHint = await req.clone().json();
       } catch {
@@ -856,8 +1450,29 @@ export function createWildwoodRoute(
       }
     }
 
-    const gitAction = gitActionFromPathname(pathname, bodyHint);
+    let gitAction = gitActionFromPathname(pathname, bodyHint);
+    if (!gitAction && managedAuth) {
+      const client = await resolveClient(req);
+      const body = bodyHint as Record<string, unknown> | undefined;
+      const pathRef = pathname.match(/\/git\/(?:worktrees|pr)\/([^/?]+)/)?.[1];
+      const queryRef = new URL(req.url).searchParams.get("ref");
+      const ref =
+        (typeof body?.ref === "string" ? body.ref : undefined) ??
+        queryRef ??
+        (pathRef ? decodeURIComponent(pathRef) : undefined) ??
+        client._.config.ref;
+      gitAction = { type: "content.read", ref };
+    }
     if (!gitAction) return null;
+
+    if (managedAuth) {
+      const client = await resolveClient(req);
+      const managedGate = await evaluateManagedAccess(client, user, gitAction);
+      if (managedGate) return managedGate;
+    }
+
+    // Optional legacy callback is an additional restriction in managed mode.
+    if (!authOpts.authorize) return null;
 
     const result = await authOpts.authorize({
       user: user as never,
@@ -874,6 +1489,8 @@ export function createWildwoodRoute(
     if (isOAuthDiscoveryPath(pathname)) return handleOAuthDiscovery(req);
     if (isMcpPath(pathname)) return handleMcp(req);
     if (isCapabilitiesPath(pathname)) return handleCapabilities(req);
+    if (isCmsDatabasePath(pathname)) return handleCmsDatabase(req);
+    if (isAccessPath(pathname)) return handleAccess(req);
     if (isAuthPath(pathname)) return handleAuth(req);
     if (isDraftPath(pathname)) return handleDraft(req);
     if (isPreviewTokenPath(pathname)) return handlePreviewToken(req);
@@ -885,6 +1502,10 @@ export function createWildwoodRoute(
   }
 
   async function HEAD(req: Request) {
+    const pathname = pathnameOf(req);
+    if (isCmsDatabasePath(pathname)) return handleCmsDatabase(req);
+    const gate = await authorizeGitRequest(req, pathname);
+    if (gate) return gate;
     return apiFetch(req);
   }
   async function OPTIONS(req: Request) {
@@ -895,6 +1516,7 @@ export function createWildwoodRoute(
     const pathname = pathnameOf(req);
     if (isMcpPath(pathname)) return handleMcp(req);
     if (isCapabilitiesPath(pathname)) return handleCapabilities(req);
+    if (isAccessPath(pathname)) return handleAccess(req);
     if (isAuthPath(pathname)) return handleAuth(req);
     if (isDraftPath(pathname)) return handleDraft(req);
     if (isPreviewTokenPath(pathname)) return handlePreviewToken(req);
@@ -957,8 +1579,7 @@ export const createRoute = createWildwoodRoute;
  * Pull the OAuth sign-in creds off the read client's single GitHub credential
  * object. Lets `createCMS(ww, { auth: { github: true } })` reuse the SAME
  * `clientId`/`clientSecret` you configured on `wildwood({ github })` — declare
- * the GitHub App once. Env (`GITHUB_CLIENT_ID`/`SECRET`) still works as a
- * fallback via `normalizeGithubProvider`.
+ * the GitHub App once. Auth never looks up a second set of credentials.
  */
 function reuseGithubSignInFromClient(
   client: WildwoodRouteClientInput,
@@ -967,9 +1588,19 @@ function reuseGithubSignInFromClient(
   const authOpts = opts.auth;
   if (!authOpts) return opts;
 
+  const config = (client as { _?: { config?: { origin?: string; repo?: string } } })?._?.config;
+  let nextAuth = {
+    ...authOpts,
+    ...(!authOpts.baseURL && config?.origin ? { baseURL: config.origin } : {}),
+    ...(!authOpts.appName && config?.repo ? { appName: config.repo } : {}),
+  };
+
   // Only inject when sign-in is requested but creds weren't given explicitly.
-  const wantsGithub = authOpts.github === true || opts.providers?.github === true;
-  if (!wantsGithub) return opts;
+  const wantsGithub =
+    authOpts.github === true ||
+    opts.providers?.github === true ||
+    (Boolean(authOpts.bootstrap) && authOpts.github === undefined);
+  if (!wantsGithub) return { ...opts, auth: nextAuth };
 
   const gh = (client as { _?: { provider?: { github?: unknown } } })?._?.provider?.github as
     | { clientId?: string; clientSecret?: string }
@@ -977,9 +1608,10 @@ function reuseGithubSignInFromClient(
   const clientId = typeof gh?.clientId === "string" ? gh.clientId.trim() || undefined : undefined;
   const clientSecret =
     typeof gh?.clientSecret === "string" ? gh.clientSecret.trim() || undefined : undefined;
-  if (!clientId || !clientSecret) return opts;
+  if (!clientId || !clientSecret) return { ...opts, auth: nextAuth };
 
-  return { ...opts, auth: { ...authOpts, github: { clientId, clientSecret } } };
+  nextAuth = { ...nextAuth, github: { clientId, clientSecret } };
+  return { ...opts, auth: nextAuth };
 }
 
 /**
@@ -989,7 +1621,7 @@ function reuseGithubSignInFromClient(
  *
  *   const ww = wildwood({ ...identity, collections, database, github });
  *   export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } =
- *     createCMS(ww, { auth: { secret, github: true, authenticate, authorize } });
+ *     createCMS(ww, { auth: { bootstrap: { owner: "owner@example.com" } } });
  *
  * It owns everything write/auth related — mutation endpoints, better-auth,
  * `authenticate`/`authorize`, branch cookie, `revalidateTag`, capabilities —

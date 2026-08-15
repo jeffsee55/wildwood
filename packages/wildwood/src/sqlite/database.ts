@@ -26,6 +26,34 @@ function isIgnorableSchemaError(err: unknown): boolean {
   return err instanceof Error && /already exists/i.test(err.message);
 }
 
+// Child tables precede their parents so reset remains valid when SQLite
+// foreign-key enforcement is enabled (including remote Turso databases).
+const CLEAR_TABLE_PRIORITY = [
+  "oauthAccessToken",
+  "oauthRefreshToken",
+  "oauthConsent",
+  "oauthClientResource",
+  "session",
+  "account",
+  "oauthClient",
+  "oauthResource",
+  "deviceCode",
+  "verification",
+  "jwks",
+  "oauthClientAssertion",
+  "wildwood_auth_event",
+  "wildwood_approval_request",
+  "wildwood_credential",
+  "wildwood_access_grant",
+  "wildwood_project",
+  "wildwood_auth_setting",
+] as const;
+
+function clearPriority(tableName: string): number {
+  const index = (CLEAR_TABLE_PRIORITY as readonly string[]).indexOf(tableName);
+  return index === -1 ? CLEAR_TABLE_PRIORITY.length : index;
+}
+
 function errorMessage(err: unknown): string {
   if (err instanceof Error) {
     return err.message;
@@ -55,6 +83,28 @@ function dedupeRefVersions(versions: string[]): string[] {
 }
 
 export type { Cache } from "@/types";
+
+export type WildwoodDatabaseStats = {
+  users: number;
+  sessions: number;
+  projects: number;
+  grants: number;
+  credentials: number;
+  approvals: number;
+  authEvents: number;
+  refs: number;
+  commits: number;
+  entries: number;
+};
+
+export type WildwoodDatabaseResetProgress =
+  | { phase: "clearing"; table: string; completed: number; total: number }
+  | { phase: "initializing" };
+
+export type WildwoodDatabaseResetOptions = {
+  preserveAuthSettings?: boolean;
+  onProgress?: (progress: WildwoodDatabaseResetProgress) => void;
+};
 
 export class LibsqlDatabase {
   /** Raw libsql client — reused for better-auth dialect so we don't configure DB twice. */
@@ -605,17 +655,62 @@ export class LibsqlDatabase {
     }
   }
 
-  async clear() {
-    for (const item of Object.values(this.drizzle._.schema || {})) {
-      const tableName = item.dbName;
-      try {
-        await this.drizzle.$client.execute(`delete from ${tableName}`);
-      } catch {}
+  /** Small owner-facing snapshot used by the toolbar database panel. */
+  async stats(): Promise<WildwoodDatabaseStats> {
+    const result = await this.client.execute(`select
+      (select count(*) from "user") as users,
+      (select count(*) from "session") as sessions,
+      (select count(*) from "wildwood_project") as projects,
+      (select count(*) from "wildwood_access_grant") as grants,
+      (select count(*) from "wildwood_credential") as credentials,
+      (select count(*) from "wildwood_approval_request") as approvals,
+      (select count(*) from "wildwood_auth_event") as auth_events,
+      (select count(*) from "_refs") as refs,
+      (select count(*) from "_commits") as commits,
+      (select count(*) from "entries") as entries`);
+    const row = result.rows[0];
+    return {
+      users: Number(row?.users ?? 0),
+      sessions: Number(row?.sessions ?? 0),
+      projects: Number(row?.projects ?? 0),
+      grants: Number(row?.grants ?? 0),
+      credentials: Number(row?.credentials ?? 0),
+      approvals: Number(row?.approvals ?? 0),
+      authEvents: Number(row?.auth_events ?? 0),
+      refs: Number(row?.refs ?? 0),
+      commits: Number(row?.commits ?? 0),
+      entries: Number(row?.entries ?? 0),
+    };
+  }
+
+  async clear(options: WildwoodDatabaseResetOptions = {}) {
+    const tableNames = [
+      ...new Set(
+        Object.values(this.drizzle._.schema || {})
+          .map((item) => item.dbName)
+          .filter((name) => typeof name === "string"),
+      ),
+    ].sort((left, right) => clearPriority(left) - clearPriority(right));
+
+    const clearableTables = options.preserveAuthSettings
+      ? tableNames.filter((tableName) => tableName !== "wildwood_auth_setting")
+      : tableNames;
+
+    for (const [index, tableName] of clearableTables.entries()) {
+      const quotedName = `"${tableName.replaceAll('"', '""')}"`;
+      await this.drizzle.$client.execute(`delete from ${quotedName}`);
+      options.onProgress?.({
+        phase: "clearing",
+        table: tableName,
+        completed: index + 1,
+        total: clearableTables.length,
+      });
     }
   }
 
-  async reset() {
-    await this.clear();
+  async reset(options: WildwoodDatabaseResetOptions = {}) {
+    await this.clear(options);
+    options.onProgress?.({ phase: "initializing" });
     await this.init();
   }
 }

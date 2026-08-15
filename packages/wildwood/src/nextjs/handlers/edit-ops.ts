@@ -19,6 +19,7 @@
  */
 
 import type { WildwoodClient } from "@/client/index";
+import type { Git } from "@/git/git";
 import type { WildwoodAuthAction, WildwoodAuthUser } from "@/nextjs/auth";
 import { isNativeRemoteNotImplementedError } from "./auth";
 
@@ -81,15 +82,15 @@ export function authorFromUser(user: EditOpUser | null): {
  * Guard against writing to the protected ref (e.g. `main`). Returns an error
  * message when the action targets the protected ref, or `null` to allow.
  */
-function guardProtectedRef(
-  client: WildwoodClient,
-  action: WildwoodAuthAction,
-): string | null {
+function guardProtectedRef(client: WildwoodClient, action: WildwoodAuthAction): string | null {
   const protectedRef = client._.config.ref;
   if (!protectedRef) return null;
-  if (action.type === "git.add" && action.ref === protectedRef) return protectedRefError(protectedRef);
-  if (action.type === "git.commit" && action.ref === protectedRef) return protectedRefError(protectedRef);
-  if (action.type === "content.delete" && action.path === protectedRef) return protectedRefError(protectedRef);
+  if (action.type === "git.add" && action.ref === protectedRef)
+    return protectedRefError(protectedRef);
+  if (action.type === "git.commit" && action.ref === protectedRef)
+    return protectedRefError(protectedRef);
+  if (action.type === "content.delete" && action.ref === protectedRef)
+    return protectedRefError(protectedRef);
   return null;
 }
 
@@ -121,10 +122,10 @@ async function run<T>(
 
 // ── read ────────────────────────────────────────────────────────────────
 
-export async function listCollections(
-  client: WildwoodClient,
-): Promise<EditOpResult<string[]>> {
-  const collections = Object.keys(client._.config.configObject.collections ?? {});
+export async function listCollections(ctx: EditOpContext): Promise<EditOpResult<string[]>> {
+  const denied = await ctx.authorize({ type: "content.read", ref: ctx.client._.config.ref });
+  if (denied) return fail(denied);
+  const collections = Object.keys(ctx.client._.config.configObject.collections ?? {});
   return ok(collections);
 }
 
@@ -142,6 +143,9 @@ export async function findMany(
     references?: Record<string, unknown>;
   },
 ): Promise<EditOpResult<unknown>> {
+  const ref = args.ref ?? ctx.client._.config.ref;
+  const denied = await ctx.authorize({ type: "content.read", ref });
+  if (denied) return fail(denied);
   const coll = (ctx.client as Record<string, unknown>)[args.collection] as
     | { findMany: (a: unknown) => Promise<unknown> }
     | undefined;
@@ -174,6 +178,9 @@ export async function findFirst(
     references?: Record<string, unknown>;
   },
 ): Promise<EditOpResult<unknown>> {
+  const ref = args.ref ?? ctx.client._.config.ref;
+  const denied = await ctx.authorize({ type: "content.read", ref });
+  if (denied) return fail(denied);
   const coll = (ctx.client as Record<string, unknown>)[args.collection] as
     | { findFirst: (a: unknown) => Promise<unknown> }
     | undefined;
@@ -195,8 +202,17 @@ export async function findFirst(
 export async function getBlob(
   ctx: EditOpContext,
   oid: string,
+  ref = ctx.client._.config.ref,
 ): Promise<EditOpResult<unknown>> {
   const git = ctx.client._.git;
+  const denied = await ctx.authorize({ type: "content.read", ref });
+  if (denied) return fail(denied);
+  const worktree = await git.db.refs.get({ ref });
+  if (!worktree) return fail(`Ref not found: ${ref}`, 404);
+  const rootOid = worktree.rootTree?.oid ?? worktree.commit.treeOid;
+  if (!(await treeContainsOid(git, rootOid, oid))) {
+    return fail(`Blob is not reachable from authorized ref "${ref}"`, 403);
+  }
   const blob = await git.getBlob(oid);
   if (!blob) return fail(`Blob not found: ${oid}`);
   return ok(blob);
@@ -204,9 +220,7 @@ export async function getBlob(
 
 // ── branches ────────────────────────────────────────────────────────────
 
-export async function listBranches(
-  ctx: EditOpContext,
-): Promise<EditOpResult<string[]>> {
+export async function listBranches(ctx: EditOpContext): Promise<EditOpResult<string[]>> {
   const git = ctx.client._.git;
   const remote = git.remote;
   await ctx.client._.db.init();
@@ -219,11 +233,34 @@ export async function listBranches(
   }
   const seen = new Set(worktreeRefs);
   const branches = [...worktreeRefs];
-  for (const r of remoteRefs) if (!seen.has(r)) {
-    seen.add(r);
-    branches.push(r);
+  for (const r of remoteRefs)
+    if (!seen.has(r)) {
+      seen.add(r);
+      branches.push(r);
+    }
+  const visible: string[] = [];
+  for (const ref of branches) {
+    if (!(await ctx.authorize({ type: "content.read", ref }))) visible.push(ref);
   }
-  return ok(branches);
+  return ok(visible);
+}
+
+async function treeContainsOid(git: Git, rootOid: string, wantedOid: string): Promise<boolean> {
+  const pending = [rootOid];
+  const visited = new Set<string>();
+  while (pending.length > 0) {
+    const treeOid = pending.pop()!;
+    if (visited.has(treeOid)) continue;
+    visited.add(treeOid);
+    if (treeOid === wantedOid) return true;
+    const tree = await git.getTree(treeOid);
+    if (!tree) continue;
+    for (const entry of Object.values(tree)) {
+      if (entry.oid === wantedOid) return true;
+      if (entry.type === "tree") pending.push(entry.oid);
+    }
+  }
+  return false;
 }
 
 export async function createBranch(
@@ -368,7 +405,15 @@ export async function merge(
   const git = ctx.client._.git;
   const remote = git.remote;
   const configRef = git.config.ref;
-  const action: WildwoodAuthAction = { type: "git.merge", ref: args.ref, message: args.message };
+  const readDenied = await ctx.authorize({ type: "content.read", ref: args.ref });
+  if (readDenied) return fail(readDenied);
+  const source = await git.resolveWorktreeForApi({ ref: args.ref });
+  const action: WildwoodAuthAction = {
+    type: "git.merge",
+    ref: args.ref,
+    message: args.message,
+    sourceCommit: source.commit.oid,
+  };
   const denied = await ctx.authorize(action);
   if (denied) return fail(denied);
   try {
@@ -461,7 +506,12 @@ export async function createPr(
   const git = ctx.client._.git;
   const remote = git.remote;
   const configRef = git.config.ref;
-  const action: WildwoodAuthAction = { type: "git.createPr", ref: args.ref, title: args.title, body: args.body };
+  const action: WildwoodAuthAction = {
+    type: "git.createPr",
+    ref: args.ref,
+    title: args.title,
+    body: args.body,
+  };
   const denied = await ctx.authorize(action);
   if (denied) return fail(denied);
   try {
@@ -491,6 +541,8 @@ export async function findPr(
   args: { ref: string },
 ): Promise<EditOpResult<{ pr?: { number: number; url: string } }>> {
   const git = ctx.client._.git;
+  const denied = await ctx.authorize({ type: "content.read", ref: args.ref });
+  if (denied) return fail(denied);
   const remote = git.remote;
   const configRef = git.config.ref;
   try {
@@ -519,7 +571,7 @@ export async function deleteFiles(
   const git = ctx.client._.git;
   // Per-path content.delete gate — the authz gate for each path.
   for (const path of args.paths) {
-    const deny = await ctx.authorize({ type: "content.delete", path });
+    const deny = await ctx.authorize({ type: "content.delete", ref: args.ref, path });
     if (deny) return fail(deny);
   }
   const protectedRef = git.config.ref;
@@ -532,7 +584,9 @@ export async function deleteFiles(
   try {
     const worktree = await git.db.refs.get({ ref: args.ref });
     if (!worktree) {
-      throw new Error(`Worktree for "${args.ref}" is not loaded. Create or switch to the branch first.`);
+      throw new Error(
+        `Worktree for "${args.ref}" is not loaded. Create or switch to the branch first.`,
+      );
     }
     const rootTreeOid = worktree.rootTree?.oid ?? worktree.commit?.treeOid;
     if (!rootTreeOid) throw new Error(`No root tree OID found for ${args.ref}`);

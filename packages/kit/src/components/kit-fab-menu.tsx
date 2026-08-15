@@ -84,6 +84,11 @@ type KitFabMenuProps = {
   auth?: KitAuthConfig;
 };
 
+type KitDatabaseCapability = {
+  allowed: true;
+  database: { resetEnabled: true };
+};
+
 function isProd(): boolean {
   try {
     return typeof process !== "undefined" && process.env.NODE_ENV === "production";
@@ -362,6 +367,30 @@ export function KitFabMenu({
   const pendingGhApp = usePendingGitHubApp();
   const [installVerifying, setInstallVerifying] = React.useState(false);
   const [installVerifyMsg, setInstallVerifyMsg] = React.useState<string | null>(null);
+  const [databaseEnabled, setDatabaseEnabled] = React.useState(false);
+
+  // The protected endpoint is the capability check. Non-bootstrap users get no
+  // database affordance, and the bootstrap email never enters the client bundle.
+  React.useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch(apiUrl(base, "/wildwood/access/reset?capability=1"), {
+          credentials: "include",
+          headers: { accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const status = (await response.json()) as KitDatabaseCapability;
+        if (status.allowed === true && status.database?.resetEnabled === true) {
+          setDatabaseEnabled(true);
+        }
+      } catch {
+        // Hidden is the safe fallback for signed-out and unauthorized visitors.
+      }
+    })();
+    return () => controller.abort();
+  }, [base]);
 
   // Auto-promote needs-setup → needs-install when callback tab broadcasts.
   // User created App in new tab while this tab's editor overlay was open at needs-setup.
@@ -1057,6 +1086,18 @@ export function KitFabMenu({
               // already forced the setup item. Still offer Auth if session exists? Hide.
               <>{/* setup item already rendered above */}</>
             )}
+            {databaseEnabled ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => {
+                    window.location.assign(apiUrl(base, "/wildwood/cms/database"));
+                  }}
+                >
+                  Database
+                </DropdownMenuItem>
+              </>
+            ) : null}
             <DropdownMenuItem onClick={() => {}}>Share</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

@@ -23,6 +23,8 @@ export type GitServiceAuthorizeFn = (
 
 type GitServiceRouterOptions = {
   authorize?: GitServiceAuthorizeFn;
+  /** Managed auth requires callers to bind immutable object reads to a readable ref. */
+  requireRefForObjectReads?: boolean;
 };
 
 export function createGitServiceRouter(
@@ -36,8 +38,63 @@ export function createGitServiceRouter(
   const repo = git.config.repo;
   const router = new H3();
 
+  async function objectReadRef(req: Request): Promise<{ ref: string } | { error: Response }> {
+    const requested = new URL(req.url).searchParams.get("ref")?.trim();
+    if (!requested && options.requireRefForObjectReads) {
+      return {
+        error: new Response("A ref query parameter is required for Git object reads", {
+          status: 400,
+        }),
+      };
+    }
+    const ref = requested || configRef;
+    if (options.authorize) {
+      const denied = await options.authorize(req, { type: "content.read", ref });
+      if (denied) return { error: denied };
+    }
+    return { ref };
+  }
+
+  async function treeContainsOid(ref: string, wantedOid: string): Promise<boolean> {
+    await client._.db.init();
+    const resolved = await git.resolveWorktreeForApi({ ref });
+    const pending = [resolved.rootTreeOid ?? resolved.commit.treeOid];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const treeOid = pending.pop()!;
+      if (visited.has(treeOid)) continue;
+      visited.add(treeOid);
+      if (treeOid === wantedOid) return true;
+      const tree = await git.getTree(treeOid);
+      if (!tree) continue;
+      for (const entry of Object.values(tree)) {
+        if (entry.oid === wantedOid) return true;
+        if (entry.type === "tree") pending.push(entry.oid);
+      }
+    }
+    return false;
+  }
+
+  async function commitIsReachable(ref: string, wantedOid: string): Promise<boolean> {
+    await client._.db.init();
+    const resolved = await git.resolveWorktreeForApi({ ref });
+    const pending = [resolved.commit.oid];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const commitOid = pending.pop()!;
+      if (visited.has(commitOid)) continue;
+      visited.add(commitOid);
+      if (commitOid === wantedOid) return true;
+      const commit = await git.getCommit(commitOid);
+      if (!commit) continue;
+      if (commit.parent) pending.push(commit.parent);
+      if (commit.secondParent) pending.push(commit.secondParent);
+    }
+    return false;
+  }
+
   // ── branches ──────────────────────────────────────────────────────
-  router.get("/branches", async () => {
+  router.get("/branches", async (event) => {
     try {
       await client._.db.init();
       const worktreeRefs = await git.db.refs.listRefs();
@@ -54,7 +111,16 @@ export function createGitServiceRouter(
           seen.add(r);
           branches.push(r);
         }
-      return Response.json({ branches });
+      if (!options.authorize) return Response.json({ branches });
+      const visible: string[] = [];
+      for (const ref of branches) {
+        const denied = await options.authorize(event.req as unknown as Request, {
+          type: "content.read",
+          ref,
+        });
+        if (!denied) visible.push(ref);
+      }
+      return Response.json({ branches: visible });
     } catch (e) {
       console.error("Failed to list branches:", e);
       return new Response(
@@ -262,6 +328,11 @@ export function createGitServiceRouter(
     const oid = routeParamString(event.context.params?.oid);
     if (!oid) return new Response("OID parameter required", { status: 400 });
     try {
+      const access = await objectReadRef(event.req as unknown as Request);
+      if ("error" in access) return access.error;
+      if (!(await treeContainsOid(access.ref, oid))) {
+        return new Response("Tree not found on authorized ref", { status: 404 });
+      }
       wildwoodGitApiLog("GET /tree/:oid", { oid: oid.slice(0, 7), org, repo });
       const treeEntry = await git.getTree(oid);
       if (!treeEntry) {
@@ -290,6 +361,11 @@ export function createGitServiceRouter(
     const oid = routeParamString(event.context.params?.oid);
     if (!oid) return new Response("OID parameter required", { status: 400 });
     try {
+      const access = await objectReadRef(event.req as unknown as Request);
+      if ("error" in access) return access.error;
+      if (!(await treeContainsOid(access.ref, oid))) {
+        return new Response("Blob not found on authorized ref", { status: 404 });
+      }
       const localBlobs = await client._.git.db.blobs.batchGet({ oids: [oid] });
       if (localBlobs.length > 0) {
         return Response.json(
@@ -315,6 +391,11 @@ export function createGitServiceRouter(
     const oid = routeParamString(event.context.params?.oid);
     if (!oid) return new Response("OID parameter required", { status: 400 });
     try {
+      const access = await objectReadRef(event.req as unknown as Request);
+      if ("error" in access) return access.error;
+      if (!(await treeContainsOid(access.ref, oid))) {
+        return new Response("Blob not found on authorized ref", { status: 404 });
+      }
       const localBlobs = await client._.git.db.blobs.batchGet({ oids: [oid] });
       if (localBlobs.length > 0) {
         return new Response(new TextEncoder().encode(localBlobs[0]!.content), {
@@ -339,6 +420,11 @@ export function createGitServiceRouter(
     const oid = routeParamString(event.context.params?.oid);
     if (!oid) return new Response("OID parameter required", { status: 400 });
     try {
+      const access = await objectReadRef(event.req as unknown as Request);
+      if ("error" in access) return access.error;
+      if (!(await commitIsReachable(access.ref, oid))) {
+        return new Response("Commit not found on authorized ref", { status: 404 });
+      }
       const commit = await git.getCommit(oid);
       if (!commit) return new Response("Commit not found", { status: 404 });
       return Response.json(commit);
@@ -358,6 +444,15 @@ export function createGitServiceRouter(
     try {
       const oursRef = decodeURIComponent(ours);
       const theirsRef = decodeURIComponent(theirs);
+      if (options.authorize) {
+        for (const ref of [oursRef, theirsRef]) {
+          const denied = await options.authorize(event.req as unknown as Request, {
+            type: "content.read",
+            ref,
+          });
+          if (denied) return denied;
+        }
+      }
       const oursCommit = await remote.fetchCommit({ ref: oursRef });
       const theirsCommit = await remote.fetchCommit({ ref: theirsRef });
       if (oursCommit.oid === theirsCommit.oid)
@@ -598,10 +693,17 @@ export function createGitServiceRouter(
         .object({ ref: z.string(), message: z.string().optional() })
         .parse(await event.req.json());
       if (options.authorize) {
+        const readError = await options.authorize(event.req as unknown as Request, {
+          type: "content.read",
+          ref: refParam,
+        });
+        if (readError) return readError;
+        const source = await git.resolveWorktreeForApi({ ref: refParam });
         const authError = await options.authorize(event.req as unknown as Request, {
           type: "git.merge",
           ref: refParam,
           message: messageParam,
+          sourceCommit: source.commit.oid,
         });
         if (authError) return authError;
       }

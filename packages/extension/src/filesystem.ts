@@ -105,7 +105,7 @@ export class WildwoodFileSystemProvider implements vscode.FileSystemProvider, Gi
 
   async getTree(oid: string): Promise<TreeEntries | null> {
     return this.objectCache.fetchTree(this.repo, oid, async () => {
-      const url = `${this.apiUrl}/tree/${encodeURIComponent(String(oid))}`;
+      const url = `${this.apiUrl}/tree/${encodeURIComponent(String(oid))}?ref=${encodeURIComponent(this.currentRef)}`;
       try {
         const res = await fetch(url, { credentials: "include" });
         if (!res.ok) {
@@ -133,7 +133,7 @@ export class WildwoodFileSystemProvider implements vscode.FileSystemProvider, Gi
 
   private async fetchBlobRaw(oid: string): Promise<Uint8Array | null> {
     return this.objectCache.fetchBlobRaw(this.repo, oid, async () => {
-      const url = `${this.apiUrl}/blob/${encodeURIComponent(String(oid))}/raw`;
+      const url = `${this.apiUrl}/blob/${encodeURIComponent(String(oid))}/raw?ref=${encodeURIComponent(this.currentRef)}`;
       try {
         const res = await fetch(url, { credentials: "include" });
         if (!res.ok) {
@@ -154,7 +154,10 @@ export class WildwoodFileSystemProvider implements vscode.FileSystemProvider, Gi
 
   async getCommit(oid: string): Promise<CommitNode | null> {
     try {
-      const res = await fetch(`${this.apiUrl}/commit/${oid}`);
+      const res = await fetch(
+        `${this.apiUrl}/commit/${encodeURIComponent(oid)}?ref=${encodeURIComponent(this.currentRef)}`,
+        { credentials: "include" },
+      );
       if (!res.ok) return null;
       return (await res.json()) as CommitNode;
     } catch {

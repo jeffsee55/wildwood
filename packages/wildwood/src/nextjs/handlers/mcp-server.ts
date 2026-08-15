@@ -28,6 +28,12 @@ import { z } from "zod";
 import type { WildwoodClient } from "@/client/index";
 import type { WildwoodAuthAction } from "@/nextjs/auth";
 import {
+  listActiveGrants,
+  selectorsMatch,
+  type WildwoodAccessDb,
+  type WildwoodProject,
+} from "@/nextjs/access";
+import {
   type EditOpContext,
   type EditOpResult,
   addAndCommit,
@@ -76,6 +82,8 @@ export type McpServerContext = {
   previewPath: string;
   /** Auth instance, for creating preview tokens (needs DB access). */
   auth: unknown;
+  /** Managed grant storage used to back anonymous preview sessions with authority. */
+  access?: { db: WildwoodAccessDb; project: WildwoodProject };
   /** Called after a successful mutation so the route layer can revalidate cache. */
   onMutate?: () => void;
 };
@@ -155,7 +163,7 @@ export function buildWildwoodMcpServer(
       inputSchema: {},
     },
     async () => {
-      const res = await listCollections(client);
+      const res = await listCollections(ctx);
       return toToolResult(res);
     },
   );
@@ -167,19 +175,28 @@ export function buildWildwoodMcpServer(
         "List entries in a collection. Supports the full query shape: `where` (filters), `with` (eager-load connections), `references` (reverse connections), `orderBy`, `limit`, `offset`, `variant`, and `ref`. Returns the collection name, the resolved commit oid, and the matched items.",
       inputSchema: {
         collection: z.string().describe("Collection name (see list_collections)."),
-        ref: z.string().optional().describe("Git ref/branch to read. Defaults to the configured ref."),
-        where: z.record(z.string(), z.unknown()).optional().describe(
-          "Filter object, e.g. { title: { eq: 'Intro' } }, { slug: 'intro' }, or joined: { author: { name: { eq: 'Jeff' } } }. Compound: { AND: [...], OR: [...] }.",
-        ),
-        with: z.record(z.string(), z.unknown()).optional().describe(
-          "Eager-load connections, e.g. { author: true }.",
-        ),
-        references: z.record(z.string(), z.unknown()).optional().describe(
-          "Reverse connections, e.g. { docs: true }.",
-        ),
-        orderBy: z.record(z.string(), z.enum(["asc", "desc"])).optional().describe(
-          "Order by field, e.g. { title: 'asc' }.",
-        ),
+        ref: z
+          .string()
+          .optional()
+          .describe("Git ref/branch to read. Defaults to the configured ref."),
+        where: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe(
+            "Filter object, e.g. { title: { eq: 'Intro' } }, { slug: 'intro' }, or joined: { author: { name: { eq: 'Jeff' } } }. Compound: { AND: [...], OR: [...] }.",
+          ),
+        with: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe("Eager-load connections, e.g. { author: true }."),
+        references: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe("Reverse connections, e.g. { docs: true }."),
+        orderBy: z
+          .record(z.string(), z.enum(["asc", "desc"]))
+          .optional()
+          .describe("Order by field, e.g. { title: 'asc' }."),
         limit: z.number().int().positive().optional().describe("Max items to return."),
         offset: z.number().int().nonnegative().optional().describe("Items to skip."),
         variant: z.string().optional().describe("Content variant (e.g. locale)."),
@@ -208,17 +225,23 @@ export function buildWildwoodMcpServer(
         "Fetch a single entry from a collection, optionally filtered by a `where` clause. Supports the full query shape: `where`, `with`, `references`, `variant`, and `ref`. Throws when no entry matches.",
       inputSchema: {
         collection: z.string().describe("Collection name (see list_collections)."),
-        where: z.record(z.string(), z.unknown()).optional().describe(
-          "Filter object, e.g. { slug: 'intro' } or { title: { eq: 'Intro' } }.",
-        ),
-        with: z.record(z.string(), z.unknown()).optional().describe(
-          "Eager-load connections, e.g. { author: true }.",
-        ),
-        references: z.record(z.string(), z.unknown()).optional().describe(
-          "Reverse connections, e.g. { docs: true }.",
-        ),
+        where: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe("Filter object, e.g. { slug: 'intro' } or { title: { eq: 'Intro' } }."),
+        with: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe("Eager-load connections, e.g. { author: true }."),
+        references: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe("Reverse connections, e.g. { docs: true }."),
         variant: z.string().optional().describe("Content variant (e.g. locale)."),
-        ref: z.string().optional().describe("Git ref/branch to read. Defaults to the configured ref."),
+        ref: z
+          .string()
+          .optional()
+          .describe("Git ref/branch to read. Defaults to the configured ref."),
       },
     },
     async (args) => {
@@ -240,10 +263,16 @@ export function buildWildwoodMcpServer(
       description: "Read a raw git blob by its object id (oid). Returns the blob content as text.",
       inputSchema: {
         oid: z.string().describe("Git blob object id."),
+        ref: z
+          .string()
+          .optional()
+          .describe(
+            "Authorized ref the blob must be reachable from. Defaults to the configured ref.",
+          ),
       },
     },
     async (args) => {
-      const res = await getBlob(ctx, args.oid);
+      const res = await getBlob(ctx, args.oid, args.ref);
       return toToolResult(res);
     },
   );
@@ -303,7 +332,9 @@ export function buildWildwoodMcpServer(
         "Stage file contents into the worktree for a ref (does not commit). Provide a map of repo-relative path -> file contents. The protected ref (e.g. `main`) cannot be edited directly — create a branch first.",
       inputSchema: {
         ref: z.string().describe("Ref/branch to write to (must not be the protected ref)."),
-        files: z.record(z.string(), z.string()).describe("Map of repo-relative path to UTF-8 file contents."),
+        files: z
+          .record(z.string(), z.string())
+          .describe("Map of repo-relative path to UTF-8 file contents."),
       },
     },
     async (args) => {
@@ -352,11 +383,17 @@ export function buildWildwoodMcpServer(
       inputSchema: {
         ref: z.string().describe("Ref/branch to write to (must not be the protected ref)."),
         message: z.string().describe("Commit message."),
-        files: z.record(z.string(), z.string()).describe("Map of repo-relative path to UTF-8 file contents."),
+        files: z
+          .record(z.string(), z.string())
+          .describe("Map of repo-relative path to UTF-8 file contents."),
       },
     },
     async (args) => {
-      const res = await addAndCommit(ctx, { ref: args.ref, message: args.message, files: args.files });
+      const res = await addAndCommit(ctx, {
+        ref: args.ref,
+        message: args.message,
+        files: args.files,
+      });
       return toToolResult(res);
     },
   );
@@ -364,7 +401,8 @@ export function buildWildwoodMcpServer(
   server.registerTool(
     "discard",
     {
-      description: "Discard uncommitted changes on a ref, resetting the worktree to the last commit.",
+      description:
+        "Discard uncommitted changes on a ref, resetting the worktree to the last commit.",
       inputSchema: {
         ref: z.string().describe("Ref/branch to discard changes on."),
       },
@@ -390,7 +428,12 @@ export function buildWildwoodMcpServer(
       const res = await push(ctx, {
         ref: args.ref,
         ...(args.prTitle || args.prBody
-          ? { pr: { ...(args.prTitle ? { title: args.prTitle } : {}), ...(args.prBody ? { body: args.prBody } : {}) } }
+          ? {
+              pr: {
+                ...(args.prTitle ? { title: args.prTitle } : {}),
+                ...(args.prBody ? { body: args.prBody } : {}),
+              },
+            }
           : {}),
       });
       return toToolResult(res);
@@ -472,6 +515,24 @@ export function buildWildwoodMcpServer(
     },
     async (args) => {
       try {
+        const denied = await authorize({ type: "branch.share", ref: args.branch });
+        if (denied) return errorResult(denied);
+        const parent = serverCtx.access
+          ? (
+              await listActiveGrants({
+                ...serverCtx.access,
+                subjectType: "user",
+                subjectId: auth.userId,
+              })
+            ).find(
+              (grant) =>
+                grant.permissions.includes("branch.share") &&
+                selectorsMatch(grant.refs, args.branch),
+            )
+          : undefined;
+        if (serverCtx.access && !parent) {
+          return errorResult("No active branch.share grant can parent this preview link");
+        }
         const result = await createPreviewTokenOp({
           auth: serverCtx.auth as never,
           db: client._.db,
@@ -479,6 +540,7 @@ export function buildWildwoodMcpServer(
           branch: args.branch,
           origin: serverCtx.origin,
           previewPath: serverCtx.previewPath,
+          access: serverCtx.access ? { ...serverCtx.access, parentGrantId: parent?.id } : undefined,
         });
         return textResult(result);
       } catch (e) {

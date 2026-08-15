@@ -17,6 +17,8 @@ import { cimd } from "@better-auth/cimd";
 // MCP guard through this single bundled boundary.
 import { mcpHandler } from "@better-auth/mcp";
 import { LibsqlDialect } from "@libsql/kysely-libsql";
+import type { WildwoodBootstrapConfig } from "./access";
+import sqlSchema from "@/sqlite/schema.json" with { type: "json" };
 
 // Re-export so `route.ts` builds the Next handler without importing
 // `better-auth/next-js` itself — one bundling boundary, owned here.
@@ -54,11 +56,14 @@ export type WildwoodAuthUser = {
   email?: string;
   name?: string;
   image?: string | null;
-  /** True when the user is a per-branch god-user created by the preview-token flow. */
+  /** True for the Better Auth identity backing an anonymous preview session. */
   isAnonymous?: boolean;
+  /** Internal managed-authority subject selected after credential verification. */
+  managedSubjectType?: "user" | "agent" | "anonymous";
 };
 
 export type WildwoodAuthAction =
+  | { type: "content.read"; ref: string }
   | { type: "git.switchRef"; ref: string }
   | { type: "git.createBranch"; name: string; baseRef?: string }
   | { type: "git.add"; ref: string; paths: string[] }
@@ -67,46 +72,15 @@ export type WildwoodAuthAction =
   | { type: "git.discard"; ref: string }
   | { type: "git.push"; ref: string }
   | { type: "git.pull"; ref: string }
-  | { type: "git.merge"; ref: string; message?: string }
+  | { type: "git.merge"; ref: string; message?: string; sourceCommit?: string }
   | { type: "git.createPr"; ref: string; title?: string; body?: string }
-  | { type: "content.update"; path: string }
-  | { type: "content.delete"; path: string };
+  | { type: "branch.share"; ref: string }
+  | { type: "content.update"; ref: string; path: string }
+  | { type: "content.delete"; ref: string; path: string };
 
-// Inlined schema — avoids fs at runtime, no NFT file.
-const BETTER_AUTH_SCHEMA_SQL = `
-create table "user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" integer not null, "image" text, "isAnonymous" integer default 0, "createdAt" date not null, "updatedAt" date not null);
-create table "session" ("id" text not null primary key, "expiresAt" date not null, "token" text not null unique, "createdAt" date not null, "updatedAt" date not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade);
-create table "account" ("id" text not null primary key, "accountId" text not null, "providerId" text not null, "userId" text not null references "user" ("id") on delete cascade, "accessToken" text, "refreshToken" text, "idToken" text, "accessTokenExpiresAt" date, "refreshTokenExpiresAt" date, "scope" text, "password" text, "createdAt" date not null, "updatedAt" date not null);
-create table "verification" ("id" text not null primary key, "identifier" text not null, "value" text not null, "expiresAt" date not null, "createdAt" date not null, "updatedAt" date not null);
-create table "deviceCode" ("id" text not null primary key, "deviceCode" text not null, "userCode" text not null, "userId" text, "expiresAt" date not null, "status" text not null, "lastPolledAt" date, "pollingInterval" integer, "clientId" text, "scope" text);
-create table "jwks" ("id" text not null primary key, "publicKey" text not null, "privateKey" text not null, "createdAt" date not null, "expiresAt" date);
-create table "oauthClient" ("id" text not null primary key, "clientId" text not null unique, "clientSecret" text, "disabled" integer default 0, "skipConsent" integer, "enableEndSession" integer, "subjectType" text, "scopes" text, "userId" text references "user" ("id"), "createdAt" date, "updatedAt" date, "name" text, "uri" text, "icon" text, "contacts" text, "tos" text, "policy" text, "softwareId" text, "softwareVersion" text, "softwareStatement" text, "redirectUris" text not null, "postLogoutRedirectUris" text, "backchannelLogoutUri" text, "backchannelLogoutSessionRequired" integer, "tokenEndpointAuthMethod" text, "jwks" text, "jwksUri" text, "grantTypes" text, "responseTypes" text, "public" integer, "type" text, "requirePKCE" integer, "dpopBoundAccessTokens" integer default 0, "referenceId" text, "metadata" text);
-create table "oauthResource" ("id" text not null primary key, "identifier" text not null unique, "name" text not null, "accessTokenTtl" integer, "refreshTokenTtl" integer, "signingAlgorithm" text, "signingKeyId" text, "allowedScopes" text, "customClaims" text, "dpopBoundAccessTokensRequired" integer default 0, "disabled" integer default 0, "createdAt" date, "updatedAt" date, "policyVersion" integer default 1, "metadata" text);
-create table "oauthClientResource" ("id" text not null primary key, "clientId" text not null references "oauthClient" ("clientId"), "resourceId" text not null references "oauthResource" ("identifier"), "metadata" text, "createdAt" date);
-create table "oauthRefreshToken" ("id" text not null primary key, "token" text not null unique, "clientId" text not null references "oauthClient" ("clientId"), "sessionId" text references "session" ("id") on delete set null, "userId" text not null references "user" ("id"), "referenceId" text, "authorizationCodeId" text, "resources" text, "requestedUserInfoClaims" text, "expiresAt" date, "createdAt" date, "revoked" date, "rotatedAt" date, "rotationReplayResponse" text, "rotationReplayExpiresAt" date, "authTime" date, "confirmation" text, "scopes" text not null);
-create table "oauthAccessToken" ("id" text not null primary key, "token" text unique, "clientId" text not null references "oauthClient" ("clientId"), "sessionId" text references "session" ("id") on delete set null, "userId" text references "user" ("id"), "referenceId" text, "authorizationCodeId" text, "resources" text, "requestedUserInfoClaims" text, "refreshId" text references "oauthRefreshToken" ("id"), "expiresAt" date, "createdAt" date, "revoked" date, "confirmation" text, "scopes" text not null);
-create table "oauthConsent" ("id" text not null primary key, "clientId" text not null references "oauthClient" ("clientId"), "userId" text references "user" ("id"), "referenceId" text, "resources" text, "requestedUserInfoClaims" text, "scopes" text not null, "createdAt" date, "updatedAt" date);
-create table "oauthClientAssertion" ("id" text not null primary key, "expiresAt" date not null);
-create index "session_userId_idx" on "session" ("userId");
-create index "account_userId_idx" on "account" ("userId");
-create index "verification_identifier_idx" on "verification" ("identifier");
-create index "deviceCode_deviceCode_idx" on "deviceCode" ("deviceCode");
-create index "deviceCode_userCode_idx" on "deviceCode" ("userCode");
-create index "oauthClient_userId_idx" on "oauthClient" ("userId");
-create index "oauthClientResource_clientId_idx" on "oauthClientResource" ("clientId");
-create index "oauthClientResource_resourceId_idx" on "oauthClientResource" ("resourceId");
-create index "oauthRefreshToken_clientId_idx" on "oauthRefreshToken" ("clientId");
-create index "oauthRefreshToken_sessionId_idx" on "oauthRefreshToken" ("sessionId");
-create index "oauthRefreshToken_authorizationCodeId_idx" on "oauthRefreshToken" ("authorizationCodeId");
-create index "oauthAccessToken_authorizationCodeId_idx" on "oauthAccessToken" ("authorizationCodeId");
-create index "oauthRefreshToken_userId_idx" on "oauthRefreshToken" ("userId");
-create index "oauthAccessToken_clientId_idx" on "oauthAccessToken" ("clientId");
-create index "oauthAccessToken_sessionId_idx" on "oauthAccessToken" ("sessionId");
-create index "oauthAccessToken_userId_idx" on "oauthAccessToken" ("userId");
-create index "oauthAccessToken_refreshId_idx" on "oauthAccessToken" ("refreshId");
-create index "oauthConsent_clientId_idx" on "oauthConsent" ("clientId");
-create index "oauthConsent_userId_idx" on "oauthConsent" ("userId");
-`.trim();
+// Generated from the Drizzle schema modules and bundled as JSON so runtime
+// initialization never reads schema files from disk.
+const WILDWOOD_SCHEMA_SQL = sqlSchema.raw;
 
 function splitSqlStatements(sql: string): string[] {
   return sql
@@ -164,6 +138,8 @@ export type WildwoodAuthProviders = {
 };
 
 export type WildwoodRouteAuthOptions = {
+  /** Enables convention-first persisted authorization and seeds the first owner. */
+  bootstrap?: WildwoodBootstrapConfig | undefined;
   /** Optional — trimmed internally; pass `process.env.X` directly. */
   secret?: string | undefined;
   baseURL?: WildwoodBaseURL | undefined;
@@ -192,7 +168,10 @@ export type WildwoodAuthInstance = {
   api: { getSession(a: { headers: Headers }): Promise<unknown> };
 };
 
-type LibsqlClientLike = { execute(s: string): Promise<unknown>; close?(): void };
+type LibsqlClientLike = {
+  execute(s: string | { sql: string; args: unknown[] }): Promise<unknown>;
+  close?(): void;
+};
 
 export type WildwoodAuthDbInput =
   | LibsqlClientLike
@@ -214,12 +193,6 @@ function resolveLibsqlClient(db: WildwoodAuthDbInput | undefined): LibsqlClientL
   return holder.libsqlClient ?? holder.client ?? holder._client ?? null;
 }
 
-function envTrim(name: string): string | undefined {
-  const v = process.env[name];
-  if (typeof v !== "string") return undefined;
-  const t = v.trim();
-  return t ? t : undefined;
-}
 function normalizeGithubProvider(
   opts: WildwoodRouteAuthOptions,
 ): { clientId: string; clientSecret: string } | undefined {
@@ -234,12 +207,9 @@ function normalizeGithubProvider(
 
   const raw = providers?.github ?? topLevel;
   if (!raw) return undefined;
-  if (raw === true) {
-    const cid = envTrim("GITHUB_CLIENT_ID");
-    const csec = envTrim("GITHUB_CLIENT_SECRET");
-    if (!cid || !csec) return undefined;
-    return { clientId: cid, clientSecret: csec };
-  }
+  // `createCMS()` resolves `true` from the client's explicit GitHub config.
+  // Auth never reaches into process.env for credentials.
+  if (raw === true) return undefined;
   // `raw` is { clientId?, clientSecret? } — trim internally so caller doesn't need `.trim()`
   const clientId = typeof raw.clientId === "string" ? raw.clientId.trim() || undefined : undefined;
   const clientSecret =
@@ -250,6 +220,7 @@ function normalizeGithubProvider(
 
 let cachedAuth: {
   key: string;
+  client: LibsqlClientLike;
   instance: WildwoodAuthInstance;
   ensurePromise: Promise<void> | null;
 } | null = null;
@@ -291,7 +262,7 @@ function cacheKey(opts: WildwoodRouteAuthOptions): string {
 function parseCreateTable(
   stmt: string,
 ): { table: string; columns: { name: string; def: string }[] } | null {
-  const m = stmt.match(/^create\s+table\s+"([^"]+)"\s*\(([\s\S]*)\)\s*$/i);
+  const m = stmt.match(/^create\s+table\s+[`"]([^`"]+)[`"]\s*\(([\s\S]*)\)\s*$/i);
   if (!m) return null;
   const table = m[1]!;
   const body = m[2]!;
@@ -314,7 +285,7 @@ function parseCreateTable(
   const columns: { name: string; def: string }[] = [];
   for (const raw of parts) {
     const def = raw.trim();
-    const cm = def.match(/^"([^"]+)"\s+(.+)$/);
+    const cm = def.match(/^[`"]([^`"]+)[`"]\s+(.+)$/);
     if (!cm) continue; // table-level constraint, not a column
     columns.push({ name: cm[1]!, def });
   }
@@ -343,14 +314,14 @@ async function existingColumns(
   }
 }
 
-async function ensureAuthTables(client: LibsqlClientLike): Promise<void> {
-  for (const stmt of splitSqlStatements(BETTER_AUTH_SCHEMA_SQL)) {
+async function ensureWildwoodTables(client: LibsqlClientLike): Promise<void> {
+  for (const stmt of splitSqlStatements(WILDWOOD_SCHEMA_SQL)) {
     try {
       await client.execute(stmt);
     } catch (e) {
       if (!(e instanceof Error) || !/already exists/i.test(e.message)) throw e;
       // Table already exists from an older schema version — reconcile it by
-      // adding any columns the current plugin schema expects but the live
+      // adding any columns the generated Drizzle schema expects but the live
       // table is missing. SQLite `ADD COLUMN` is a cheap metadata-only op and
       // can't add UNIQUE/PRIMARY KEY, so we strip those tokens from the def.
       const parsed = parseCreateTable(stmt);
@@ -372,6 +343,34 @@ async function ensureAuthTables(client: LibsqlClientLike): Promise<void> {
       }
     }
   }
+}
+
+function randomSecret(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function getOrCreatePersistedSecret(client: LibsqlClientLike): Promise<string> {
+  const key = "better-auth.secret";
+  const now = new Date().toISOString();
+  const candidate = randomSecret();
+  await client.execute({
+    sql: `insert or ignore into "wildwood_auth_setting"
+      ("key", "value", "created_at", "updated_at") values (?, ?, ?, ?)`,
+    args: [key, candidate, now, now],
+  });
+  const result = (await client.execute({
+    sql: `select "value" from "wildwood_auth_setting" where "key" = ? limit 1`,
+    args: [key],
+  })) as { rows?: Array<Record<string, unknown>> };
+  const value = result.rows?.[0]?.value;
+  if (typeof value !== "string" || !value) {
+    throw new Error("Wildwood could not initialize its persisted Better Auth secret.");
+  }
+  return value;
 }
 
 function buildAuthenticateHook(
@@ -471,18 +470,17 @@ export async function getOrCreateAuth(opts: {
   const libsqlClient: LibsqlClientLike = maybeClient;
 
   const key = cacheKey(authOpts);
-  if (cachedAuth && cachedAuth.key === key) {
+  if (cachedAuth && cachedAuth.key === key && cachedAuth.client === libsqlClient) {
     // libsqlClient is stable — reuse cached ensuring same client; safe to capture here.
     const lc: LibsqlClientLike = libsqlClient;
     return {
       auth: cachedAuth.instance,
       ensureAuthSchema: () => {
-        if (!cachedAuth!.ensurePromise) cachedAuth!.ensurePromise = ensureAuthTables(lc);
+        if (!cachedAuth!.ensurePromise) cachedAuth!.ensurePromise = ensureWildwoodTables(lc);
         return cachedAuth!.ensurePromise;
       },
     };
   }
-
 
   const githubPair = normalizeGithubProvider(authOpts);
   const github = githubPair ? { github: githubPair } : undefined;
@@ -537,8 +535,11 @@ export async function getOrCreateAuth(opts: {
 
   const databaseHooks = authenticate ? buildAuthenticateHook(authenticate) : undefined;
 
+  // The convention-first CMS does not require a host secret. Generate one once
+  // and persist it beside the auth tables so sessions remain valid across deploys.
+  await ensureWildwoodTables(libsqlClient);
   const appNameTrimmed = authOpts.appName?.trim() || "Wildwood";
-  const secretTrimmed = authOpts.secret?.trim() || undefined;
+  const secretTrimmed = authOpts.secret?.trim() || (await getOrCreatePersistedSecret(libsqlClient));
 
   const baOpts: BetterAuthOptions = {
     appName: appNameTrimmed,
@@ -611,13 +612,13 @@ export async function getOrCreateAuth(opts: {
     baOpts,
   );
 
-  let ensurePromise: Promise<void> | null = null;
+  let ensurePromise: Promise<void> | null = Promise.resolve();
   function ensureAuthSchema(): Promise<void> {
-    if (!ensurePromise) ensurePromise = ensureAuthTables(libsqlClient);
+    if (!ensurePromise) ensurePromise = ensureWildwoodTables(libsqlClient);
     return ensurePromise;
   }
 
-  cachedAuth = { key, instance, ensurePromise };
+  cachedAuth = { key, client: libsqlClient, instance, ensurePromise };
   return { auth: instance, ensureAuthSchema };
 }
 
@@ -632,7 +633,12 @@ export function userFromSession(session: unknown): WildwoodAuthUser | null {
     email: typeof rec.email === "string" ? rec.email : undefined,
     name: typeof rec.name === "string" ? rec.name : undefined,
     image: typeof rec.image === "string" ? rec.image : null,
-    isAnonymous: typeof rec.isAnonymous === "boolean" ? rec.isAnonymous : undefined,
+    isAnonymous:
+      typeof rec.isAnonymous === "boolean"
+        ? rec.isAnonymous
+        : rec.isAnonymous === 1
+          ? true
+          : undefined,
   };
 }
 
