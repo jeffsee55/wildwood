@@ -38,9 +38,15 @@ import {
 } from "./branch";
 import { handle as createNextHandle } from "./handler";
 import { resolveWildwoodPaths, type WildwoodWellKnownOptions } from "./config";
+import { renderCmsApprovalPage } from "./cms-approval-page";
 import { renderCmsDatabasePage } from "./cms-database-page";
+import { renderCmsWorkIntentPage } from "./cms-work-intent-page";
 import type { WildwoodClient } from "@/client/index";
-import { activeRefSetCookieHeader, clearBranchCookieHeader } from "wildwood-shared";
+import {
+  activeRefSetCookieHeader,
+  clearBranchCookieHeader,
+  generateBranchName,
+} from "wildwood-shared";
 
 export { WILDWOOD_BRANCH_COOKIE, WILDWOOD_CACHE_TAG };
 
@@ -74,8 +80,10 @@ import {
   WILDWOOD_PERMISSIONS,
   authorizeManagedAction,
   authorizeManagedPermission,
+  createAgentBranchGrant,
   createAgentSession,
   createContributorAccess,
+  createContributorBranchAccess,
   createMergeApprovalRequest,
   decideApprovalRequest,
   ensureBootstrapOwner,
@@ -89,6 +97,12 @@ import {
   type WildwoodPermission,
   type WildwoodProject,
 } from "./access";
+import {
+  createWorkIntent,
+  decideWorkIntent,
+  getWorkIntent,
+  type WildwoodWorkIntent,
+} from "./work-intent";
 import {
   revokePreviewToken,
   createPreviewToken,
@@ -360,6 +374,50 @@ export function createWildwoodRoute(
     };
   }
 
+  async function availableManagedBranchName(client: WildwoodClient): Promise<string> {
+    await client._.db.init();
+    for (let attempt = 0; attempt < 32; attempt += 1) {
+      const candidate = generateBranchName();
+      if (!(await client._.db.refs.get({ ref: candidate }))) return candidate;
+    }
+    throw new Error("Could not allocate a unique branch name");
+  }
+
+  function managedBranchCreation(
+    client: WildwoodClient,
+    access: { db: WildwoodAccessDb; project: WildwoodProject },
+    userId: string,
+  ) {
+    return {
+      generateName: () => availableManagedBranchName(client),
+      onCreated: (ref: string) =>
+        createContributorBranchAccess({
+          ...access,
+          userId,
+          ref,
+        }).then(() => undefined),
+    };
+  }
+
+  async function managedMcpAgentId(
+    projectId: string,
+    userId: string,
+    jwt: Record<string, unknown>,
+  ): Promise<string> {
+    const clientId =
+      [jwt.client_id, jwt.clientId, jwt.azp].find(
+        (value): value is string => typeof value === "string" && value.length > 0,
+      ) ?? "oauth-client";
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(`${projectId}\0${userId}\0${clientId}`),
+    );
+    const id = Array.from(new Uint8Array(digest).slice(0, 18), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+    return `agent_mcp_${id}`;
+  }
+
   async function evaluateManagedAccess(
     client: WildwoodClient,
     user: import("./auth").WildwoodAuthUser | null,
@@ -594,7 +652,11 @@ export function createWildwoodRoute(
         // authorize/token endpoints reject the `resource` param that MCP
         // clients derive from the protected-resource discovery doc.
         return await mod.getOrCreateAuth({
-          auth: authOpts,
+          // Better Auth plugins need a concrete origin even when the host did
+          // not configure one. Resolve it from the first real request: local
+          // dev, Vercel previews, and production all use the same path without
+          // auth environment variables.
+          auth: authOpts.baseURL || !req ? authOpts : { ...authOpts, baseURL: requestOrigin(req) },
           db: db as never,
           mcpPath: wwPaths.mcp,
         });
@@ -642,6 +704,29 @@ export function createWildwoodRoute(
     const url = new URL(req.url);
     const disable = url.searchParams.get("disable");
     const branch = url.searchParams.get("branch")?.trim() || "";
+    const redirectParam = url.searchParams.get("redirect")?.trim();
+    if (redirectParam && (!redirectParam.startsWith("/") || redirectParam.startsWith("//"))) {
+      return NextResponse.json({ error: '"redirect" must be a same-origin path' }, { status: 400 });
+    }
+    const redirectUrl = redirectParam ? new URL(redirectParam, url.origin) : undefined;
+
+    if (branch && managedAuth) {
+      const authRes = await resolveAuthUserFromRequest(req);
+      const user = authRes?.user ?? null;
+      const client = await resolveClient(req);
+      const decision = await authorizeManagedAction({
+        ...(await accessContext(client)),
+        user,
+        action: { type: "content.read", ref: branch },
+      });
+      if (!decision.allowed) {
+        return NextResponse.json(
+          { error: decision.reason },
+          { status: user ? 403 : 401, headers: { "cache-control": "private, no-store" } },
+        );
+      }
+    }
+
     try {
       if (disable) {
         const dm = (await import("next/headers")) as unknown as {
@@ -650,7 +735,9 @@ export function createWildwoodRoute(
         (await dm.draftMode()).disable();
         const jar = await cookies();
         await clearBranchCookies(jar);
-        return NextResponse.json({ draftMode: false });
+        return redirectUrl
+          ? NextResponse.redirect(redirectUrl, { status: 303 })
+          : NextResponse.json({ draftMode: false });
       }
       if (!branch) return NextResponse.json({ error: "Missing ?branch=" }, { status: 400 });
       const dm = (await import("next/headers")) as unknown as {
@@ -659,12 +746,22 @@ export function createWildwoodRoute(
       (await dm.draftMode()).enable();
       const jar = await cookies();
       jar.set(cookieName, branch, { path: "/" });
-      return NextResponse.json({ draftMode: true, branch });
+      return redirectUrl
+        ? NextResponse.redirect(redirectUrl, { status: 303 })
+        : NextResponse.json({ draftMode: true, branch });
     } catch {
-      if (disable) return NextResponse.json({ draftMode: false });
+      if (disable) {
+        return redirectUrl
+          ? NextResponse.redirect(redirectUrl, { status: 303 })
+          : NextResponse.json({ draftMode: false });
+      }
       if (!branch) return NextResponse.json({ error: "Missing ?branch=" }, { status: 400 });
       const headers = new Headers();
       headers.append("Set-Cookie", cookieHeaderValue(cookieName, branch));
+      if (redirectUrl) {
+        headers.set("location", redirectUrl.toString());
+        return new NextResponse(null, { status: 303, headers });
+      }
       return new NextResponse(JSON.stringify({ draftMode: true, branch }), { headers });
     }
   }
@@ -1031,6 +1128,108 @@ export function createWildwoodRoute(
       );
     }
 
+    const intentMatch = accessPathname.match(/\/wildwood\/access\/intents\/([^/]+)\/?$/);
+    if (intentMatch) {
+      const intentId = decodeURIComponent(intentMatch[1]!);
+      const intent = await getWorkIntent({ db, project, intentId });
+      if (!intent) {
+        return NextResponse.json({ error: "Edit intent not found" }, { status: 404 });
+      }
+      if (!user?.id) {
+        if (req.method === "GET" && req.headers.get("accept")?.includes("text/html")) {
+          const origin = requestOrigin(req);
+          const signIn = `${origin}${wwPaths.base}/wildwood/device/signin?next=${encodeURIComponent(accessPathname)}`;
+          return NextResponse.redirect(signIn, 303);
+        }
+        return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+      }
+      if (intent.requestedFor !== user.id) {
+        return NextResponse.json(
+          { error: "This edit intent belongs to a different user" },
+          { status: 403 },
+        );
+      }
+
+      if (req.method === "GET") {
+        if (req.headers.get("accept")?.includes("text/html")) {
+          return new Response(
+            renderCmsWorkIntentPage({
+              endpoint: accessPathname,
+              project: { org: project.org, repo: project.repo },
+              actor: { name: user.name, email: user.email },
+              intent,
+            }),
+            {
+              headers: {
+                "cache-control": "private, no-store",
+                "content-security-policy":
+                  "default-src 'none'; connect-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+                "content-type": "text/html; charset=utf-8",
+                "x-content-type-options": "nosniff",
+              },
+            },
+          );
+        }
+        return NextResponse.json({ intent });
+      }
+      if (req.method !== "POST") {
+        return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
+      }
+      let body: unknown;
+      try {
+        body = await req.json();
+      } catch {
+        return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+      }
+      const requestedDecision = (body as { decision?: unknown }).decision;
+      if (requestedDecision !== "approve" && requestedDecision !== "deny") {
+        return NextResponse.json(
+          { error: 'Expected { "decision": "approve" | "deny" }' },
+          { status: 400 },
+        );
+      }
+      try {
+        const decided = await decideWorkIntent({
+          db,
+          project,
+          intentId,
+          actorId: user.id,
+          decision: requestedDecision,
+          activate: async (pending: WildwoodWorkIntent) => {
+            const ref = await availableManagedBranchName(client);
+            const decision = await authorizeManagedAction({
+              db,
+              project,
+              user,
+              action: { type: "git.createBranch", name: ref, baseRef: project.configRef },
+            });
+            if (!decision.allowed) throw new Error(decision.reason);
+            await client._.git.createBranch({ name: ref, base: project.configRef });
+            await createContributorBranchAccess({ db, project, userId: user.id!, ref });
+            const grant = await createAgentBranchGrant({
+              db,
+              project,
+              userId: user.id!,
+              agentId: pending.requestedBy,
+              ref,
+              expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+            });
+            revalidateContent();
+            return { ref, grantId: grant.id };
+          },
+        });
+        const previewUrl = decided.ref
+          ? `${requestOrigin(req)}${wwPaths.base}/wildwood/draft?branch=${encodeURIComponent(decided.ref)}&redirect=%2F`
+          : undefined;
+        return NextResponse.json({ intent: decided, previewUrl });
+      } catch (error) {
+        return NextResponse.json(
+          { error: error instanceof Error ? error.message : String(error) },
+          { status: 409 },
+        );
+      }
+    }
+
     const approvalMatch = accessPathname.match(/\/wildwood\/access\/approvals(?:\/([^/]+))?\/?$/);
     if (approvalMatch) {
       const decisionGate = await authorizeManagedPermission({
@@ -1057,9 +1256,26 @@ export function createWildwoodRoute(
         });
         if (approvalId) {
           const approval = approvals.find((candidate) => candidate.id === approvalId);
-          return approval
-            ? NextResponse.json({ approval })
-            : NextResponse.json({ error: "Approval request not found" }, { status: 404 });
+          if (!approval) {
+            return NextResponse.json({ error: "Approval request not found" }, { status: 404 });
+          }
+          if (req.headers.get("accept")?.includes("text/html")) {
+            return new Response(
+              renderCmsApprovalPage({
+                endpoint: new URL(req.url).pathname,
+                project: { org: project.org, repo: project.repo },
+                actor: { name: user?.name, email: user?.email },
+                approval,
+              }),
+              {
+                headers: {
+                  "cache-control": "private, no-store",
+                  "content-type": "text/html; charset=utf-8",
+                },
+              },
+            );
+          }
+          return NextResponse.json({ approval });
         }
         return NextResponse.json({ approvals });
       }
@@ -1244,7 +1460,7 @@ export function createWildwoodRoute(
     return h(req);
   }
 
-  /** Request origin, honoring proxy headers (dev portless proxy, Vercel). */
+  /** Request origin, honoring standard proxy headers (including Vercel). */
   function requestOrigin(req: Request): string {
     try {
       const url = new URL(req.url);
@@ -1358,6 +1574,8 @@ export function createWildwoodRoute(
           previewPath: wwPaths.preview,
           auth: inst.auth,
           access,
+          userPreviewUrl: (ref) =>
+            `${origin}${wwPaths.base}/wildwood/draft?branch=${encodeURIComponent(ref)}&redirect=%2F`,
           onMutate: revalidateContent,
         },
       );
@@ -1376,22 +1594,56 @@ export function createWildwoodRoute(
       },
       async (request: Request, jwt: Record<string, unknown>) => {
         const scopeClaim = typeof jwt.scope === "string" ? jwt.scope : "";
-        const auth = {
-          userId: String(jwt.sub ?? ""),
+        const oauthUserId = String(jwt.sub ?? "");
+        const oauthAuth = {
+          userId: oauthUserId,
           email: typeof jwt.email === "string" ? jwt.email : undefined,
           scopes: scopeClaim.split(/\s+/).filter(Boolean),
         };
-        // Build the per-action authorizer gate so the MCP tools run through the
-        // same authz gate as the HTTP API. The MCP path doesn't have a session
-        // cookie, so we build the user from the JWT (no session) and run the
-        // same `authenticate` + `authorize` gates the HTTP API uses.
-        const mcpUser = auth.userId ? { id: auth.userId, email: auth.email } : null;
+        const access = managedAuth ? await accessContext(client) : undefined;
+        const agentId =
+          access && oauthUserId
+            ? await managedMcpAgentId(access.project.id, oauthUserId, jwt)
+            : undefined;
+        // In managed projects an OAuth MCP connection is a linked agent, not a
+        // second copy of the user's authority. It begins powerless and receives
+        // exact-ref grants only after the linked user approves a work intent.
+        const mcpUser = agentId
+          ? ({
+              id: agentId,
+              email: oauthAuth.email,
+              managedSubjectType: "agent" as const,
+            } satisfies import("./auth").WildwoodAuthUser)
+          : oauthUserId
+            ? { id: oauthUserId, email: oauthAuth.email }
+            : null;
+        const auth = agentId ? { ...oauthAuth, userId: agentId } : oauthAuth;
         const authorizeForMcp = await buildMcpAuthorizeForRequest(request, mcpUser);
         return handleMcpRequest(request, client as never, auth, authorizeForMcp, {
           origin,
           previewPath: wwPaths.preview,
           auth: inst.auth,
-          access: managedAuth ? await accessContext(client) : undefined,
+          access,
+          userPreviewUrl: (ref) =>
+            `${origin}${wwPaths.base}/wildwood/draft?branch=${encodeURIComponent(ref)}&redirect=%2F`,
+          workIntents:
+            access && agentId && oauthUserId
+              ? {
+                  begin: async (summary) => {
+                    const intent = await createWorkIntent({
+                      ...access,
+                      requestedBy: agentId,
+                      requestedFor: oauthUserId,
+                      summary,
+                    });
+                    return {
+                      ...intent,
+                      approvalUrl: `${origin}${wwPaths.base}/wildwood/access/intents/${intent.id}`,
+                    };
+                  },
+                  get: (intentId) => getWorkIntent({ ...access, intentId, requestedBy: agentId }),
+                }
+              : undefined,
           onMutate: revalidateContent,
         });
       },
@@ -1522,19 +1774,79 @@ export function createWildwoodRoute(
     if (isPreviewTokenPath(pathname)) return handlePreviewToken(req);
     if (isExitPreviewPath(pathname)) return handleExitPreview();
 
-    const gate = await authorizeGitRequest(req, pathname);
+    const isCreateBranch = /\/git\/create-branch\/?$/.test(pathname);
+    let forwardedReq = req;
+    let managedBranchOwner: string | undefined;
+    let managedBranchAccess: { db: WildwoodAccessDb; project: WildwoodProject } | undefined;
+
+    // In managed mode branch refs are server-owned identifiers. Callers only
+    // choose the base; the returned two-word ref is the value they must retain.
+    if (managedAuth && isCreateBranch) {
+      try {
+        const body = (await req.clone().json()) as Record<string, unknown>;
+        const authRes = await resolveAuthUserFromRequest(req);
+        if (authRes?.user?.id) {
+          const client = await resolveClient(req);
+          const name = await availableManagedBranchName(client);
+          const headers = new Headers(req.headers);
+          headers.set("content-type", "application/json");
+          headers.delete("content-length");
+          forwardedReq = new Request(req.url, {
+            method: req.method,
+            headers,
+            body: JSON.stringify({ ...body, name }),
+            signal: req.signal,
+          });
+          managedBranchOwner = authRes.user.id;
+          managedBranchAccess = await accessContext(client);
+        }
+      } catch (error) {
+        return NextResponse.json(
+          { error: error instanceof Error ? error.message : "Invalid branch request" },
+          { status: 400 },
+        );
+      }
+    }
+
+    const gate = await authorizeGitRequest(forwardedReq, pathname);
     if (gate) return gate;
 
     let createBranchName: string | undefined;
-    if (/\/git\/create-branch\/?$/.test(pathname)) {
+    if (isCreateBranch) {
       try {
-        const b = (await req.clone().json()) as { name?: string };
+        const b = (await forwardedReq.clone().json()) as { name?: string };
         const n = typeof b.name === "string" ? b.name.trim() : "";
         if (n) createBranchName = n;
       } catch {}
     }
 
-    const upstream = await apiFetch(req);
+    const upstream = await apiFetch(forwardedReq);
+
+    if (
+      upstream.ok &&
+      isCreateBranch &&
+      createBranchName &&
+      managedBranchOwner &&
+      managedBranchAccess
+    ) {
+      try {
+        await createContributorBranchAccess({
+          ...managedBranchAccess,
+          userId: managedBranchOwner,
+          ref: createBranchName,
+        });
+      } catch (error) {
+        return NextResponse.json(
+          {
+            error:
+              error instanceof Error
+                ? error.message
+                : "The branch was created but its access grant could not be recorded",
+          },
+          { status: 500 },
+        );
+      }
+    }
 
     if (mutationRe.test(pathname)) revalidateContent();
 

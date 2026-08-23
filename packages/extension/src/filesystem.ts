@@ -484,12 +484,12 @@ export class WildwoodFileSystemProvider implements vscode.FileSystemProvider, Gi
     }
     const newBranch = generateBranchName();
     logger("ensureDraftBranch: creating", newBranch, "from", this.configRef);
-    await this.createBranch(newBranch, this.configRef);
-    await this.switchRef(newBranch);
-    this._onDidCreateBranch.fire(newBranch);
+    const createdBranch = await this.createBranch(newBranch, this.configRef);
+    await this.switchRef(createdBranch);
+    this._onDidCreateBranch.fire(createdBranch);
   }
 
-  async createBranch(name: string, base: string): Promise<void> {
+  async createBranch(name: string, base: string): Promise<string> {
     const res = await fetch(`${this.apiUrl}/create-branch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -500,6 +500,8 @@ export class WildwoodFileSystemProvider implements vscode.FileSystemProvider, Gi
       const err = await res.text();
       throw new Error(`Failed to create branch: ${res.status}: ${err}`);
     }
+    const created = (await res.json()) as { ref?: string };
+    return created.ref?.trim() || name;
   }
 
   async commit(message: string, author: { name: string; email: string }): Promise<void> {

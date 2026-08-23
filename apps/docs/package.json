@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next:dev",
-    "next:dev": "portless ww next dev",
+    "dev": "node scripts/reset-dev-db.mjs && next dev -p 3000",
+    "next:dev": "pnpm run dev",
     "build": "next build",
     "start": "next start",
     "lint": "oxlint .",
@@ -15,7 +15,6 @@
     "@babel/runtime": "catalog:",
     "@libsql/client": "catalog:",
     "next": "catalog:",
-    "portless": "^0.15.3",
     "react": "catalog:",
     "react-dom": "catalog:",
     "wildwood": "workspace:*",

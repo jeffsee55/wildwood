@@ -2,8 +2,10 @@ import { createClient, type Client } from "@libsql/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   authorizeManagedAction,
+  createAgentBranchGrant,
   createAgentSession,
   createContributorAccess,
+  createContributorBranchAccess,
   createGrant,
   createMergeApprovalRequest,
   decideApprovalRequest,
@@ -12,10 +14,10 @@ import {
   listProjectGrants,
   revokeGrant,
   resolveProject,
-  userBranchNamespace,
   verifyAgentSession,
   type WildwoodProject,
 } from "@/nextjs/access";
+import { createWorkIntent, decideWorkIntent, getWorkIntent } from "@/nextjs/work-intent";
 import { createPreviewToken, revokePreviewToken } from "@/nextjs/handlers/preview-token";
 
 const project: WildwoodProject = {
@@ -75,6 +77,12 @@ describe("managed ref access", () => {
       "target_ref" text not null, "source_commit" text not null, "reason" text,
       "status" text not null, "created_at" date not null, "expires_at" date not null,
       "decided_at" date, "decided_by" text, "grant_id" text
+    )`);
+    await db.execute(`create table "wildwood_work_intent" (
+      "id" text not null primary key, "project_id" text not null,
+      "requested_by" text not null, "requested_for" text not null, "summary" text not null,
+      "status" text not null, "ref" text, "grant_id" text, "created_at" date not null,
+      "expires_at" date not null, "decided_at" date, "decided_by" text
     )`);
     await db.execute(`create table "user" (
       "id" text not null primary key, "name" text not null, "email" text not null unique,
@@ -161,7 +169,7 @@ describe("managed ref access", () => {
     ).resolves.toMatchObject({ allowed: true });
   });
 
-  it("gives contributors main read plus control of only their namespace", async () => {
+  it("gives contributors main read plus exact control of server-created branches", async () => {
     const user = { id: "u_123", email: "contributor@example.com" };
     await createContributorAccess({
       db,
@@ -169,7 +177,7 @@ describe("managed ref access", () => {
       userId: user.id,
       issuedBy: "u_owner",
     });
-    const ownRef = `${userBranchNamespace(user.id)}rewrite-homepage`;
+    const ownRef = "quiet-river";
 
     await expect(
       authorizeManagedAction({
@@ -192,6 +200,15 @@ describe("managed ref access", () => {
         db,
         project,
         user,
+        action: { type: "git.commit", ref: ownRef, message: "Not owned yet" },
+      }),
+    ).resolves.toMatchObject({ allowed: false });
+    await createContributorBranchAccess({ db, project, userId: user.id, ref: ownRef });
+    await expect(
+      authorizeManagedAction({
+        db,
+        project,
+        user,
         action: { type: "git.commit", ref: ownRef, message: "Update page" },
       }),
     ).resolves.toMatchObject({ allowed: true });
@@ -208,7 +225,7 @@ describe("managed ref access", () => {
         db,
         project,
         user,
-        action: { type: "git.createBranch", name: "users/u_other/escape", baseRef: "main" },
+        action: { type: "git.createBranch", name: "bright-forest", baseRef: "other" },
       }),
     ).resolves.toMatchObject({ allowed: false });
     await expect(
@@ -236,7 +253,7 @@ describe("managed ref access", () => {
     });
 
     expect(second.base.id).toBe(first.base.id);
-    expect(second.namespace.id).toBe(first.namespace.id);
+    expect(second.creator.id).toBe(first.creator.id);
     const grants = await db.execute(
       `select "id" from "wildwood_access_grant" where "subject_id" = 'u_123'`,
     );
@@ -255,9 +272,10 @@ describe("managed ref access", () => {
       userId: user.id,
       issuedBy: "u_owner",
     });
-    const ref = `${userBranchNamespace(user.id)}draft`;
+    const ref = "misty-dawn";
+    await createContributorBranchAccess({ db, project, userId: user.id, ref });
 
-    await revokeGrant({ db, project, grantId: grants.namespace.id, actorId: "u_owner" });
+    await revokeGrant({ db, project, grantId: grants.creator.id, actorId: "u_owner" });
     await expect(
       authorizeManagedAction({
         db,
@@ -268,6 +286,54 @@ describe("managed ref access", () => {
     ).resolves.toMatchObject({ allowed: false });
   });
 
+  it("revokes one friendly branch without affecting the contributor's other branches", async () => {
+    const user = { id: "u_123", email: "contributor@example.com" };
+    await createContributorAccess({
+      db,
+      project,
+      userId: user.id,
+      issuedBy: "u_owner",
+    });
+    const first = await createContributorBranchAccess({
+      db,
+      project,
+      userId: user.id,
+      ref: "quiet-river",
+    });
+    await createContributorBranchAccess({
+      db,
+      project,
+      userId: user.id,
+      ref: "bright-forest",
+    });
+
+    await revokeGrant({ db, project, grantId: first.id, actorId: "u_owner" });
+    await expect(
+      authorizeManagedAction({
+        db,
+        project,
+        user,
+        action: { type: "git.commit", ref: "quiet-river", message: "Denied" },
+      }),
+    ).resolves.toMatchObject({ allowed: false });
+    await expect(
+      authorizeManagedAction({
+        db,
+        project,
+        user,
+        action: { type: "git.commit", ref: "bright-forest", message: "Allowed" },
+      }),
+    ).resolves.toMatchObject({ allowed: true });
+    await expect(
+      authorizeManagedAction({
+        db,
+        project,
+        user,
+        action: { type: "git.createBranch", name: "golden-meadow", baseRef: "main" },
+      }),
+    ).resolves.toMatchObject({ allowed: true });
+  });
+
   it("issues exact-ref agent credentials and cascades parent revocation", async () => {
     const user = { id: "u_123", email: "contributor@example.com" };
     const contributor = await createContributorAccess({
@@ -276,7 +342,8 @@ describe("managed ref access", () => {
       userId: user.id,
       issuedBy: "u_owner",
     });
-    const ref = `${userBranchNamespace(user.id)}agent-edit`;
+    const ref = "silver-otter";
+    await createContributorBranchAccess({ db, project, userId: user.id, ref });
     const session = await createAgentSession({ db, project, user, ref, ttlSeconds: 300 });
 
     expect(session.token).toMatch(/^wwa_/);
@@ -325,7 +392,7 @@ describe("managed ref access", () => {
     await revokeGrant({
       db,
       project,
-      grantId: contributor.namespace.id,
+      grantId: contributor.creator.id,
       actorId: "u_owner",
     });
     await expect(verifyAgentSession({ db, project, token: session.token })).resolves.toBeNull();
@@ -339,7 +406,8 @@ describe("managed ref access", () => {
       userId: user.id,
       issuedBy: "u_owner",
     });
-    const ref = `${userBranchNamespace(user.id)}ready`;
+    const ref = "amber-summit";
+    await createContributorBranchAccess({ db, project, userId: user.id, ref });
     const session = await createAgentSession({ db, project, user, ref });
     const approval = await createMergeApprovalRequest({
       db,
@@ -392,7 +460,7 @@ describe("managed ref access", () => {
     await revokeGrant({
       db,
       project,
-      grantId: contributor.namespace.id,
+      grantId: contributor.creator.id,
       actorId: "u_owner",
     });
     await expect(
@@ -401,6 +469,86 @@ describe("managed ref access", () => {
         project,
         user: agent,
         action: { type: "git.merge", ref, sourceCommit: "commit_a" },
+      }),
+    ).resolves.toMatchObject({ allowed: false });
+  });
+
+  it("keeps an OAuth MCP agent powerless until its linked user approves an edit intent", async () => {
+    const user = { id: "u_123", email: "contributor@example.com" };
+    await createContributorAccess({ db, project, userId: user.id, issuedBy: "u_owner" });
+    const agentId = "agent_mcp_client_123";
+    const first = await createWorkIntent({
+      db,
+      project,
+      requestedBy: agentId,
+      requestedFor: user.id,
+      summary: "Fix the homepage title",
+    });
+    const duplicate = await createWorkIntent({
+      db,
+      project,
+      requestedBy: agentId,
+      requestedFor: user.id,
+      summary: "Fix the homepage title",
+    });
+    expect(duplicate.id).toBe(first.id);
+
+    await expect(
+      authorizeManagedAction({
+        db,
+        project,
+        user: { id: agentId, managedSubjectType: "agent" },
+        action: { type: "content.read", ref: "quiet-cedar" },
+      }),
+    ).resolves.toMatchObject({ allowed: false });
+    await expect(
+      decideWorkIntent({
+        db,
+        project,
+        intentId: first.id,
+        actorId: "u_other",
+        decision: "approve",
+        activate: async () => ({ ref: "quiet-cedar", grantId: "never" }),
+      }),
+    ).rejects.toThrow("different user");
+
+    const approved = await decideWorkIntent({
+      db,
+      project,
+      intentId: first.id,
+      actorId: user.id,
+      decision: "approve",
+      activate: async () => {
+        await createContributorBranchAccess({ db, project, userId: user.id, ref: "quiet-cedar" });
+        const grant = await createAgentBranchGrant({
+          db,
+          project,
+          userId: user.id,
+          agentId,
+          ref: "quiet-cedar",
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        });
+        return { ref: "quiet-cedar", grantId: grant.id };
+      },
+    });
+    expect(approved).toMatchObject({ status: "approved", ref: "quiet-cedar" });
+    await expect(
+      getWorkIntent({ db, project, intentId: first.id, requestedBy: agentId }),
+    ).resolves.toMatchObject({ status: "approved", ref: "quiet-cedar" });
+    await expect(
+      authorizeManagedAction({
+        db,
+        project,
+        user: { id: agentId, managedSubjectType: "agent" },
+        action: { type: "git.add", ref: "quiet-cedar", paths: ["content/nav/index.json"] },
+      }),
+    ).resolves.toMatchObject({ allowed: true });
+    await expect(
+      authorizeManagedAction({
+        db,
+        project,
+        user: { id: agentId, managedSubjectType: "agent" },
+        action: { type: "content.read", ref: "main" },
       }),
     ).resolves.toMatchObject({ allowed: false });
   });

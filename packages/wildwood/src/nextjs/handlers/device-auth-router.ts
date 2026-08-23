@@ -200,18 +200,19 @@ function renderDevicePage(userCode: string): string {
 
 /**
  * Fixed local-dev identities. These exist purely to mirror production auth
- * flows (and to demo authz once roles land) — they are NOT secrets. There is no
+ * flows — they are NOT secrets. There is no
  * DB migration/seed step: users are upserted on first sign-in via better-auth's
  * sign-up endpoint using a shared, hardcoded dev password (below).
  *
- * `role` is not enforced yet; it's surfaced here so the upcoming authz layer has
- * a stable identity to key off of. Emails use a real `.com` TLD because
- * better-auth's email validation rejects addresses without one.
+ * The labels describe initial authorization state, not Better Auth roles. Only
+ * the configured bootstrap owner gets an automatic grant; the other identities
+ * let local development exercise invitation and denial flows. Emails use a real
+ * `.com` TLD because better-auth validates their shape.
  */
-const DEV_USERS: ReadonlyArray<{ email: string; name: string; role: string }> = [
-  { email: "admin@wildwood.com", name: "Wildwood Admin", role: "admin" },
-  { email: "owner@wildwood.com", name: "Wildwood Owner", role: "owner" },
-  { email: "contributer@wildwood.com", name: "Wildwood Contributer", role: "contributer" },
+const DEV_USERS: ReadonlyArray<{ email: string; name: string; state: string }> = [
+  { email: "owner@wildwood.com", name: "Wildwood Owner", state: "bootstrap owner" },
+  { email: "contributor@wildwood.com", name: "Wildwood Contributor", state: "ungranted" },
+  { email: "user@wildwood.com", name: "Wildwood User", state: "ungranted" },
 ];
 
 // Shared, non-secret dev password. Never prompted — hardcoded at persistence
@@ -223,7 +224,7 @@ function renderSigninPage(next: string): string {
   const buttons = DEV_USERS.map(
     (u) => `
       <button type="button" class="dev-user secondary" data-email="${escapeHtml(u.email)}" data-name="${escapeHtml(u.name)}">
-        <span class="dev-role">${escapeHtml(u.role)}</span>
+        <span class="dev-role">${escapeHtml(u.state)}</span>
         <span class="dev-email">${escapeHtml(u.email)}</span>
       </button>`,
   ).join("");

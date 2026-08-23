@@ -46,6 +46,11 @@ export type EditOpContext = {
    * MCP don't invalidate the Next.js cache.
    */
   onMutate?: () => void;
+  /** Managed auth owns public branch names and records exact-ref ownership. */
+  branchCreation?: {
+    generateName: () => Promise<string>;
+    onCreated: (ref: string) => Promise<void>;
+  };
 };
 
 /**
@@ -265,18 +270,21 @@ async function treeContainsOid(git: Git, rootOid: string, wantedOid: string): Pr
 
 export async function createBranch(
   ctx: EditOpContext,
-  args: { name: string; baseRef?: string; base?: string },
+  args: { name?: string; baseRef?: string; base?: string },
 ): Promise<EditOpResult<{ ref: string; base: string }>> {
   const git = ctx.client._.git;
   const base = (args.baseRef ?? args.base)?.trim();
   if (!base) return fail("Missing base ref: send `baseRef` or `base`", 400);
-  const action: WildwoodAuthAction = { type: "git.createBranch", name: args.name, baseRef: base };
+  const name = ctx.branchCreation ? await ctx.branchCreation.generateName() : args.name?.trim();
+  if (!name) return fail("Missing branch name", 400);
+  const action: WildwoodAuthAction = { type: "git.createBranch", name, baseRef: base };
   const denied = await ctx.authorize(action);
   if (denied) return fail(denied);
   try {
-    await git.createBranch({ name: args.name, base });
+    await git.createBranch({ name, base });
+    await ctx.branchCreation?.onCreated(name);
     ctx.onMutate?.();
-    return ok({ ref: args.name, base });
+    return ok({ ref: name, base });
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
   }

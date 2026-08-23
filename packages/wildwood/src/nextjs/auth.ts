@@ -601,7 +601,7 @@ export async function getOrCreateAuth(opts: {
       // CIMD (Client ID Metadata Documents): lets MCP clients identify
       // themselves with an HTTPS URL `client_id` — no pre-registration, no
       // static credentials. `allowLoopback` is required for local dev because
-      // the dev origin is a loopback host (`ww.localhost`); it stays off in
+      // the dev origin is a loopback host (`localhost`); it stays off in
       // production so the server never fetches its own loopback interface.
       cimd({ allowLoopback: true }) as never,
       nextCookies(),

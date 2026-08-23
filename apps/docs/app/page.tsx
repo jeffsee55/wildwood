@@ -4,12 +4,19 @@ import { Suspense } from "react";
 import { Markdown } from "wildwood/react/markdown";
 import { WILDWOOD_CONTENT_TAG, getContext, wildwood } from "@/lib/wildwood";
 
-async function getDocsList(opts: { branch: string; isDraft: boolean }) {
+async function getHomeContent(opts: { branch: string; isDraft: boolean }) {
   "use cache";
   cacheLife("hours");
   cacheTag(WILDWOOD_CONTENT_TAG, `wildwood:branch:${opts.branch}`);
 
-  return wildwood.docs.findMany({ ref: opts.branch });
+  const [docs, home] = await Promise.all([
+    wildwood.docs.findMany({ ref: opts.branch }),
+    wildwood.nav.findFirst({
+      ref: opts.branch,
+      where: { name: { eq: "index" } },
+    }),
+  ]);
+  return { docs, home };
 }
 
 export default function Home() {
@@ -30,32 +37,38 @@ function HomeFallback() {
 
 async function HomeContent() {
   const { branch, isDraft } = await getContext();
-  const r = await getDocsList({ branch, isDraft });
-  const current = r.items.toSorted((a, b) => a.title.localeCompare(b.title))[0] ?? null;
+  const { docs, home } = await getHomeContent({ branch, isDraft });
+  const current = docs.items.toSorted((a, b) => a.title.localeCompare(b.title))[0] ?? null;
 
   return (
     <div className="typeset typeset-man">
       <section>
-        <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">name</div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+          name
+        </div>
         <h1 className="mt-3! border-0! pt-0! text-[28px]! font-semibold! normal-case! tracking-[-0.03em]!">
-          wildwood — git as content store
+          {home.value.title ?? "wildwood — git as content store"}
         </h1>
         <p className="mt-5! max-w-[60ch] leading-[1.95]! text-muted-foreground">
-          Markdown and JSON in <code>content/</code> → typed collection API. Edits go through a shared H3/HTTP
-          surface that powers both the floating editor and your own routes. This site is <code>content/</code> from
-          this repo rendered through itself.
+          Markdown and JSON in <code>content/</code> → typed collection API. Edits go through a
+          shared H3/HTTP surface that powers both the floating editor and your own routes. This site
+          is <code>content/</code> from this repo rendered through itself.
         </p>
 
         <div className="mt-8 grid gap-3 border border-border p-4 font-mono text-[11px] leading-[1.9]">
           <div className="flex gap-3">
-            <span className="w-22 shrink-0 uppercase tracking-[0.12em] text-muted-foreground">synopsis</span>
+            <span className="w-22 shrink-0 uppercase tracking-[0.12em] text-muted-foreground">
+              synopsis
+            </span>
             <span>
-              <code>wildwood.docs.findMany()</code> · <code>with:{"{author:true}"}</code> · <code>wildwood/api</code> ·{" "}
-              <code>draftMode()</code> per-user
+              <code>wildwood.docs.findMany()</code> · <code>with:{"{author:true}"}</code> ·{" "}
+              <code>wildwood/api</code> · <code>draftMode()</code> per-user
             </span>
           </div>
           <div className="flex gap-3">
-            <span className="w-22 shrink-0 uppercase tracking-[0.12em] text-muted-foreground">source</span>
+            <span className="w-22 shrink-0 uppercase tracking-[0.12em] text-muted-foreground">
+              source
+            </span>
             <Link
               className="underline decoration-border underline-offset-4 hover:decoration-foreground"
               href="https://github.com/jeffsee55/wildwood"
@@ -82,18 +95,24 @@ async function HomeContent() {
       <section>
         <h2>files</h2>
         <dl className="mt-4 grid grid-cols-[12rem_1fr] gap-x-6 gap-y-3 border-t border-border pt-5 font-mono text-[11px] leading-[1.9]">
-          <dt className="uppercase tracking-[0.08em] text-muted-foreground">content/docs/**/*.md</dt>
+          <dt className="uppercase tracking-[0.08em] text-muted-foreground">
+            content/docs/**/*.md
+          </dt>
           <dd>
             markdown collections — <code>z.markdown()</code>
           </dd>
-          <dt className="uppercase tracking-[0.08em] text-muted-foreground">content/nav/index.json</dt>
+          <dt className="uppercase tracking-[0.08em] text-muted-foreground">
+            content/nav/index.json
+          </dt>
           <dd>
             nav collection — <code>z.json()</code> with <code>z.connect()</code>
           </dd>
-          <dt className="uppercase tracking-[0.08em] text-muted-foreground">app/api/[...path]/route.ts</dt>
+          <dt className="uppercase tracking-[0.08em] text-muted-foreground">
+            app/api/[...path]/route.ts
+          </dt>
           <dd>
-            one catch-all: <code>createCMS</code> owns <code>/git/*</code>, <code>/wildwood/draft</code>,{" "}
-            <code>/wildwood/preview</code>
+            one catch-all: <code>createCMS</code> owns <code>/git/*</code>,{" "}
+            <code>/wildwood/draft</code>, <code>/wildwood/preview</code>
           </dd>
         </dl>
       </section>

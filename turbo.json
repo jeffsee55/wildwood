@@ -118,6 +118,11 @@
     "studio:play": {
       "dependsOn": ["^build"],
       "cache": false
+    },
+    "studio:docs": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true
     }
   }
 }

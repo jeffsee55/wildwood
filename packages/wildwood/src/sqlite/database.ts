@@ -42,6 +42,7 @@ const CLEAR_TABLE_PRIORITY = [
   "jwks",
   "oauthClientAssertion",
   "wildwood_auth_event",
+  "wildwood_work_intent",
   "wildwood_approval_request",
   "wildwood_credential",
   "wildwood_access_grant",
@@ -91,6 +92,7 @@ export type WildwoodDatabaseStats = {
   grants: number;
   credentials: number;
   approvals: number;
+  workIntents: number;
   authEvents: number;
   refs: number;
   commits: number;
@@ -664,6 +666,7 @@ export class LibsqlDatabase {
       (select count(*) from "wildwood_access_grant") as grants,
       (select count(*) from "wildwood_credential") as credentials,
       (select count(*) from "wildwood_approval_request") as approvals,
+      (select count(*) from "wildwood_work_intent") as work_intents,
       (select count(*) from "wildwood_auth_event") as auth_events,
       (select count(*) from "_refs") as refs,
       (select count(*) from "_commits") as commits,
@@ -676,6 +679,7 @@ export class LibsqlDatabase {
       grants: Number(row?.grants ?? 0),
       credentials: Number(row?.credentials ?? 0),
       approvals: Number(row?.approvals ?? 0),
+      workIntents: Number(row?.work_intents ?? 0),
       authEvents: Number(row?.auth_events ?? 0),
       refs: Number(row?.refs ?? 0),
       commits: Number(row?.commits ?? 0),

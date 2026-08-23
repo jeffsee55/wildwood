@@ -1,0 +1,2 @@
+[mcp_servers.wildwood_local]
+url = "http://localhost:3000/api/wildwood/mcp"

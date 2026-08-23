@@ -169,6 +169,23 @@ CREATE TABLE `wildwood_project` (
 	`updated_at` date NOT NULL
 );
 
+CREATE TABLE `wildwood_work_intent` (
+	`id` text PRIMARY KEY NOT NULL,
+	`project_id` text NOT NULL,
+	`requested_by` text NOT NULL,
+	`requested_for` text NOT NULL,
+	`summary` text NOT NULL,
+	`status` text NOT NULL,
+	`ref` text,
+	`grant_id` text,
+	`created_at` date NOT NULL,
+	`expires_at` date NOT NULL,
+	`decided_at` date,
+	`decided_by` text,
+	CONSTRAINT `fk_wildwood_work_intent_project_id_wildwood_project_id_fk` FOREIGN KEY (`project_id`) REFERENCES `wildwood_project`(`id`),
+	CONSTRAINT `fk_wildwood_work_intent_grant_id_wildwood_access_grant_id_fk` FOREIGN KEY (`grant_id`) REFERENCES `wildwood_access_grant`(`id`)
+);
+
 CREATE TABLE `account` (
 	`id` text PRIMARY KEY NOT NULL,
 	`accountId` text NOT NULL,
@@ -204,7 +221,9 @@ CREATE TABLE `jwks` (
 	`publicKey` text NOT NULL,
 	`privateKey` text NOT NULL,
 	`createdAt` date NOT NULL,
-	`expiresAt` date
+	`expiresAt` date,
+	`alg` text,
+	`crv` text
 );
 
 CREATE TABLE `oauthAccessToken` (
@@ -380,6 +399,8 @@ CREATE INDEX `wildwoodCredential_subject_idx` ON `wildwood_credential` (`project
 CREATE UNIQUE INDEX `wildwoodCredential_secretHash_uidx` ON `wildwood_credential` (`secret_hash`);
 CREATE UNIQUE INDEX `wildwoodProject_name_uidx` ON `wildwood_project` (`provider`,`org_name`,`repo_name`);
 CREATE UNIQUE INDEX `wildwoodProject_external_uidx` ON `wildwood_project` (`provider`,`external_id`) WHERE "wildwood_project"."external_id" is not null;
+CREATE INDEX `wildwoodWorkIntent_actor_idx` ON `wildwood_work_intent` (`project_id`,`requested_by`,`status`);
+CREATE INDEX `wildwoodWorkIntent_user_idx` ON `wildwood_work_intent` (`project_id`,`requested_for`,`status`);
 CREATE INDEX `account_userId_idx` ON `account` (`userId`);
 CREATE INDEX `deviceCode_deviceCode_idx` ON `deviceCode` (`deviceCode`);
 CREATE INDEX `deviceCode_userCode_idx` ON `deviceCode` (`userCode`);

@@ -127,6 +127,31 @@ export const wildwoodApprovalRequest = sqliteTable(
   ],
 );
 
+export const wildwoodWorkIntent = sqliteTable(
+  "wildwood_work_intent",
+  {
+    id: text("id").notNull(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => wildwoodProject.id),
+    requestedBy: text("requested_by").notNull(),
+    requestedFor: text("requested_for").notNull(),
+    summary: text("summary").notNull(),
+    status: text("status").notNull(),
+    ref: text("ref"),
+    grantId: text("grant_id").references(() => wildwoodAccessGrant.id),
+    createdAt: sqliteDate("created_at").notNull(),
+    expiresAt: sqliteDate("expires_at").notNull(),
+    decidedAt: sqliteDate("decided_at"),
+    decidedBy: text("decided_by"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id] }),
+    index("wildwoodWorkIntent_actor_idx").on(table.projectId, table.requestedBy, table.status),
+    index("wildwoodWorkIntent_user_idx").on(table.projectId, table.requestedFor, table.status),
+  ],
+);
+
 export const wildwoodAuthEvent = sqliteTable(
   "wildwood_auth_event",
   {

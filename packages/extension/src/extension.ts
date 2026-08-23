@@ -214,9 +214,11 @@ export async function activate(context: vscode.ExtensionContext) {
         if (picked.label.startsWith("$(add)")) {
           const branchName = generateBranchName();
           try {
-            await wildwoodFS.createBranch(branchName, configRef);
-            await wildwoodFS.switchRef(branchName);
-            vscode.window.showInformationMessage(`Created and switched to branch: ${branchName}`);
+            const createdBranch = await wildwoodFS.createBranch(branchName, configRef);
+            await wildwoodFS.switchRef(createdBranch);
+            vscode.window.showInformationMessage(
+              `Created and switched to branch: ${createdBranch}`,
+            );
           } catch (error) {
             vscode.window.showErrorMessage(
               `Failed to create branch: ${error instanceof Error ? error.message : String(error)}`,

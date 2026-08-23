@@ -278,11 +278,6 @@ export function selectorsMatch(selectors: WildwoodRefSelector[], ref: string): b
   return selectors.some((selector) => refMatches(selector, ref));
 }
 
-export function userBranchNamespace(userId: string): string {
-  const safe = userId.replace(/[^A-Za-z0-9._-]/g, "-");
-  return `users/${safe}/`;
-}
-
 function ownerMatches(bootstrap: WildwoodBootstrapConfig, user: WildwoodAuthUser): boolean {
   return bootstrap.owner.trim().toLowerCase() === user.email?.trim().toLowerCase();
 }
@@ -341,8 +336,7 @@ export async function createContributorAccess(args: {
   project: WildwoodProject;
   userId: string;
   issuedBy: string;
-}): Promise<{ base: WildwoodGrant; namespace: WildwoodGrant }> {
-  const namespace = userBranchNamespace(args.userId);
+}): Promise<{ base: WildwoodGrant; creator: WildwoodGrant }> {
   const existing = await args.db.execute({
     sql: `select * from "wildwood_access_grant"
       where "project_id" = ? and "subject_type" = 'user'
@@ -359,8 +353,11 @@ export async function createContributorAccess(args: {
         (selector) => selector.type === "exact" && selector.ref === args.project.configRef,
       ),
   );
-  let namespaceGrant = current.find((grant) =>
-    grant.refs.some((selector) => selector.type === "prefix" && selector.prefix === namespace),
+  let creator = current.find(
+    (grant) =>
+      grant.permissions.length === 1 &&
+      grant.permissions[0] === "branch.create" &&
+      grant.refs.some((selector) => selector.type === "prefix" && selector.prefix === ""),
   );
 
   base ??= await createGrant({
@@ -375,33 +372,87 @@ export async function createContributorAccess(args: {
       issuedBy: args.issuedBy,
     },
   });
-  namespaceGrant ??= await createGrant({
+  creator ??= await createGrant({
     db: args.db,
     project: args.project,
     grant: {
       subjectType: "user",
       subjectId: args.userId,
-      permissions: [
-        "content.read",
-        "content.write",
-        "branch.create",
-        "branch.delete",
-        "branch.share",
-        "merge.request",
-        "agent.create",
-        "access.revoke",
-      ],
-      refs: [{ type: "prefix", prefix: namespace }],
+      permissions: ["branch.create"],
+      refs: [{ type: "prefix", prefix: "" }],
       constraints: {
         baseRefs: [{ type: "exact", ref: args.project.configRef }],
-        targetRefs: [{ type: "exact", ref: args.project.configRef }],
-        delegablePermissions: ["content.read", "content.write", "merge.request"],
       },
       kind: "contributor",
       issuedBy: args.issuedBy,
     },
   });
-  return { base, namespace: namespaceGrant };
+  return { base, creator };
+}
+
+const CONTRIBUTOR_BRANCH_PERMISSIONS: WildwoodPermission[] = [
+  "content.read",
+  "content.write",
+  "branch.delete",
+  "branch.share",
+  "merge.request",
+  "agent.create",
+  "access.revoke",
+];
+
+/**
+ * Record ownership of one server-generated branch as an exact-ref child grant.
+ * Branch names stay friendly and opaque while revocation remains per-branch.
+ */
+export async function createContributorBranchAccess(args: {
+  db: WildwoodAccessDb;
+  project: WildwoodProject;
+  userId: string;
+  ref: string;
+  issuedBy?: string;
+}): Promise<WildwoodGrant> {
+  const active = await listActiveGrants({
+    db: args.db,
+    project: args.project,
+    subjectType: "user",
+    subjectId: args.userId,
+  });
+  const existing = active.find(
+    (grant) =>
+      CONTRIBUTOR_BRANCH_PERMISSIONS.every((permission) =>
+        grant.permissions.includes(permission),
+      ) && grant.refs.some((selector) => selector.type === "exact" && selector.ref === args.ref),
+  );
+  if (existing) return existing;
+
+  const parent = active.find(
+    (grant) =>
+      grant.permissions.includes("branch.create") &&
+      selectorsMatch(grant.refs, args.ref) &&
+      (!grant.constraints?.baseRefs ||
+        selectorsMatch(grant.constraints.baseRefs, args.project.configRef)),
+  );
+  if (!parent) {
+    throw new Error(`No active grant can create branch "${args.ref}"`);
+  }
+
+  return createGrant({
+    db: args.db,
+    project: args.project,
+    grant: {
+      subjectType: "user",
+      subjectId: args.userId,
+      permissions: CONTRIBUTOR_BRANCH_PERMISSIONS,
+      refs: [{ type: "exact", ref: args.ref }],
+      constraints: {
+        targetRefs: [{ type: "exact", ref: args.project.configRef }],
+        delegablePermissions: ["content.read", "content.write", "merge.request"],
+      },
+      kind: "contributor",
+      issuedBy: args.issuedBy ?? args.userId,
+      parentGrantId: parent.id,
+    },
+  });
 }
 
 export async function listProjectGrants(args: {
@@ -635,6 +686,63 @@ const DEFAULT_AGENT_PERMISSIONS: WildwoodPermission[] = [
   "content.write",
   "merge.request",
 ];
+
+/**
+ * Delegate one user's exact-ref branch authority to an MCP agent principal.
+ * The agent grant stays a child of the user's branch grant, so revoking either
+ * the branch or the user's authority immediately invalidates the delegation.
+ */
+export async function createAgentBranchGrant(args: {
+  db: WildwoodAccessDb;
+  project: WildwoodProject;
+  userId: string;
+  agentId: string;
+  ref: string;
+  permissions?: WildwoodPermission[];
+  expiresAt: string;
+}): Promise<WildwoodGrant> {
+  const requested = [...new Set(args.permissions ?? DEFAULT_AGENT_PERMISSIONS)];
+  if (requested.length === 0) throw new Error("At least one agent permission is required");
+
+  const userGrants = await listActiveGrants({
+    db: args.db,
+    project: args.project,
+    subjectType: "user",
+    subjectId: args.userId,
+  });
+  const parent = userGrants.find((grant) => {
+    const delegable =
+      grant.kind === "owner" ? grant.permissions : (grant.constraints?.delegablePermissions ?? []);
+    return (
+      grant.permissions.includes("agent.create") &&
+      selectorsMatch(grant.refs, args.ref) &&
+      requested.every(
+        (permission) => grant.permissions.includes(permission) && delegable.includes(permission),
+      )
+    );
+  });
+  if (!parent) {
+    throw new Error(`No grant can delegate the requested agent permissions for ref "${args.ref}"`);
+  }
+
+  const parentExpiry = parent.expiresAt ? Date.parse(parent.expiresAt) : Number.POSITIVE_INFINITY;
+  const expiresAt = new Date(Math.min(Date.parse(args.expiresAt), parentExpiry)).toISOString();
+  return createGrant({
+    db: args.db,
+    project: args.project,
+    grant: {
+      subjectType: "agent",
+      subjectId: args.agentId,
+      permissions: requested,
+      refs: [{ type: "exact", ref: args.ref }],
+      constraints: { targetRefs: parent.constraints?.targetRefs },
+      kind: "agent",
+      issuedBy: args.userId,
+      parentGrantId: parent.id,
+      expiresAt,
+    },
+  });
+}
 
 function randomSecret(bytes = 32): string {
   const value = new Uint8Array(bytes);

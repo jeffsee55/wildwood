@@ -10,7 +10,9 @@ export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createCMS(wildwo
   revalidateTagName: WILDWOOD_CONTENT_TAG,
   dangerouslyAllowDatabaseReset: true,
   auth: {
-    bootstrap: { owner: "jeffsee.55@gmail.com" },
+    // Local development uses the library's deterministic owner persona. It
+    // receives the same persisted owner grant as GitHub does in production.
+    bootstrap: { owner: isDev ? "owner@wildwood.com" : "jeffsee.55@gmail.com" },
     providers: isDev ? { emailAndPassword: true } : undefined,
   },
 });

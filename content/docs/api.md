@@ -274,8 +274,8 @@ WILDWOOD_ACTIVE_REF_STORAGE_KEY = "tr33.activeRef"
 WILDWOOD_CACHE_TAG = "tr33"
 ACTIVE_REF_MAX_AGE_SEC = 604800 (7d)
 GIT_EMPTY_TREE_OID = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-BRANCH_CITIES: const array of cities
-generateBranchName(): `${city}-${suffix4}`  // suffix base36
+BRANCH_ADJECTIVES / BRANCH_NOUNS: word lists for friendly refs
+generateBranchName(): `${adjective}-${noun}`
 activeRefSetCookieHeader(ref, cookieName?): string   // encodes ref, Path=/; HttpOnly; SameSite=Lax; Max-Age=...
 clearBranchCookieHeader(cookieName?): string
 allBranchCookieNames(): string[]

@@ -100,6 +100,8 @@ export const jwks = sqliteTable(
     privateKey: text("privateKey").notNull(),
     createdAt: sqliteDate("createdAt").notNull(),
     expiresAt: sqliteDate("expiresAt"),
+    alg: text("alg"),
+    crv: text("crv"),
   },
   (table) => [primaryKey({ columns: [table.id] })],
 );

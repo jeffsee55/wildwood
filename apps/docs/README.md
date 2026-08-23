@@ -90,9 +90,11 @@ export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createCMS(wildwo
 });
 ```
 
-- Contributors receive read access to `config.ref` and control of
-  `users/{userId}/*`; users, agents, approvals, and anonymous preview links are
-  represented as revocable grants rather than callbacks in app configuration.
+- Contributors receive read access to `config.ref`, permission to create from
+  it, and an exact grant for every server-named branch they create. Public refs
+  are memorable two-word names; user ids remain private authorization data.
+  Users, agents, approvals, and anonymous preview links are represented as
+  revocable grants rather than callbacks in app configuration.
 - Multiple repositories can share the same identity realm and database. Each is
   a stable `wildwood_project`; grants, credentials, approvals, and audit events
   carry its `project_id`. GitHub's immutable repository id preserves authority

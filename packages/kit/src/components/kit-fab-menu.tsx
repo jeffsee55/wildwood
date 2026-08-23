@@ -457,8 +457,10 @@ export function KitFabMenu({
     if (!res.ok) {
       throw new Error(`Could not create draft branch: ${res.status} ${await res.text()}`);
     }
-    setBranches((prev) => (prev.includes(name) ? prev : [...prev, name].sort()));
-    return name;
+    const created = (await res.json()) as { ref?: string };
+    const ref = created.ref?.trim() || name;
+    setBranches((prev) => (prev.includes(ref) ? prev : [...prev, ref].sort()));
+    return ref;
   }, [base, configRef]);
 
   const runEditorOpenSequenceRef = React.useRef<(refForOpen: string) => Promise<void>>(
@@ -736,8 +738,10 @@ export function KitFabMenu({
         setGitError(`Could not create branch: ${res.status} ${await res.text()}`);
         return;
       }
-      setBranches((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed].sort()));
-      notifyExtensionActiveRef(trimmed);
+      const created = (await res.json()) as { ref?: string };
+      const ref = created.ref?.trim() || trimmed;
+      setBranches((prev) => (prev.includes(ref) ? prev : [...prev, ref].sort()));
+      notifyExtensionActiveRef(ref);
       scheduleRefresh();
     } catch (e) {
       setGitError(e instanceof Error ? e.message : String(e));

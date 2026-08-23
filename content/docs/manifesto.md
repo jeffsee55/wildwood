@@ -163,7 +163,7 @@ No preview deploys. No separate env. Branch = preview. Closing preview = clear c
 5. \*\*When touching `ensureTrees` / `versions` / `createBranch` / `findMany`, run `version-bump.test.ts`. It guards the hardest invariant.
 6. **Treat `z.filter` as intent.** If a field should be queryable, it needs `z.filter(...)`. If not, it shouldn't be.
 7. **Prefer references over strings.** When modeling new content, reach for `z.connect` and `referencedAs` before URLs.
-8. **Branches are cheap. Make one.** `generateBranchName()` (`BRANCH_CITIES`) exists. Use it for agent edits, set cookie, never mutate `main` directly in preview flows.
+8. **Branches are cheap. Make one.** `generateBranchName()` produces memorable two-word refs. Use the server-returned ref for agent edits, set the cookie, and never mutate `main` directly in preview flows.
 9. **Log with context.** Use `[wildwood:git-add]`, `[wildwood:patch-worktree]` shape with ref, file list, ms timings. Silence via `WILDWOOD_GIT_API_LOG=0` if noisy.
 10. **Self-heal > error.** If your new feature could leave a partially claimed index, add a recovery path in `findMany` and an `ensureRefInDb`-style guard, with a single retry, not a loop.
 

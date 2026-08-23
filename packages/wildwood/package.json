@@ -39,6 +39,7 @@
     "playground": "pnpm srvx ./playground.ts --import=tsx",
     "studio": "npx drizzle-kit studio --config drizzle.sqlite.ts",
     "studio:app": "npx drizzle-kit studio --config drizzle.app.ts --port 3001",
+    "studio:docs": "npx drizzle-kit studio --config drizzle.docs.ts --port 3002",
     "studio:play": "npx drizzle-kit studio --config drizzle.play.ts --port 3002",
     "restart": "rm -rf wildwood.db && pnpm run export && pnpm run studio",
     "restart:app": "rm -f ../../apps/shad-docs/wildwood.db && pnpm run export && pnpm run studio:app",

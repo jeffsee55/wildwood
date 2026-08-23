@@ -27,6 +27,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod";
 import type { WildwoodClient } from "@/client/index";
 import type { WildwoodAuthAction } from "@/nextjs/auth";
+import type { WildwoodWorkIntent } from "@/nextjs/work-intent";
 import {
   listActiveGrants,
   selectorsMatch,
@@ -86,6 +87,15 @@ export type McpServerContext = {
   access?: { db: WildwoodAccessDb; project: WildwoodProject };
   /** Called after a successful mutation so the route layer can revalidate cache. */
   onMutate?: () => void;
+  /** Server-owned naming and exact-ref grant issuance for managed auth. */
+  branchCreation?: EditOpContext["branchCreation"];
+  /** Signed-user handoff that opts one browser into rendering an agent ref. */
+  userPreviewUrl?: (ref: string) => string;
+  /** Claimable edit-session operations available to managed OAuth agent principals. */
+  workIntents?: {
+    begin: (summary: string) => Promise<WildwoodWorkIntent & { approvalUrl: string }>;
+    get: (intentId: string) => Promise<WildwoodWorkIntent | null>;
+  };
 };
 
 function textResult(data: unknown) {
@@ -107,8 +117,14 @@ function errorResult(message: string) {
 }
 
 /** Map an EditOpResult to an MCP tool result. */
-function toToolResult<T>(result: EditOpResult<T>) {
-  if (result.ok) return textResult(result.data);
+function toToolResult<T>(result: EditOpResult<T>, metadata?: Record<string, unknown>) {
+  if (result.ok) {
+    return textResult(
+      metadata && result.data && typeof result.data === "object"
+        ? { ...result.data, ...metadata }
+        : result.data,
+    );
+  }
   return errorResult(result.error);
 }
 
@@ -118,6 +134,7 @@ function buildEditOpContext(
   auth: McpAuthContext,
   authorize: McpAuthorizeFn,
   onMutate?: () => void,
+  branchCreation?: EditOpContext["branchCreation"],
 ): EditOpContext {
   return {
     client,
@@ -128,6 +145,7 @@ function buildEditOpContext(
     },
     authorize,
     ...(onMutate ? { onMutate } : {}),
+    ...(branchCreation ? { branchCreation } : {}),
   };
 }
 
@@ -146,12 +164,76 @@ export function buildWildwoodMcpServer(
   authorize: McpAuthorizeFn,
   serverCtx: McpServerContext,
 ): McpServer {
-  const server = new McpServer({
-    name: "wildwood",
-    version: "0.1.0",
-  });
+  const server = new McpServer(
+    {
+      name: "wildwood",
+      version: "0.1.0",
+    },
+    {
+      instructions:
+        "Before changing content, call begin_edit with a concise description of the requested work. If it returns user_action_required, show approvalUrl to the user and do not attempt content tools. After the user approves, call get_edit_intent until it returns approved and use only its ref. Mutation results include previewUrl; show it when the user is not already previewing the ref. A merge may return approval_required; show that approvalUrl and retry only after approval.",
+    },
+  );
 
-  const ctx = buildEditOpContext(client, auth, authorize, serverCtx.onMutate);
+  const ctx = buildEditOpContext(
+    client,
+    auth,
+    authorize,
+    serverCtx.onMutate,
+    serverCtx.branchCreation,
+  );
+
+  if (serverCtx.workIntents) {
+    server.registerTool(
+      "begin_edit",
+      {
+        description:
+          "Begin a user-approved edit session. This does not grant content access. Show the returned approvalUrl to the user, then check the intent with get_edit_intent after they approve it.",
+        inputSchema: {
+          summary: z
+            .string()
+            .min(1)
+            .max(500)
+            .describe("Concise human-readable description of the intended edit."),
+        },
+      },
+      async ({ summary }) => {
+        const intent = await serverCtx.workIntents!.begin(summary);
+        return errorResult(
+          JSON.stringify({
+            error: "user_action_required",
+            intentId: intent.id,
+            approvalUrl: intent.approvalUrl,
+            summary: intent.summary,
+            expiresAt: intent.expiresAt,
+            nextTool: "get_edit_intent",
+          }),
+        );
+      },
+    );
+
+    server.registerTool(
+      "get_edit_intent",
+      {
+        description:
+          "Check a previously requested edit session. When approved, use the returned exact ref for every content and git operation.",
+        inputSchema: {
+          intentId: z.string().describe("Intent id returned by begin_edit."),
+        },
+      },
+      async ({ intentId }) => {
+        const intent = await serverCtx.workIntents!.get(intentId);
+        if (!intent) return errorResult("Edit intent not found");
+        return textResult({
+          ...intent,
+          ...(intent.ref && serverCtx.userPreviewUrl
+            ? { previewUrl: serverCtx.userPreviewUrl(intent.ref) }
+            : {}),
+          retryable: intent.status === "pending",
+        });
+      },
+    );
+  }
 
   // ── read ────────────────────────────────────────────────────────────────
 
@@ -296,15 +378,23 @@ export function buildWildwoodMcpServer(
     "create_branch",
     {
       description:
-        "Create a new branch from a base ref. Use this before editing content — the protected ref (e.g. `main`) cannot be edited directly.",
+        "Create a new branch from a base ref. Managed Wildwood projects assign a memorable two-word name; use the returned `ref` for subsequent tools.",
       inputSchema: {
-        name: z.string().describe("New branch name (e.g. 'agent/my-edit')."),
+        name: z
+          .string()
+          .optional()
+          .describe("Requested name for unmanaged projects. Managed projects ignore this value."),
         baseRef: z.string().describe("Base ref to branch from (e.g. 'main')."),
       },
     },
     async (args) => {
       const res = await createBranch(ctx, { name: args.name, baseRef: args.baseRef });
-      return toToolResult(res);
+      return toToolResult(
+        res,
+        res.ok && serverCtx.userPreviewUrl
+          ? { previewUrl: serverCtx.userPreviewUrl(res.data.ref) }
+          : undefined,
+      );
     },
   );
 
@@ -394,7 +484,12 @@ export function buildWildwoodMcpServer(
         message: args.message,
         files: args.files,
       });
-      return toToolResult(res);
+      return toToolResult(
+        res,
+        res.ok && serverCtx.userPreviewUrl
+          ? { previewUrl: serverCtx.userPreviewUrl(args.ref) }
+          : undefined,
+      );
     },
   );
 

@@ -143,7 +143,7 @@ Errors render as pinned banner above FAB/overlay. Guard/run id monotonic via `ed
 `KitFabMenu` in `@wildwood/kit` provides the floating action button and menu:
 
 - Auth panel (`KitAuthPanel`) — `KitAuthConfig`, GitHub OAuth state, GitHub App install links.
-- FAB: branch display (`activeRef ?? configRef`), switch branch UI, branch name generator (`generateBranchName()` from shared: picks a random city (`BRANCH_CITIES`) + 4-char base36 suffix).
+- FAB: branch display (`activeRef ?? configRef`), switch branch UI, branch name generator (`generateBranchName()` from shared: picks a memorable adjective + noun). Managed auth owns the final name, so clients always use the returned `ref`.
 - Menu groups via shadcn `DropdownMenu` subcomponents (`DropdownMenu`, `DropdownMenuItem`, etc). Portal via `createPortal` into shadow host container (`useShadowContainer` from `lib/shadow-root`).
 - Auth affordance (no-throw): `authEnabled(auth)` returns `true` even when `githubApp` is not configured so the Kit can keep showing a “Set up GitHub App” entrypoint. Editing is visually disabled with an inline hint (`setupHintLabel`). Missing GitHub App in prod is a `console.warn`, not a throw — the content page must remain usable. The host can still gate write API routes server‑side if desired. Client Kit never enforces `enforceInProduction` by throwing.
 - Error isolation: `Kit` and `Toolbar` are wrapped in React error boundaries (`KitErrorBoundary`, `WildwoodToolbarBoundary`) so any render or chunk‑load failure in the floating editor surface renders a fixed‑position fallback or hides itself, and never unmounts the page content.

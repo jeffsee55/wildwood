@@ -31,6 +31,7 @@ const nav = z.collection({
   schema: z.json({
     name: z.filter(z.string()),
     label: z.string(),
+    title: z.string().optional(),
     children: z.array(z.lazy(() => z.connect(docs))),
   }),
 });
@@ -51,7 +52,7 @@ const nav = z.collection({
  * transport (blob fallback / on-the-fly builds) and CMS sign-in.
  */
 export const wildwood = createWildwood({
-  version: "1",
+  version: "2",
   collections: {
     authors,
     docs,

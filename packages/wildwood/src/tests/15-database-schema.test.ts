@@ -32,6 +32,7 @@ const EXPECTED_TABLES = [
   "wildwood_auth_setting",
   "wildwood_credential",
   "wildwood_project",
+  "wildwood_work_intent",
 ];
 
 describe("generated database schema", () => {
@@ -63,6 +64,11 @@ describe("generated database schema", () => {
     expect(byName.get("id")?.notnull).toBe(1);
     expect(byName.get("email")?.notnull).toBe(1);
     expect(byName.get("isAnonymous")?.dflt_value).toBe("0");
+
+    const jwksColumns = await client.execute("pragma table_info('jwks')");
+    const jwksNames = new Set(jwksColumns.rows.map((row) => String(row.name)));
+    expect(jwksNames.has("alg")).toBe(true);
+    expect(jwksNames.has("crv")).toBe(true);
 
     const indexes = await client.execute(
       "select name from sqlite_master where type = 'index' and name like 'wildwood%' order by name",
@@ -172,6 +178,7 @@ describe("generated database schema", () => {
         grants: 4,
         credentials: 5,
         approvals: 6,
+        workIntents: 0,
         authEvents: 7,
         refs: 8,
         commits: 9,

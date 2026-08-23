@@ -12,11 +12,12 @@
     "typecheck": "turbo typecheck",
     "dev:web": "turbo run watch:deps next:dev studio:play --filter=wildwood --filter=wildwood-kit --filter=wildwood-vscode --filter=play",
     "dev:web-play": "pnpm run dev:web",
-    "dev:docs": "turbo run watch:deps next:dev studio:play --filter=wildwood --filter=wildwood-kit --filter=wildwood-vscode --filter=docs",
+    "dev:docs": "turbo run watch:deps next:dev studio:docs --filter=wildwood --filter=wildwood-kit --filter=wildwood-vscode --filter=docs",
     "playground": "pnpm run dev:web",
     "dev:vscode-playground": "turbo run playground studio --filter=wildwood",
     "studio:wildwood": "turbo run studio --filter=wildwood",
     "studio:web-db": "turbo run studio:play --filter=wildwood",
+    "studio:docs": "turbo run studio:docs --filter=wildwood",
     "test:wildwood": "turbo run test --filter=wildwood",
     "test:wildwood:watch": "turbo run test:watch --filter=wildwood"
   },
