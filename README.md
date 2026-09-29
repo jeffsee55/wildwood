@@ -10,6 +10,13 @@ branches                 →  preview cookies (x-wildwood-branch)
 
 No external CMS. Git is the CMS.
 
+## Features
+
+- 🎯 **Type-safe queries** — Full TypeScript inference from Zod schemas to query results
+- 🔄 **Git-native** — Content in Git, database is just a cache
+- 🌿 **Branch-based previews** — No separate infrastructure needed
+- 🔗 **Content relationships** — Type-safe references between collections
+
 ## Why
 
 Most CMSs add a separate DB, auth, editor, and deploy for content. Wildwood collapses it:
