@@ -1,0 +1,65 @@
+[WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+Scope: all 9 workspace projects
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +819
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+   ╭─────────────────────────────────────────╮
+   │                                         │
+   │   Update available! 10.33.0 → 12.8.1.   │
+   │   Changelog: https://pnpm.io/v/12.8.1   │
+   │    To update, run: pnpm add -g pnpm     │
+   │                                         │
+   ╰─────────────────────────────────────────╯
+
+Progress: resolved 819, reused 0, downloaded 14, added 0
+Progress: resolved 819, reused 0, downloaded 28, added 4
+Progress: resolved 819, reused 0, downloaded 29, added 4
+Progress: resolved 819, reused 0, downloaded 77, added 20
+Progress: resolved 819, reused 0, downloaded 88, added 20
+Progress: resolved 819, reused 0, downloaded 109, added 28
+Progress: resolved 819, reused 0, downloaded 122, added 32
+Progress: resolved 819, reused 0, downloaded 180, added 50
+Progress: resolved 819, reused 0, downloaded 256, added 77
+Progress: resolved 819, reused 0, downloaded 306, added 95
+Progress: resolved 819, reused 0, downloaded 348, added 107
+Progress: resolved 819, reused 0, downloaded 365, added 113
+Progress: resolved 819, reused 0, downloaded 393, added 120
+Progress: resolved 819, reused 0, downloaded 481, added 150
+Progress: resolved 819, reused 0, downloaded 612, added 201
+Progress: resolved 819, reused 0, downloaded 728, added 240
+Progress: resolved 819, reused 0, downloaded 771, added 252
+Progress: resolved 819, reused 0, downloaded 809, added 264
+Progress: resolved 819, reused 0, downloaded 810, added 354
+Progress: resolved 819, reused 0, downloaded 810, added 691
+Progress: resolved 819, reused 0, downloaded 810, added 818
+Progress: resolved 819, reused 0, downloaded 810, added 819, done
+.../sharp@0.34.5/node_modules/sharp install$ node install/check.js || npm run build
+.../node_modules/@parcel/watcher install$ node scripts/build-from-source.js
+.../node_modules/better-sqlite3 install$ prebuild-install || node-gyp rebuild --release
+.../esbuild@0.27.3/node_modules/esbuild postinstall$ node install.js
+.../esbuild@0.25.12/node_modules/esbuild postinstall$ node install.js
+.../node_modules/@parcel/watcher install: Done
+.../esbuild@0.27.3/node_modules/esbuild postinstall: Done
+.../sharp@0.34.5/node_modules/sharp install: Done
+.../esbuild@0.25.12/node_modules/esbuild postinstall: Done
+.../node_modules/better-sqlite3 install: (node:989) [DEP0176] DeprecationWarning: fs.R_OK is deprecated, use fs.constants.R_OK instead
+.../node_modules/better-sqlite3 install: (Use `node --trace-deprecation ...` to show where the warning was created)
+.../node_modules/better-sqlite3 install: Done
+
+devDependencies:
++ oxfmt 0.18.0
++ oxlint 1.73.0
++ syncpack 13.0.2
++ turbo 2.9.4
++ typescript 7.0.2
+
+╭ Warning ─────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│   Ignored build scripts: msw@2.12.14.                                        │
+│   Run "pnpm approve-builds" to pick which dependencies should be allowed     │
+│   to run scripts.                                                            │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Done in 24.8s using pnpm v10.33.0
