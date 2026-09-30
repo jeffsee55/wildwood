@@ -1,0 +1,451 @@
+[WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+
+> wildwood-mono@ build /project/wildwood
+> turbo build
+
+
+Attention:
+Turborepo now collects completely anonymous telemetry regarding usage.
+This information is used to shape the Turborepo roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://turborepo.dev/docs/telemetry
+
+• turbo 2.9.4
+
+   • Packages in scope: docs, play, wildwood, wildwood-kit, wildwood-shared, wildwood-store, wildwood-ui, wildwood-vscode
+   • Running build in 8 packages
+   • Remote caching disabled
+
+wildwood-store:build: cache miss, executing 6d706f091dcf296b
+wildwood-ui:build: cache miss, executing 1fe046b09c8c5940
+wildwood-shared:build: cache miss, executing 0915072aa048da95
+wildwood-store:build: [WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+wildwood-shared:build: [WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+wildwood-ui:build: [WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+wildwood-store:build: 
+wildwood-store:build: > wildwood-store@0.1.0 build /project/wildwood/packages/store
+wildwood-store:build: > tsdown
+wildwood-store:build: 
+wildwood-shared:build: 
+wildwood-shared:build: > wildwood-shared@0.1.0 build /project/wildwood/packages/shared
+wildwood-shared:build: > tsdown
+wildwood-shared:build: 
+wildwood-store:build: ℹ tsdown v0.22.7 powered by rolldown v1.1.5
+wildwood-ui:build: 
+wildwood-ui:build: > wildwood-ui@0.1.0 build /project/wildwood/packages/ui
+wildwood-ui:build: > tsdown
+wildwood-ui:build: 
+wildwood-shared:build: ℹ tsdown v0.22.7 powered by rolldown v1.1.5
+wildwood-store:build: ℹ config file: /project/wildwood/packages/store/tsdown.config.ts 
+wildwood-store:build: ℹ entry: src/index.ts
+wildwood-store:build: ℹ tsconfig: tsconfig.json
+wildwood-store:build: ℹ Build start
+wildwood-shared:build: ℹ config file: /project/wildwood/packages/shared/tsdown.config.ts 
+wildwood-shared:build: ℹ entry: ./src/index.ts
+wildwood-shared:build: ℹ tsconfig: tsconfig.json
+wildwood-shared:build: ℹ Build start
+wildwood-ui:build: ℹ tsdown v0.22.7 powered by rolldown v1.1.5
+wildwood-shared:build: 
+wildwood-shared:build:  WARN  TypeScript 7.0 does not yet have a stable API and is experimental. Some options will be unavailable.
+wildwood-shared:build: 
+wildwood-store:build: 
+wildwood-store:build:  WARN  TypeScript 7.0 does not yet have a stable API and is experimental. Some options will be unavailable.
+wildwood-store:build: 
+wildwood-shared:build: ℹ Emit types with typescript@7.0.2
+wildwood-store:build: ℹ Emit types with typescript@7.0.2
+wildwood-ui:build: ℹ config file: /project/wildwood/packages/ui/tsdown.config.ts 
+wildwood-ui:build: ℹ entry: src/index.ts
+wildwood-ui:build: ℹ tsconfig: tsconfig.json
+wildwood-ui:build: ℹ Build start
+wildwood-ui:build: 
+wildwood-ui:build:  WARN  TypeScript 7.0 does not yet have a stable API and is experimental. Some options will be unavailable.
+wildwood-ui:build: 
+wildwood-ui:build: ℹ Emit types with typescript@7.0.2
+wildwood-shared:build: ℹ dist/index.mjs        5.54 kB │ gzip: 1.77 kB
+wildwood-shared:build: ℹ dist/index.mjs.map    7.39 kB │ gzip: 2.46 kB
+wildwood-shared:build: ℹ dist/index.d.mts.map  0.35 kB │ gzip: 0.20 kB
+wildwood-shared:build: ℹ dist/index.d.mts      5.32 kB │ gzip: 1.55 kB
+wildwood-shared:build: ℹ 4 files, total: 18.60 kB
+wildwood-shared:build: ✔ Build complete in 678ms
+wildwood-ui:build: ℹ dist/index.js        0.23 kB │ gzip: 0.20 kB
+wildwood-ui:build: ℹ dist/index.js.map    0.25 kB │ gzip: 0.21 kB
+wildwood-ui:build: ℹ dist/index.d.ts.map  0.11 kB │ gzip: 0.12 kB
+wildwood-ui:build: ℹ dist/index.d.ts      0.17 kB │ gzip: 0.15 kB
+wildwood-ui:build: ℹ 4 files, total: 0.75 kB
+wildwood-ui:build: ✔ Build complete in 477ms
+wildwood-store:build: ℹ dist/index.mjs        37.73 kB │ gzip:  8.44 kB
+wildwood-store:build: ℹ dist/index.mjs.map    78.92 kB │ gzip: 17.02 kB
+wildwood-store:build: ℹ dist/index.d.mts.map   2.25 kB │ gzip:  0.87 kB
+wildwood-store:build: ℹ dist/index.d.mts       8.82 kB │ gzip:  2.30 kB
+wildwood-store:build: ℹ 4 files, total: 127.72 kB
+wildwood-store:build: ✔ Build complete in 837ms
+wildwood-kit:build: cache miss, executing 8e4cf4e1ba12bea7
+wildwood-vscode:build: cache miss, executing 50c04de1010749ac
+wildwood-kit:build: [WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+wildwood-vscode:build: [WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+wildwood-kit:build: 
+wildwood-kit:build: > wildwood-kit@0.1.0 build /project/wildwood/packages/kit
+wildwood-kit:build: > tsdown
+wildwood-kit:build: 
+wildwood-kit:build: ℹ tsdown v0.22.7 powered by rolldown v1.1.5
+wildwood-vscode:build: 
+wildwood-vscode:build: > wildwood-vscode@0.1.0 build /project/wildwood/packages/extension
+wildwood-vscode:build: > tsdown
+wildwood-vscode:build: 
+wildwood-kit:build: ℹ config file: /project/wildwood/packages/kit/tsdown.config.ts 
+wildwood-kit:build: ℹ entry: ./src/lib/index.tsx
+wildwood-kit:build: ℹ tsconfig: tsconfig.build.json
+wildwood-kit:build: ℹ Build start
+wildwood-kit:build: 
+wildwood-kit:build:  WARN  TypeScript 7.0 does not yet have a stable API and is experimental. Some options will be unavailable.
+wildwood-kit:build: 
+wildwood-kit:build: ℹ Emit types with typescript@7.0.2
+wildwood-vscode:build: ℹ tsdown v0.22.7 powered by rolldown v1.1.5
+wildwood-vscode:build: ℹ config file: /project/wildwood/packages/extension/tsdown.config.mts 
+wildwood-vscode:build: ℹ entry: src/extension.ts
+wildwood-vscode:build: ℹ tsconfig: tsconfig.json
+wildwood-vscode:build: ℹ Build start
+wildwood-vscode:build: ℹ Hint: consider adding deps.onlyBundle option to avoid unintended bundling of dependencies, or set deps.onlyBundle: false to disable this hint.
+wildwood-vscode:build: See more at https://tsdown.dev/options/dependencies#deps-onlybundle
+wildwood-vscode:build: Detected dependencies in bundle:
+wildwood-vscode:build: - node-diff3
+wildwood-vscode:build: ℹ dist/extension.js  109.75 kB │ gzip: 24.74 kB
+wildwood-vscode:build: ℹ 1 files, total: 109.75 kB
+wildwood-vscode:build: ✔ Build complete in 91ms
+wildwood-kit:build: ≈ tailwindcss v4.2.2
+wildwood-kit:build: 
+wildwood-kit:build: Done in 132ms
+wildwood-kit:build: ℹ Hint: consider adding deps.onlyBundle option to avoid unintended bundling of dependencies, or set deps.onlyBundle: false to disable this hint.
+wildwood-kit:build: See more at https://tsdown.dev/options/dependencies#deps-onlybundle
+wildwood-kit:build: Detected dependencies in bundle:
+wildwood-kit:build: - sonner
+wildwood-kit:build: ℹ dist/index.js        147.50 kB │ gzip: 31.16 kB
+wildwood-kit:build: ℹ dist/index.js.map    185.80 kB │ gzip: 44.17 kB
+wildwood-kit:build: ℹ dist/index.d.ts.map    0.55 kB │ gzip:  0.31 kB
+wildwood-kit:build: ℹ dist/index.d.ts        4.75 kB │ gzip:  2.02 kB
+wildwood-kit:build: ℹ 4 files, total: 338.60 kB
+wildwood-kit:build: (tailwind-inline plugin) [33m[SOURCEMAP_BROKEN] [0mSourcemap is likely to be incorrect: a plugin (tailwind-inline) was used to transform files, but didn't generate a sourcemap for the transformation. Consult the plugin documentation for help: https://rolldown.rs/guide/troubleshooting#warning-sourcemap-is-likely-to-be-incorrect
+wildwood-kit:build: 
+wildwood-kit:build: ✔ Build complete in 1054ms
+wildwood:build: cache miss, executing fb415c5b7a20253c
+wildwood:build: [WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+wildwood:build: 
+wildwood:build: > wildwood@0.1.0 build /project/wildwood/packages/wildwood
+wildwood:build: > pnpm --filter wildwood-shared run build 2>/dev/null || true && pnpm --filter wildwood-store run build && tsdown && node scripts/copy-bundled-extension.mjs
+wildwood:build: 
+wildwood:build: 
+wildwood:build: > wildwood-shared@0.1.0 build /project/wildwood/packages/shared
+wildwood:build: > tsdown
+wildwood:build: 
+wildwood:build: ℹ tsdown v0.22.7 powered by rolldown v1.1.5
+wildwood:build: ℹ config file: /project/wildwood/packages/shared/tsdown.config.ts 
+wildwood:build: ℹ entry: ./src/index.ts
+wildwood:build: ℹ tsconfig: tsconfig.json
+wildwood:build: ℹ Build start
+wildwood:build: ℹ Cleaning 4 files
+wildwood:build: ℹ Emit types with typescript@7.0.2
+wildwood:build: ℹ dist/index.mjs        5.54 kB │ gzip: 1.77 kB
+wildwood:build: ℹ dist/index.mjs.map    7.39 kB │ gzip: 2.46 kB
+wildwood:build: ℹ dist/index.d.mts.map  0.35 kB │ gzip: 0.20 kB
+wildwood:build: ℹ dist/index.d.mts      5.32 kB │ gzip: 1.55 kB
+wildwood:build: ℹ 4 files, total: 18.60 kB
+wildwood:build: ✔ Build complete in 199ms
+wildwood:build: [WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+wildwood:build: 
+wildwood:build: > wildwood-store@0.1.0 build /project/wildwood/packages/store
+wildwood:build: > tsdown
+wildwood:build: 
+wildwood:build: ℹ tsdown v0.22.7 powered by rolldown v1.1.5
+wildwood:build: ℹ config file: /project/wildwood/packages/store/tsdown.config.ts 
+wildwood:build: ℹ entry: src/index.ts
+wildwood:build: ℹ tsconfig: tsconfig.json
+wildwood:build: ℹ Build start
+wildwood:build: ℹ Cleaning 4 files
+wildwood:build: 
+wildwood:build:  WARN  TypeScript 7.0 does not yet have a stable API and is experimental. Some options will be unavailable.
+wildwood:build: 
+wildwood:build: ℹ Emit types with typescript@7.0.2
+wildwood:build: ℹ dist/index.mjs        37.73 kB │ gzip:  8.44 kB
+wildwood:build: ℹ dist/index.mjs.map    78.92 kB │ gzip: 17.02 kB
+wildwood:build: ℹ dist/index.d.mts.map   2.25 kB │ gzip:  0.87 kB
+wildwood:build: ℹ dist/index.d.mts       8.82 kB │ gzip:  2.30 kB
+wildwood:build: ℹ 4 files, total: 127.72 kB
+wildwood:build: ✔ Build complete in 304ms
+wildwood:build: ℹ tsdown v0.22.7 powered by rolldown v1.1.5
+wildwood:build: ℹ config file: /project/wildwood/packages/wildwood/tsdown.config.ts 
+wildwood:build: ℹ entry: src/index.ts, src/nextjs/index.ts, src/nextjs/config.ts, src/nextjs/handler.ts, src/nextjs/route.ts, src/nextjs/branch.ts, src/nextjs/draft.ts, src/nextjs/kit.ts, src/nextjs/resolve-active-ref.ts, src/nextjs/auth.ts, src/react/index.tsx, src/react/markdown.tsx
+wildwood:build: ℹ tsconfig: tsconfig.json
+wildwood:build: 
+wildwood:build:  WARN  `external` is deprecated. Use `deps.neverBundle` instead.
+wildwood:build: 
+wildwood:build: 
+wildwood:build:  WARN  `noExternal` is deprecated. Use `deps.alwaysBundle` instead.
+wildwood:build: 
+wildwood:build: ℹ entry: src/nextjs/client-boundary.tsx
+wildwood:build: ℹ tsconfig: tsconfig.json
+wildwood:build: 
+wildwood:build:  WARN  `external` is deprecated. Use `deps.neverBundle` instead.
+wildwood:build: 
+wildwood:build: ℹ Build start
+wildwood:build: 
+wildwood:build:  WARN  TypeScript 7.0 does not yet have a stable API and is experimental. Some options will be unavailable.
+wildwood:build: 
+wildwood:build: ℹ Emit types with typescript@7.0.2
+wildwood:build: ℹ dist/nextjs/client-boundary.js        1.27 kB │ gzip: 0.66 kB
+wildwood:build: [33m[PLUGIN_TIMINGS] [0mYour build spent significant time in plugin `rolldown-plugin-dts:generate`. See https://rolldown.rs/reference/InputOptions.checks#plugintimings for more details.
+wildwood:build: 
+wildwood:build: ℹ dist/nextjs/client-boundary.js.map    4.00 kB │ gzip: 1.71 kB
+wildwood:build: ℹ dist/nextjs/client-boundary.d.ts.map  0.19 kB │ gzip: 0.16 kB
+wildwood:build: ℹ dist/nextjs/client-boundary.d.ts      0.40 kB │ gzip: 0.27 kB
+wildwood:build: ℹ 4 files, total: 5.85 kB
+wildwood:build: ✔ Build complete in 5538ms
+wildwood:build: ℹ Hint: consider adding deps.onlyBundle option to avoid unintended bundling of dependencies, or set deps.onlyBundle: false to disable this hint.
+wildwood:build: See more at https://tsdown.dev/options/dependencies#deps-onlybundle
+wildwood:build: Detected dependencies in bundle:
+wildwood:build: - @babel/runtime
+wildwood:build: - @uiw/react-json-view
+wildwood:build: - @better-auth/core
+wildwood:build: - jose
+wildwood:build: - better-call
+wildwood:build: - kysely
+wildwood:build: - @standard-schema/spec
+wildwood:build: - better-auth
+wildwood:build: - @better-auth/oauth-provider
+wildwood:build: - @better-auth/telemetry
+wildwood:build: - @better-auth/mcp
+wildwood:build: - @noble/hashes
+wildwood:build: - @better-auth/utils
+wildwood:build: - @noble/ciphers
+wildwood:build: - defu
+wildwood:build: - @better-fetch/fetch
+wildwood:build: - @better-auth/cimd
+wildwood:build: - @libsql/kysely-libsql
+wildwood:build: - @better-auth/kysely-adapter
+wildwood:build: - rou3
+wildwood:build: - @better-auth/memory-adapter
+wildwood:build: - @opentelemetry/api
+wildwood:build: - @opentelemetry/semantic-conventions
+wildwood:build: - @types/unist
+wildwood:build: - @types/mdast
+wildwood:build: - react
+wildwood:build: ℹ dist/index.mjs                                     151.33 kB │ gzip:  36.33 kB
+wildwood:build: ℹ dist/react/index.mjs                                88.46 kB │ gzip:  13.47 kB
+wildwood:build: ℹ dist/nextjs/index.mjs                                9.55 kB │ gzip:   2.88 kB
+wildwood:build: ℹ dist/react/markdown.mjs                              8.93 kB │ gzip:   1.99 kB
+wildwood:build: ℹ dist/nextjs/config.mjs                               5.50 kB │ gzip:   2.36 kB
+wildwood:build: ℹ dist/nextjs/branch.mjs                               4.96 kB │ gzip:   1.81 kB
+wildwood:build: ℹ dist/nextjs/draft.mjs                                4.18 kB │ gzip:   1.80 kB
+wildwood:build: ℹ dist/nextjs/resolve-active-ref.mjs                   1.61 kB │ gzip:   0.62 kB
+wildwood:build: ℹ dist/nextjs/route.mjs                                0.36 kB │ gzip:   0.19 kB
+wildwood:build: ℹ dist/nextjs/auth.mjs                                 0.33 kB │ gzip:   0.19 kB
+wildwood:build: ℹ dist/nextjs/kit.mjs                                  0.11 kB │ gzip:   0.10 kB
+wildwood:build: ℹ dist/nextjs/handler.mjs                              0.11 kB │ gzip:   0.10 kB
+wildwood:build: ℹ dist/auth-CxBf7e_R.mjs.map                           1.81 MB
+wildwood:build: ℹ dist/auth-CxBf7e_R.mjs                             999.73 kB │ gzip: 223.99 kB
+wildwood:build: ℹ dist/compiled-query-C3nyuUy0.mjs.map               424.79 kB │ gzip:  60.43 kB
+wildwood:build: ℹ dist/dist-D_QsG1ht.mjs.map                         351.46 kB │ gzip:  54.09 kB
+wildwood:build: ℹ dist/index.mjs.map                                 346.56 kB │ gzip:  78.09 kB
+wildwood:build: ℹ dist/auth-B7WfiZ5F.d.mts.map                       279.67 kB │ gzip:  39.81 kB
+wildwood:build: ℹ dist/client-assertion-D-tAYsKC-DAt-1_bV.mjs.map    272.80 kB │ gzip:  62.64 kB
+wildwood:build: ℹ dist/compiled-query-C3nyuUy0.mjs                   234.43 kB │ gzip:  37.99 kB
+wildwood:build: ℹ dist/handler-3rHWPAIc.mjs.map                      211.52 kB │ gzip:  52.25 kB
+wildwood:build: ℹ dist/route-D5jildS4.mjs.map                        193.32 kB │ gzip:  45.75 kB
+wildwood:build: ℹ dist/dist-D_QsG1ht.mjs                             191.78 kB │ gzip:  32.41 kB
+wildwood:build: ℹ dist/bundled-extension-bytes.gen-SDnEPHsV.mjs.map  181.25 kB │ gzip:  48.39 kB
+wildwood:build: ℹ dist/bundled-extension-bytes.gen-SDnEPHsV.mjs      180.87 kB │ gzip:  48.30 kB
+wildwood:build: ℹ dist/client-assertion-D-tAYsKC-DAt-1_bV.mjs        156.38 kB │ gzip:  40.59 kB
+wildwood:build: ℹ dist/react/index.mjs.map                           155.96 kB │ gzip:  23.36 kB
+wildwood:build: ℹ dist/factory-DTYluO7p.mjs.map                      153.72 kB │ gzip:  31.52 kB
+wildwood:build: ℹ dist/esm-BKiLa1HK.mjs.map                          128.42 kB │ gzip:  21.45 kB
+wildwood:build: ℹ dist/handler-3rHWPAIc.mjs                          118.33 kB │ gzip:  30.87 kB
+wildwood:build: ℹ dist/migrator-CKPlhhjS.mjs.map                     116.67 kB │ gzip:  17.97 kB
+wildwood:build: ℹ dist/jsx-runtime-CyOoTuhv.mjs.map                  116.28 kB │ gzip:  24.69 kB
+wildwood:build: ℹ dist/route-D5jildS4.mjs                             96.61 kB │ gzip:  24.42 kB
+wildwood:build: ℹ dist/jsx-runtime-CyOoTuhv.mjs                       65.90 kB │ gzip:  14.53 kB
+wildwood:build: ℹ dist/factory-DTYluO7p.mjs                           61.44 kB │ gzip:  12.50 kB
+wildwood:build: ℹ dist/esm-BKiLa1HK.mjs                               55.44 kB │ gzip:  11.99 kB
+wildwood:build: ℹ dist/access-CdYt3DTJ.mjs.map                        50.83 kB │ gzip:  11.15 kB
+wildwood:build: ℹ dist/github-BwXU9m3F.mjs.map                        48.17 kB │ gzip:  11.66 kB
+wildwood:build: ℹ dist/migrator-CKPlhhjS.mjs                          43.80 kB │ gzip:   7.96 kB
+wildwood:build: ℹ dist/access-CdYt3DTJ.mjs                            26.58 kB │ gzip:   5.82 kB
+wildwood:build: ℹ dist/dist-37fqnHnp.mjs.map                          24.75 kB │ gzip:   6.35 kB
+wildwood:build: ℹ dist/react/markdown.mjs.map                         24.46 kB │ gzip:   6.34 kB
+wildwood:build: ℹ dist/index-D6ypXquA.d.mts.map                       21.21 kB │ gzip:   4.01 kB
+wildwood:build: ℹ dist/error-BC4SDTv7.mjs.map                         21.12 kB │ gzip:   6.32 kB
+wildwood:build: ℹ dist/github-BwXU9m3F.mjs                            20.47 kB │ gzip:   5.41 kB
+wildwood:build: ℹ dist/wildwood-kit-CWK5kRtl.mjs.map                  15.56 kB │ gzip:   5.35 kB
+wildwood:build: ℹ dist/env-CX2Ol88T.mjs.map                           14.85 kB │ gzip:   4.57 kB
+wildwood:build: ℹ dist/dist-37fqnHnp.mjs                              14.79 kB │ gzip:   4.19 kB
+wildwood:build: ℹ dist/schema-VziJew4J.mjs                            14.03 kB │ gzip:   2.31 kB
+wildwood:build: ℹ dist/vscode-web-cdn-dGFLBOXp.mjs.map                12.77 kB │ gzip:   4.15 kB
+wildwood:build: ℹ dist/error-BC4SDTv7.mjs                             12.56 kB │ gzip:   4.23 kB
+wildwood:build: ℹ dist/nextjs/branch.mjs.map                           9.55 kB │ gzip:   3.12 kB
+wildwood:build: ℹ dist/nextjs/index.mjs.map                            9.06 kB │ gzip:   3.15 kB
+wildwood:build: ℹ dist/nextjs/config.mjs.map                           8.64 kB │ gzip:   3.25 kB
+wildwood:build: ℹ dist/node-sqlite-dialect-TOXCccKi.mjs.map            8.47 kB │ gzip:   2.73 kB
+wildwood:build: ℹ dist/bun-sqlite-dialect-PuE7pPr--gmRvJeEM.mjs.map    8.46 kB │ gzip:   2.73 kB
+wildwood:build: ℹ dist/vscode-web-cdn-dGFLBOXp.mjs                     7.90 kB │ gzip:   2.81 kB
+wildwood:build: ℹ dist/nextjs/draft.mjs.map                            7.35 kB │ gzip:   2.91 kB
+wildwood:build: ℹ dist/d1-sqlite-dialect-C2B7YsIT-DCyoTGP3.mjs.map     7.21 kB │ gzip:   2.44 kB
+wildwood:build: ℹ dist/env-CX2Ol88T.mjs                                6.71 kB │ gzip:   2.40 kB
+wildwood:build: ℹ dist/dist-B3nkPvyj.mjs.map                           6.50 kB │ gzip:   2.09 kB
+wildwood:build: ℹ dist/wildwood-kit-CWK5kRtl.mjs                       5.57 kB │ gzip:   1.87 kB
+wildwood:build: ℹ dist/bun-sqlite-dialect-PuE7pPr--gmRvJeEM.mjs        4.76 kB │ gzip:   1.71 kB
+wildwood:build: ℹ dist/node-sqlite-dialect-TOXCccKi.mjs                4.75 kB │ gzip:   1.70 kB
+wildwood:build: ℹ dist/d1-sqlite-dialect-C2B7YsIT-DCyoTGP3.mjs         4.19 kB │ gzip:   1.56 kB
+wildwood:build: ℹ dist/sqlite-adapter-C6GSbzEO.mjs.map                 4.03 kB │ gzip:   1.37 kB
+wildwood:build: ℹ dist/index-B5OKoRI6.d.mts.map                        3.32 kB │ gzip:   0.85 kB
+wildwood:build: ℹ dist/nextjs/resolve-active-ref.mjs.map               2.77 kB │ gzip:   0.99 kB
+wildwood:build: ℹ dist/dist-B3nkPvyj.mjs                               2.68 kB │ gzip:   1.19 kB
+wildwood:build: ℹ dist/sqlite-adapter-C6GSbzEO.mjs                     2.19 kB │ gzip:   0.87 kB
+wildwood:build: ℹ dist/index.d.mts.map                                 1.55 kB │ gzip:   0.64 kB
+wildwood:build: ℹ dist/rolldown-runtime-JspESFgx.mjs                   1.54 kB │ gzip:   0.73 kB
+wildwood:build: ℹ dist/react/markdown.d.mts.map                        1.20 kB │ gzip:   0.49 kB
+wildwood:build: ℹ dist/nextjs/index.d.mts.map                          1.04 kB │ gzip:   0.50 kB
+wildwood:build: ℹ dist/nextjs/route.d.mts.map                          0.67 kB │ gzip:   0.33 kB
+wildwood:build: ℹ dist/branch-o8yW3WSq.d.mts.map                       0.41 kB │ gzip:   0.28 kB
+wildwood:build: ℹ dist/config-0yG-bITe.d.mts.map                       0.39 kB │ gzip:   0.22 kB
+wildwood:build: ℹ dist/wildwood-kit-CENNFCa8.d.mts.map                 0.39 kB │ gzip:   0.27 kB
+wildwood:build: ℹ dist/handler-D_cMYS6Q.d.mts.map                      0.36 kB │ gzip:   0.25 kB
+wildwood:build: ℹ dist/index-dWQqwYiw.d.mts.map                        0.27 kB │ gzip:   0.19 kB
+wildwood:build: ℹ dist/resolve-active-ref-BcXyz3xl.d.mts.map           0.26 kB │ gzip:   0.21 kB
+wildwood:build: [33m[PLUGIN_TIMINGS] [0mYour build spent significant time in plugins. Here is a breakdown:
+wildwood:build: ℹ dist/nextjs/draft.d.mts.map                          0.26 kB │ gzip:   0.20 kB
+wildwood:build:   - rolldown-plugin-dts:resolver (51%)
+wildwood:build: ℹ dist/react/index.d.mts.map                           0.19 kB │ gzip:   0.17 kB
+wildwood:build:   - rolldown-plugin-dts:generate (26%)
+wildwood:build:   - tsdown:deps (13%)
+wildwood:build: ℹ dist/kysely-adapter-CqKJ2PEw.mjs                     0.13 kB │ gzip:   0.10 kB
+wildwood:build: ℹ dist/schema-VziJew4J.mjs.map                         0.13 kB │ gzip:   0.12 kB
+wildwood:build: ℹ dist/index.d.mts                                    34.46 kB │ gzip:   6.73 kB
+wildwood:build: ℹ dist/nextjs/index.d.mts                             10.94 kB │ gzip:   3.38 kB
+wildwood:build: ℹ dist/nextjs/route.d.mts                              6.56 kB │ gzip:   2.40 kB
+wildwood:build: See https://rolldown.rs/reference/InputOptions.checks#plugintimings for more details.
+wildwood:build: ℹ dist/react/markdown.d.mts                            4.90 kB │ gzip:   1.50 kB
+wildwood:build: ℹ dist/nextjs/draft.d.mts                              2.42 kB │ gzip:   1.13 kB
+wildwood:build: ℹ dist/nextjs/resolve-active-ref.d.mts                 1.21 kB │ gzip:   0.41 kB
+wildwood:build: ℹ dist/nextjs/branch.d.mts                             1.02 kB │ gzip:   0.37 kB
+wildwood:build: 
+wildwood:build: ℹ dist/react/index.d.mts                               0.95 kB │ gzip:   0.56 kB
+wildwood:build: ℹ dist/nextjs/auth.d.mts                               0.93 kB │ gzip:   0.34 kB
+wildwood:build: ℹ dist/nextjs/config.d.mts                             0.42 kB │ gzip:   0.21 kB
+wildwood:build: ℹ dist/nextjs/kit.d.mts                                0.29 kB │ gzip:   0.17 kB
+wildwood:build: ℹ dist/nextjs/handler.d.mts                            0.16 kB │ gzip:   0.12 kB
+wildwood:build: ℹ dist/auth-B7WfiZ5F.d.mts                             1.40 MB
+wildwood:build: ℹ dist/index-D6ypXquA.d.mts                          310.33 kB │ gzip:  18.67 kB
+wildwood:build: ℹ dist/index-B5OKoRI6.d.mts                           24.39 kB │ gzip:   4.62 kB
+wildwood:build: ℹ dist/config-0yG-bITe.d.mts                           5.88 kB │ gzip:   2.33 kB
+wildwood:build: ℹ dist/branch-o8yW3WSq.d.mts                           3.14 kB │ gzip:   1.24 kB
+wildwood:build: ℹ dist/wildwood-kit-CENNFCa8.d.mts                     2.50 kB │ gzip:   1.21 kB
+wildwood:build: ℹ dist/index-dWQqwYiw.d.mts                            2.48 kB │ gzip:   1.07 kB
+wildwood:build: ℹ dist/handler-D_cMYS6Q.d.mts                          1.60 kB │ gzip:   0.79 kB
+wildwood:build: ℹ dist/resolve-active-ref-BcXyz3xl.d.mts               1.21 kB │ gzip:   0.54 kB
+wildwood:build: ℹ 106 files, total: 9.49 MB
+wildwood:build: ✔ Build complete in 9959ms
+wildwood:build: [wildwood] copied wildwood-vscode into bundled-extension/ (+ embedded extension.js + theme)
+play:build: cache miss, executing cd7d98156b669451
+docs:build: cache miss, executing 48c1b6763501b5fb
+play:build: [WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+docs:build: [WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+docs:build: 
+docs:build: > docs@0.1.0 build /project/wildwood/apps/docs
+docs:build: > next build
+docs:build: 
+play:build: 
+play:build: > play@0.1.0 build /project/wildwood/apps/play
+play:build: > next build
+play:build: 
+play:build: Attention: Next.js now collects completely anonymous telemetry regarding usage.
+play:build: This information is used to shape Next.js' roadmap and prioritize features.
+play:build: You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+play:build: https://nextjs.org/telemetry
+play:build: 
+docs:build: Attention: Next.js now collects completely anonymous telemetry regarding usage.
+docs:build: This information is used to shape Next.js' roadmap and prioritize features.
+docs:build: You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+docs:build: https://nextjs.org/telemetry
+docs:build: 
+docs:build: ▲ Next.js 16.2.1 (Turbopack)
+docs:build: - Cache Components enabled
+docs:build: 
+play:build: ▲ Next.js 16.2.1 (Turbopack)
+play:build: - Cache Components enabled
+play:build: 
+docs:build:   Creating an optimized production build ...
+play:build:   Creating an optimized production build ...
+docs:build: ✓ Compiled successfully in 30.0s
+docs:build:   Running TypeScript ...
+play:build: ✓ Compiled successfully in 36.5s
+play:build:   Running TypeScript ...
+play:build: It looks like you're trying to use TypeScript but do not have the required package(s) installed.
+play:build: Installing dependencies
+play:build: 
+play:build: If you are not trying to use TypeScript, please remove the tsconfig.json file from your package root (and any TypeScript files in your app and pages directories).
+play:build: 
+play:build: 
+play:build: Installing devDependencies (pnpm):
+play:build: - typescript
+play:build: 
+play:build: [WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+play:build: ../..                                    | Progress: resolved 1, reused 0, downloaded 0, added 0
+docs:build:   Finished TypeScript in 9.7s ...
+docs:build:   Collecting page data using 1 worker ...
+play:build: ../..                                    | Progress: resolved 151, reused 0, downloaded 0, added 0
+play:build: ../..                                    | Progress: resolved 519, reused 0, downloaded 0, added 0
+play:build: ../..                                    | Progress: resolved 627, reused 0, downloaded 0, added 0
+docs:build:   Generating static pages using 1 worker (0/16) ...
+play:build: ../..                                    | Progress: resolved 753, reused 0, downloaded 0, added 0
+docs:build:   Generating static pages using 1 worker (4/16) 
+docs:build:   Generating static pages using 1 worker (8/16) 
+docs:build:   Generating static pages using 1 worker (12/16) 
+docs:build: ✓ Generating static pages using 1 worker (16/16) in 1029ms
+docs:build:   Finalizing page optimization ...
+docs:build: 
+docs:build: Route (app)           Revalidate  Expire
+docs:build: ┌ ◐ /                        15m      1y
+docs:build: ├ ◐ /_not-found              15m      1y
+docs:build: ├ ƒ /api/[...path]
+docs:build: └ ◐ /docs/[slug]             15m      1y
+docs:build:   ├ /docs/[slug]             15m      1y
+docs:build:   ├ /docs/api                15m      1y
+docs:build:   ├ /docs/branching          15m      1y
+docs:build:   └ [+10 more paths]
+docs:build: 
+docs:build: 
+docs:build: ◐  (Partial Prerender)  prerendered as static HTML with dynamic server-streamed content
+docs:build: ƒ  (Dynamic)            server-rendered on demand
+docs:build: 
+play:build: ../..                                    | Progress: resolved 909, reused 0, downloaded 0, added 0
+play:build: ../..                                    | Progress: resolved 995, reused 0, downloaded 0, added 0
+play:build: ../..                                    | Progress: resolved 998, reused 0, downloaded 0, added 0
+play:build: ../..                                    | Progress: resolved 1034, reused 0, downloaded 0, added 0
+play:build: ../..                                    | Progress: resolved 1053, reused 0, downloaded 0, added 0
+play:build:  WARN  3 deprecated subdependencies found: @effect/schema@0.75.5, node-domexception@1.0.0, prebuild-install@7.1.3
+play:build: ../..                                    | Progress: resolved 1097, reused 0, downloaded 0, added 0
+play:build: ../..                                    | Progress: resolved 1097, reused 0, downloaded 0, added 0, done
+play:build:  WARN  Issues with peer dependencies found
+play:build: packages/wildwood
+play:build: └─┬ better-auth 1.7.0-rc.1
+play:build:   └── ✕ unmet peer drizzle-orm@^0.45.2: found 1.0.0-beta.20
+play:build: 
+play:build: ╭ Warning ─────────────────────────────────────────────────────────────────────╮
+play:build: │                                                                              │
+play:build: │   Ignored build scripts: msw@2.12.14.                                        │
+play:build: │   Run "pnpm approve-builds" to pick which dependencies should be allowed     │
+play:build: │   to run scripts.                                                            │
+play:build: │                                                                              │
+play:build: ╰──────────────────────────────────────────────────────────────────────────────╯
+play:build: Done in 13s using pnpm v10.33.0
+play:build: 
+play:build: The "id" argument must be of type string. Received undefined
+play:build: Next.js build worker exited with code: 1 and signal: null
+play:build:  ELIFECYCLE  Command failed with exit code 1.
+ ERROR  play#build: command (/project/wildwood/apps/play) /usr/local/bin/pnpm run build exited (1)
+
+ Tasks:    7 successful, 8 total
+Cached:    0 cached, 8 total
+  Time:    1m17.184s 
+Failed:    play#build
+
+ ERROR  run failed: command  exited (1)
+ ELIFECYCLE  Command failed with exit code 1.

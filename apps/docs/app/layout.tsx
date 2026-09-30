@@ -5,6 +5,7 @@ import { cacheLife, cacheTag } from "next/cache";
 import { Suspense } from "react";
 import { Toolbar } from "wildwood/nextjs/kit";
 import { WILDWOOD_CONTENT_TAG, getContext, wildwood } from "@/lib/wildwood";
+import { Footer } from "@/components/footer";
 import "./globals.css";
 
 const geistMono = Geist_Mono({
@@ -31,10 +32,15 @@ async function getNav(opts: { branch: string; isDraft: boolean }) {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${geistMono.variable} antialiased`} suppressHydrationWarning>
-      <body className="min-h-screen">
-        <Suspense fallback={<FallbackShell />}>
-          <DynamicShell>{children}</DynamicShell>
-        </Suspense>
+      <body className="min-h-screen flex flex-col">
+        <div className="flex-1">
+          <Suspense fallback={<FallbackShell />}>
+            <DynamicShell>{children}</DynamicShell>
+          </Suspense>
+        </div>
+
+        {/* Footer */}
+        <Footer />
 
         {/* Toolbar reads cookies (dynamic) → must be inside Suspense. */}
         <div className="not-typeset">

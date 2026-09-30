@@ -1,0 +1,105 @@
+╔══════════════════════════════════════════════════════════════════════════╗
+║                     WILDWOOD - AVAILABLE SCRIPTS                         ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+🚀 DEVELOPMENT SCRIPTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  pnpm dev                    Run all packages in development mode
+  pnpm dev:web                Run web playground with dependencies
+                              (wildwood, wildwood-kit, wildwood-vscode, play)
+  pnpm dev:web-play           Alias for dev:web
+  pnpm dev:docs               Run documentation site with dependencies
+                              (wildwood, wildwood-kit, wildwood-vscode, docs)
+  pnpm playground             Alias for dev:web
+  pnpm dev:vscode-playground  Run VSCode playground with studio
+
+
+🏗️  BUILD & PRODUCTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  pnpm build                  Build all packages using Turbo
+  pnpm start                  Start all applications in production mode
+
+
+🧹 CODE QUALITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  pnpm lint                   Run oxlint on all files
+  pnpm lint:fix               Run oxlint with automatic fixes
+  pnpm format                 Format code using oxfmt
+  pnpm format:check           Check code formatting (no changes)
+  pnpm typecheck              Run TypeScript type checking across all packages
+
+
+🗄️  DATABASE & STUDIO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  pnpm studio:wildwood        Run studio for wildwood package
+  pnpm studio:web-db          Run studio for web database (play mode)
+
+
+🧪 TESTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  pnpm test:wildwood          Run tests for wildwood package
+  pnpm test:wildwood:watch    Run tests in watch mode
+
+
+📦 PACKAGE STRUCTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+packages/
+  ├── wildwood          Main package (9.49 MB built)
+  ├── wildwood-kit      UI kit with Tailwind CSS
+  ├── wildwood-vscode   VS Code extension
+  ├── wildwood-shared   Shared utilities
+  ├── wildwood-store    State management
+  └── wildwood-ui       UI components
+
+apps/
+  ├── docs              Documentation site (Next.js)
+  └── play              Playground application (Next.js)
+
+
+💡 COMMON WORKFLOWS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Start developing:
+  $ pnpm dev:web          # Start web playground
+  $ pnpm dev:docs         # Start documentation site
+
+Build for production:
+  $ pnpm build            # Build all packages
+
+Check code quality:
+  $ pnpm lint:fix         # Fix linting issues
+  $ pnpm format           # Format code
+  $ pnpm typecheck        # Check types
+
+Run tests:
+  $ pnpm test:wildwood:watch    # Run tests in watch mode
+
+
+🔧 TOOLS USED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  • Package Manager: pnpm v10.33.0
+  • Build Tool: Turbo v2.9.4
+  • Linter: oxlint v1.73.0
+  • Formatter: oxfmt v0.18.0
+  • TypeScript: v7.0.2 (experimental)
+  • Bundler: tsdown (using rolldown)
+
+
+📝 NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  • This is a monorepo managed with pnpm workspaces
+  • Turbo is used for task orchestration and caching
+  • All packages are built with tsdown (modern TypeScript bundler)
+  • The project uses experimental TypeScript 7.0
+
+╔══════════════════════════════════════════════════════════════════════════╗
+║  For more details, see: BUILD_REPORT.md                                  ║
+╚══════════════════════════════════════════════════════════════════════════╝
