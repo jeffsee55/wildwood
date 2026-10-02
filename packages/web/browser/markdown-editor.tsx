@@ -130,7 +130,7 @@ export default function MarkdownEditor({
           </TabsList>
         )}
       </div>
-      <TabsContent key={mode} value={mode} className={`editor-panes ${mode}`}>
+      <TabsContent value={mode} className={`editor-panes ${mode}`}>
         {mode !== "preview" && (
           <Textarea
             ref={textarea}
