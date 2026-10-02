@@ -661,32 +661,33 @@ export function createWeb<C extends Collections>(options: {
     throw new Error("Unsupported command");
   }
   async function state(current: View) {
-    const drafts = current.actor
-      ? await Promise.all(
-          (await list("draft", current.actor.id)).map(async (draft) => {
-            const row = (
-              await db.execute(
-                "SELECT s.created_at FROM ww2_refs r JOIN ww2_snapshots s ON s.id=r.snapshot WHERE r.repository=? AND r.name=?",
-                [repository, String(draft.data.ref)],
-              )
-            ).rows[0];
-            const updatedAt = Math.max(
-              Number(draft.data.created),
-              Date.parse(String(row?.created_at)) || 0,
-            );
-            return {
-              ...draft,
-              ...(await reviews.draftStatus(String(draft.id))),
-              updatedAt,
-              data: {
-                ...draft.data,
-                created: Number(draft.data.created),
-                name: draft.data.name ?? draftName(String(draft.data.ref)),
-              },
-            };
-          }),
-        )
-      : [];
+    const records = current.actor ? await list("draft", current.actor.id) : [];
+    const [statuses, timestamps] = records.length
+      ? await Promise.all([
+          reviews.draftStatuses(records.map((draft) => draft.id)),
+          db.execute(
+            `SELECT r.name,s.created_at FROM ww2_refs r JOIN ww2_snapshots s ON s.id=r.snapshot
+        WHERE r.repository=? AND r.name IN (SELECT value FROM json_each(?))`,
+            [repository, JSON.stringify(records.map((draft) => String(draft.data.ref)))],
+          ),
+        ])
+      : [
+          new Map<string, { status: "open" | "landing" | "published"; review?: string }>(),
+          { rows: [] },
+        ];
+    const times = new Map(
+      timestamps.rows.map((row) => [String(row.name), Date.parse(String(row.created_at)) || 0]),
+    );
+    const drafts = records.map((draft) => ({
+      ...draft,
+      ...statuses.get(draft.id),
+      updatedAt: Math.max(Number(draft.data.created), times.get(String(draft.data.ref)) ?? 0),
+      data: {
+        ...draft.data,
+        created: Number(draft.data.created),
+        name: draft.data.name ?? draftName(String(draft.data.ref)),
+      },
+    }));
     return {
       endpoint: base,
       mcpUrl: `${options.origin}${base}/mcp`,

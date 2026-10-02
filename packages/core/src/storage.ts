@@ -92,6 +92,7 @@ export const schema = [
   `CREATE TABLE IF NOT EXISTS ww2_refs (repository TEXT NOT NULL, name TEXT NOT NULL, snapshot TEXT NOT NULL REFERENCES ww2_snapshots(id), revision INTEGER NOT NULL, PRIMARY KEY(repository,name))`,
   `CREATE TABLE IF NOT EXISTS ww2_generations (repository TEXT NOT NULL, version TEXT NOT NULL, signature TEXT NOT NULL, PRIMARY KEY(repository,version))`,
   `CREATE TABLE IF NOT EXISTS ww2_builds (snapshot TEXT NOT NULL REFERENCES ww2_snapshots(id), version TEXT NOT NULL, status TEXT NOT NULL, diagnostics TEXT, PRIMARY KEY(snapshot,version))`,
+  `CREATE TABLE IF NOT EXISTS ww2_reference_builds (snapshot TEXT NOT NULL REFERENCES ww2_snapshots(id), version TEXT NOT NULL, PRIMARY KEY(snapshot,version))`,
   `CREATE TABLE IF NOT EXISTS ww2_projections (id TEXT PRIMARY KEY, repository TEXT NOT NULL, version TEXT NOT NULL, path TEXT NOT NULL, blob TEXT NOT NULL, collection TEXT, canonical TEXT NOT NULL, axes TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(repository,version,path,blob))`,
   `CREATE TABLE IF NOT EXISTS ww2_fields (projection TEXT NOT NULL REFERENCES ww2_projections(id), field TEXT NOT NULL, kind TEXT NOT NULL, text_value TEXT, number_value REAL, PRIMARY KEY(projection,field))`,
   `CREATE INDEX IF NOT EXISTS ww2_fields_text ON ww2_fields(field,kind,text_value,projection)`,

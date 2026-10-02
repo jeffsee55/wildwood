@@ -478,3 +478,60 @@ test("identical empty packs retain distinct dependency histories", async () => {
   await compactGitStorage(engine);
   expect((await resolveGitMerge(engine, second.id, [])).changes).toEqual([]);
 });
+
+test("incremental Git export reads only delta bytes across directory replacements and checkpoints", async () => {
+  const { root, source, engine } = await setup();
+  let head = await importGit(engine, { directory: source, targetRef: "main" });
+  const originalBytes = engine.bytes.bind(engine);
+  const read: string[] = [];
+  engine.bytes = async (blob) => {
+    read.push(blob);
+    return originalBytes(blob);
+  };
+  // Replace a binary file with a directory, then replace the original docs directory with a file.
+  head = {
+    ...head,
+    ...(await engine.apply({
+      ref: "main",
+      expectedRevision: head.revision,
+      idempotencyKey: "directory",
+      changes: [
+        { path: "image.bin", delete: true },
+        { path: "image.bin/child", content: "new child" },
+        { path: "docs/a.md", delete: true },
+        { path: "docs", content: "replacement file" },
+      ],
+    })),
+  };
+  await engine.checkpoint(head.snapshot);
+  read.length = 0;
+  const bare = join(root, "incremental.git");
+  const author = { name: "Test", email: "test@example.com" };
+  const exported = await exportGit(engine, {
+    snapshot: head.snapshot,
+    directory: bare,
+    message: "Directory replacements",
+    author,
+  });
+  expect(read).toHaveLength(2);
+  expect((await exec("git", ["-C", bare, "show", "HEAD:image.bin/child"])).stdout).toBe(
+    "new child",
+  );
+  expect((await exec("git", ["-C", bare, "show", "HEAD:docs"])).stdout).toBe("replacement file");
+  expect((await exec("git", ["-C", bare, "ls-tree", "HEAD", "script.sh"])).stdout).toContain(
+    "100755",
+  );
+  await exec("git", ["-C", bare, "fsck", "--strict"]);
+  read.length = 0;
+  expect(
+    (
+      await exportGit(engine, {
+        snapshot: head.snapshot,
+        directory: bare,
+        message: "Already exported",
+        author,
+      })
+    ).oid,
+  ).toBe(exported.oid);
+  expect(read).toHaveLength(0);
+});

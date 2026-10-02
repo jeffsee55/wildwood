@@ -226,7 +226,6 @@ export async function exportGit<C extends Collections>(
     )
   )
     throw new Error("Invalid Git author");
-  const files = await engine.files(args.snapshot);
   const temp = await mkdtemp(join(tmpdir(), "wildwood-git-"));
   try {
     // The caller supplies a runtime repository, never an application build asset.
@@ -272,9 +271,42 @@ export async function exportGit<C extends Collections>(
       oid = String(parent.oid);
     } else {
       const env = { GIT_INDEX_FILE: join(temp, "index") };
-      await run(args.directory, ["read-tree", "--empty"], undefined, env);
+      await run(
+        args.directory,
+        ["read-tree", parent ? String(parent.oid) : "--empty"],
+        undefined,
+        env,
+      );
+      const files = parent
+        ? (
+            await engine.database.execute(
+              `WITH RECURSIVE chain(id,parent,depth) AS (
+        SELECT id,parent,0 FROM ww2_snapshots WHERE id=? AND repository=?
+        UNION ALL SELECT s.id,s.parent,c.depth+1 FROM chain c JOIN ww2_snapshots s ON s.id=c.parent WHERE c.id<>?
+      ), ranked AS (SELECT f.path,f.blob,f.mode,ROW_NUMBER() OVER(PARTITION BY f.path ORDER BY c.depth) AS rank
+        FROM chain c JOIN ww2_changes f ON f.snapshot=c.id WHERE c.id<>?) SELECT path,blob,mode FROM ranked WHERE rank=1`,
+              [
+                args.snapshot,
+                engine.config.repository,
+                String(parent.snapshot),
+                String(parent.snapshot),
+              ],
+            )
+          ).rows.map((row) => ({
+            path: String(row.path),
+            blob: row.blob === null ? null : String(row.blob),
+            mode: String(row.mode),
+          }))
+        : await engine.files(args.snapshot);
+      // Remove first so file-to-directory and directory-to-file batches are safe.
+      const removed = files
+        .filter((file) => file.blob === null)
+        .map((file) => `0 ${"0".repeat(40)}\t${file.path}\0`)
+        .join("");
+      if (removed) await run(args.directory, ["update-index", "-z", "--index-info"], removed, env);
       const index: string[] = [];
       for (const file of files) {
+        if (file.blob === null) continue;
         const blob = (
           await run(args.directory, ["hash-object", "-w", "--stdin"], await engine.bytes(file.blob))
         )

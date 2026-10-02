@@ -72,6 +72,12 @@ if (process.env.WILDWOOD_VERIFY_REMOTE === "1") {
     );
     assert.equal((await other.ref("main")).snapshot, beforeInvalid);
     await engine.checkpoint(head.snapshot);
+    await other.validateReferences(head.snapshot);
+    const documents = (await other.query("docs", { snapshot: head.snapshot })).items;
+    assert.deepEqual(await other.resolveReferences(documents, "missing"), [null]);
+    const generation = createContent({ ...engine.config, version: "2", database: engine.database });
+    await generation.prepare(head.snapshot);
+    assert.equal((await generation.query("docs", { snapshot: head.snapshot })).items.length, 1);
     assert.equal(
       (await other.query("docs", { ref: "main", search: "Concurrent content" })).items.length,
       1,
@@ -88,7 +94,13 @@ if (process.env.WILDWOOD_VERIFY_REMOTE === "1") {
           [repository],
         );
       await tx.execute("DELETE FROM ww2_projections WHERE repository=?", [repository]);
-      for (const table of ["ww2_builds", "ww2_changes", "ww2_checkpoint_files", "ww2_checkpoints"])
+      for (const table of [
+        "ww2_reference_builds",
+        "ww2_builds",
+        "ww2_changes",
+        "ww2_checkpoint_files",
+        "ww2_checkpoints",
+      ])
         await tx.execute(
           `DELETE FROM ${table} WHERE snapshot IN (SELECT id FROM ww2_snapshots WHERE repository=?)`,
           [repository],

@@ -1,7 +1,7 @@
 import { vercelAssetBlobs } from "./asset-blobs";
 import { createClient } from "@libsql/client";
-import { collection, createContent, libsql, markdown, ConflictError } from "wildwood-core";
-import { z } from "zod";
+import { createContent, libsql, ConflictError } from "wildwood-core";
+import { contentModel } from "./content-model.mjs";
 import { randomBytes } from "node:crypto";
 import seedData from "./content.generated.json";
 const seed = seedData.map((file) => ({
@@ -31,39 +31,13 @@ export const client = createClient({
     (process.env.VERCEL ? process.env.TURSO_AUTH_TOKEN : undefined),
 });
 export const database = libsql(client);
-const base = z.object({
-  title: z.string().min(1),
-  description: z.string(),
-  order: z.number(),
-  author: z.string(),
-  body: z.string(),
-});
 const assetBlobToken =
   process.env.WILDWOOD_DOCS_ASSET_BLOB_TOKEN || process.env.BLOB_READ_WRITE_TOKEN;
 function engine(version: "1" | "2") {
   return createContent({
-    repository: "wildwood-manual",
-    version: `docs-${version}`,
+    ...contentModel(version),
     database,
     assetBlobs: assetBlobToken ? vercelAssetBlobs(assetBlobToken) : undefined,
-    variants: { locale: { options: ["en", "fr"], default: "en", path: "suffix" } },
-    collections: {
-      docs: collection({
-        match: "content/pages/**/*.md",
-        parse: markdown(
-          base.extend({
-            audience: version === "2" ? z.string().default("Developers") : z.string().optional(),
-          }),
-        ),
-        filters: ["title", "order", "audience"],
-        references: { author: "authors" },
-      }),
-      authors: collection({
-        match: "content/authors/**/*.md",
-        parse: markdown(z.object({ name: z.string(), body: z.string() })),
-        filters: ["name"],
-      }),
-    },
   });
 }
 export const engines = { "1": engine("1"), "2": engine("2") };

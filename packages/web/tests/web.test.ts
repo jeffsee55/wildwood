@@ -1,7 +1,7 @@
 import { createClient } from "@libsql/client";
 import { createContent, collection, markdown, libsql } from "wildwood-core";
 import { z } from "zod";
-import { test, expect, afterEach } from "vitest";
+import { test, expect, afterEach, vi } from "vitest";
 import { createWeb, sourcemap, withSourcemap, assets } from "../src/server";
 import { wildwoodWellKnown, withWildwood } from "../src/next/config";
 const clients: ReturnType<typeof createClient>[] = [];
@@ -837,4 +837,18 @@ test("editor ref, navigation context, and retry receipt roll back together", asy
   ).toHaveLength(0);
   await web.command(view, input);
   expect((await engine.ref(view.ref!.name)).revision).toBe(view.ref!.revision + 1);
+});
+
+test("toolbar state batches draft metadata without changing ownership boundaries", async () => {
+  const { web, headers, database } = await setup();
+  const current = await web.view(headers);
+  await web.state(current); // Initialize review storage before counting steady-state work.
+  for (let i = 0; i < 12; i++) await web.command(current, { type: "draft" });
+  const execute = vi.spyOn(database, "execute");
+  const state = await web.state(current);
+  expect(state.drafts).toHaveLength(13);
+  expect(execute.mock.calls).toHaveLength(3);
+  expect(state.drafts.every((draft) => draft.status === "open")).toBe(true);
+  const anonymous = await web.view(new Headers());
+  expect((await web.state(anonymous)).drafts).toHaveLength(0);
 });

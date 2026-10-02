@@ -78,22 +78,12 @@ export function createReviews<C extends Collections>({
         await db.execute(
           "CREATE TABLE IF NOT EXISTS ww_web_edit_context (repository TEXT NOT NULL, ref TEXT NOT NULL, revision INTEGER NOT NULL, path TEXT NOT NULL, context TEXT NOT NULL, snapshot TEXT NOT NULL, actor TEXT NOT NULL, PRIMARY KEY(repository,ref,revision,path,context))",
         );
-        await db.transaction(async (tx) => {
-          const rows = (
-            await tx.execute(
-              "SELECT data FROM ww_web_review_data WHERE repository=? AND kind='review'",
-              [repository],
-            )
-          ).rows;
-          for (const row of rows) {
-            const review = JSON.parse(String(row.data)) as Review;
-            if (review.status === "published" || review.status === "landing")
-              await tx.execute("INSERT OR IGNORE INTO ww2_ref_locks(repository,name) VALUES(?,?)", [
-                repository,
-                review.ref,
-              ]);
-          }
-        });
+        await db.execute(
+          `INSERT OR IGNORE INTO ww2_ref_locks(repository,name)
+          SELECT repository,json_extract(data,'$.ref') FROM ww_web_review_data
+          WHERE repository=? AND kind='review' AND json_extract(data,'$.status') IN ('published','landing')`,
+          [repository],
+        );
       })
       .catch((e) => {
         initialization = undefined;
@@ -633,10 +623,39 @@ export function createReviews<C extends Collections>({
     );
   }
   return {
+    async draftStatuses(ids: string[]) {
+      await init();
+      const keys = ids.map((id) => hash(`review:${id}`).slice(0, 24));
+      const rows = await db.execute(
+        `SELECT id,json_extract(data,'$.status') AS status FROM ww_web_review_data
+        WHERE repository=? AND kind='review' AND id IN (SELECT value FROM json_each(?))`,
+        [repository, JSON.stringify(keys)],
+      );
+      const statuses = new Map(
+        rows.rows.map((row) => [String(row.id), String(row.status) as Review["status"]]),
+      );
+      return new Map(
+        ids.map((id, index) => [
+          id,
+          {
+            status: statuses.get(keys[index]) ?? ("open" as const),
+            ...(statuses.has(keys[index]) ? { review: keys[index] } : {}),
+          },
+        ]),
+      );
+    },
     async draftStatus(id: string) {
       await init();
-      const r = await read<Review>(db, hash(`review:${id}`).slice(0, 24), "review");
-      return r ? { status: r.status, review: r.id } : { status: "open" as const };
+      const row = (
+        await db.execute(
+          `SELECT id,json_extract(data,'$.status') AS status FROM ww_web_review_data
+        WHERE repository=? AND id=? AND kind='review'`,
+          [repository, hash(`review:${id}`).slice(0, 24)],
+        )
+      ).rows[0];
+      return row
+        ? { status: String(row.status) as Review["status"], review: String(row.id) }
+        : { status: "open" as const };
     },
     recordEdit,
     submit,
