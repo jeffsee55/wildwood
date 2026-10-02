@@ -217,7 +217,7 @@ function SessionPanel({
             {runtime.config.siteKey
               ? "The site key is available. A personal key overrides it."
               : "Your key is required to run the agent."}{" "}
-            Personal keys are kept only in memory and cleared when this panel closes.
+            Personal keys stay in memory for this page and are cleared when you leave or reload.
           </p>
           <button type="submit">Done</button>
         </form>

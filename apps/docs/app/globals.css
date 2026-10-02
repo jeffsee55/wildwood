@@ -9,18 +9,18 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* man page — paper / ink, light default */
-  --background: #fefcfb;
-  --foreground: #11100f;
-  --muted: #6b6460;
-  --muted-foreground: #6b6460;
-  --border: #e9e1d9;
+  /* Neutral surfaces, with code as the only monospace content. */
+  --background: #fafafa;
+  --foreground: #171717;
+  --muted: #737373;
+  --muted-foreground: #737373;
+  --border: #e5e5e5;
   --card: #ffffff;
   --radius: 8px;
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
 
   --measure: 72ch;
   --content-measure: 66ch;
@@ -41,19 +41,19 @@
   --radius: var(--radius);
 }
 
-/* ── system dark — papery to phosphor ───────────────────────────────
+/* System dark theme.
  * Variables in :root are inherited automatically; no JS toggle needed.
  * `color-scheme: light dark` above tells the UA we support both so
  * scrollbars, form controls, etc adapt. Keep `.dark` class variant too
  * (for future manual override) via the same token overrides. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0c0b0a;
-    --foreground: #f2ece6;
-    --muted: #9a928c;
-    --muted-foreground: #a8a19b;
-    --border: #221e1b;
-    --card: #151311;
+    --background: #0c0c0c;
+    --foreground: #ededed;
+    --muted: #999999;
+    --muted-foreground: #a3a3a3;
+    --border: #262626;
+    --card: #151515;
   }
 }
 
@@ -61,30 +61,30 @@
    Same values as the media query so both paths match. */
 :root.dark,
 .dark {
-  --background: #0c0b0a;
-  --foreground: #f2ece6;
-  --muted: #9a928c;
-  --muted-foreground: #a8a19b;
-  --border: #221e1b;
-  --card: #151311;
+  --background: #0c0c0c;
+  --foreground: #ededed;
+  --muted: #999999;
+  --muted-foreground: #a3a3a3;
+  --border: #262626;
+  --card: #151515;
   color-scheme: dark;
 }
 
 /* presets — the only place you tune docs rhythm */
 .typeset-docs {
-  --typeset-font-body: var(--font-geist-mono);
-  --typeset-font-heading: var(--font-geist-mono);
+  --typeset-font-body: var(--font-geist-sans);
+  --typeset-font-heading: var(--font-geist-sans);
   --typeset-font-mono: var(--font-geist-mono);
-  --typeset-size: 13.5px;
+  --typeset-size: 15px;
   --typeset-leading: 1.85;
   --typeset-flow: 1.6em;
 }
 
 .typeset-man {
-  --typeset-font-body: var(--font-geist-mono);
-  --typeset-font-heading: var(--font-geist-mono);
+  --typeset-font-body: var(--font-geist-sans);
+  --typeset-font-heading: var(--font-geist-sans);
   --typeset-font-mono: var(--font-geist-mono);
-  --typeset-size: 13px;
+  --typeset-size: 15px;
   --typeset-leading: 1.9;
   --typeset-flow: 1.75em;
 }
@@ -98,8 +98,8 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-mono);
-  font-size: 13px;
+  font-family: var(--font-geist-sans);
+  font-size: 14px;
   line-height: 1.85;
   letter-spacing: -0.01em;
 }
@@ -119,10 +119,12 @@ a {
   text-underline-offset: 0.2em;
 }
 :root {
+  --font-geist-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-geist-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .manual {
-  max-width: 112ch;
+  max-width: 1120px;
   margin: auto;
   padding: 0 2rem;
 }

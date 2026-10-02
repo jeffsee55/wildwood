@@ -8,7 +8,6 @@ import { retryKey } from "./editor-model";
 import {
   Bot,
   Leaf,
-  ArrowLeft,
   GitBranch,
   Check,
   FileText,
@@ -52,7 +51,8 @@ const request = (path: string, body?: unknown, signal?: AbortSignal) =>
   requestJson(context.endpoint + path, body, signal);
 const AgentPanel = lazy(() => import("./agent/panel").then((m) => ({ default: m.AgentPanel })));
 function App() {
-  const [agentOpen, setAgentOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(() => window.matchMedia("(min-width: 900px)").matches);
+  const [decisionOpen, setDecisionOpen] = useState(false);
   const [agentReference, setAgentReference] = useState<AgentReference>();
   const [review, setReview] = useState<Review | null>(null),
     [revision, setRevision] = useState(""),
@@ -69,7 +69,7 @@ function App() {
   const commandLock = useRef(false);
   const decisionAttempt = useRef<{ payload: string; key: string } | null>(null);
   const [tab, setTab] = useState<"changes" | "activity">("changes"),
-    [split, setSplit] = useState(true),
+    [split, setSplit] = useState(false),
     [search, setSearch] = useState(""),
     [comment, setComment] = useState(""),
     [invite, setInvite] = useState(false),
@@ -137,7 +137,7 @@ function App() {
         event.preventDefault();
       }
       if (event.key === "c") {
-        document.getElementById("comment")?.focus();
+        setDecisionOpen(true);
         event.preventDefault();
       }
     };
@@ -288,15 +288,6 @@ function App() {
               : "Awaiting review";
   const pageLink = (path: string, index: number, side = "after") =>
     `${context.endpoint}/review/preview?id=${review.id}&revision=${revision}&path=${encodeURIComponent(path)}&page=${index}&side=${side}`;
-  const sourcePages = [
-    ...new Map(
-      rev.changes.flatMap((c) =>
-        (c.pages ?? []).map(
-          (page, index) => [JSON.stringify(page), { ...page, path: c.path, index }] as const,
-        ),
-      ),
-    ).values(),
-  ];
   async function decision(type: string) {
     const body = {
       type: "review-decision",
@@ -312,18 +303,30 @@ function App() {
     const r = await command({ ...body, command: decisionAttempt.current.key });
     if (r) {
       setComment("");
+      setDecisionOpen(false);
       decisionAttempt.current = null;
     }
   }
   return (
-    <div className={agentOpen ? "review-workspace agent-open" : "review-workspace"}>
+    <div
+      className={
+        agentOpen && review.capabilities.updateDraft
+          ? "review-workspace agent-open"
+          : "review-workspace"
+      }
+    >
       <div className="review-surface">
         <header className="review-header">
-          <a className="wordmark" href="/">
-            <Leaf />
-            wildwood<span>/</span>
-            <span>review</span>
-          </a>
+          <div className="review-identity">
+            <a className="wordmark" href="/" aria-label="Back to site">
+              <Leaf />
+            </a>
+            <span className="review-label">Review</span>
+            <h1 title={review.name}>{review.name}</h1>
+            <span className="review-file-count">
+              {rev.changes.length} {rev.changes.length === 1 ? "file" : "files"}
+            </span>
+          </div>
           <div className="header-right">
             {review.capabilities.updateDraft && (
               <Button
@@ -331,7 +334,7 @@ function App() {
                 aria-pressed={agentOpen}
                 onClick={() => setAgentOpen(!agentOpen)}
               >
-                <Bot /> {agentOpen ? "Hide agent" : "Work with agent"}
+                <Bot /> {agentOpen ? "Hide agent" : "Show agent"}
               </Button>
             )}
             <span className="authority">
@@ -341,55 +344,6 @@ function App() {
             <span className="avatar">{review.actor.name.slice(0, 1)}</span>
           </div>
         </header>
-        <section className="review-heading">
-          <a className="back" href="/">
-            <ArrowLeft size={13} />
-            Back to site
-          </a>
-          <div className="title-row">
-            <div>
-              <div className="eyebrow">
-                CONTENT REVIEW <span>#{review.id.slice(0, 6)}</span>
-              </div>
-              <h1>
-                {review.revision.changes.length
-                  ? `Review ${review.revision.changes.length} changed ${review.revision.changes.length === 1 ? "file" : "files"}`
-                  : "No content changes"}
-              </h1>
-            </div>
-            <span className={`status-pill ${published || req.approved ? "approved" : ""}`}>
-              <span />
-              {status}
-            </span>
-          </div>
-          <div className="review-meta">
-            <span>{review.name}</span>
-            <span>proposes changes to</span>
-            <code>
-              <GitBranch size={12} />
-              {review.authority.target}
-            </code>
-            <span>·</span>
-            <span>{when(rev.created)}</span>
-          </div>
-          {!!sourcePages.length && (
-            <div className="source-pages-summary">
-              <span>Edited on</span>
-              {sourcePages.slice(0, 6).map((p) => (
-                <a
-                  key={JSON.stringify(p)}
-                  href={pageLink(p.path, p.index)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {new URL(p.url).pathname}
-                  <ArrowUpRight size={12} />
-                </a>
-              ))}
-              {sourcePages.length > 6 && <span>+{sourcePages.length - 6} more</span>}
-            </div>
-          )}
-        </section>
         <nav className="review-tabs">
           <div>
             <button className={tab === "changes" ? "active" : ""} onClick={() => setTab("changes")}>
@@ -405,6 +359,7 @@ function App() {
             </button>
           </div>
           <div className="revision-controls">
+            <span className="review-status">{status}</span>
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="ghost" />}>
                 <Clock />
@@ -435,6 +390,10 @@ function App() {
               onClick={() => refresh().catch((e) => setError(e.message))}
             >
               <RefreshCw className={refreshing ? "spin" : ""} />
+            </Button>
+            <Button onClick={() => setDecisionOpen(true)}>
+              {published ? "Review details" : "Submit review"}
+              <ChevronDown />
             </Button>
           </div>
         </nav>
@@ -588,8 +547,8 @@ function App() {
                 {file ? (
                   <div className="diff-card">
                     {!!loaded?.pages?.length && (
-                      <div className="file-pages">
-                        <span>EDITED ON</span>
+                      <details className="file-pages">
+                        <summary>Page previews</summary>
                         {loaded.pages.map((p, index) => (
                           <div key={JSON.stringify(p)}>
                             <span title={p.url}>
@@ -612,7 +571,7 @@ function App() {
                             </a>
                           </div>
                         ))}
-                      </div>
+                      </details>
                     )}
 
                     <div className="diff-toolbar">
@@ -763,7 +722,7 @@ function App() {
                                   setComment(
                                     `Revision ${revision} · ${selection.side} lines ${selection.start}–${selection.end}:\n> ${selection.text.slice(0, 6000).replaceAll("\n", "\n> ")}\n\n`,
                                   );
-                                  document.getElementById("comment")?.focus();
+                                  setDecisionOpen(true);
                                 }
                               : undefined
                           }
@@ -781,191 +740,223 @@ function App() {
               </>
             )}
           </main>
-          <aside className="decision-sidebar">
-            <div className="decision-card">
-              <div className="sidebar-label">REVIEW STATUS</div>
-              <h2>{status}</h2>
-              <ul className="requirements">
-                <li className={req.approved && !req.changesRequested ? "met" : ""}>
-                  <Check size={14} />
-                  {req.changesRequested
-                    ? "Changes need attention"
-                    : req.approved
-                      ? "Revision approved"
-                      : "Approval required"}
-                </li>
-                <li className={!req.targetAdvanced ? "met" : ""}>
-                  <GitBranch size={14} />
-                  {published
-                    ? "Snapshot landed"
-                    : req.targetAdvanced
-                      ? "Published content has advanced"
-                      : "Target matches review base"}
-                </li>
-                <li className="met">
-                  <Shield size={14} />
-                  Wildwood controls publication
-                </li>
-              </ul>
-              {!published && (
-                <>
-                  <label className="comment-label" htmlFor="comment">
-                    {file && tab === "changes" ? "Feedback on this file" : "Review feedback"}
-                  </label>
-                  <textarea
-                    id="comment"
-                    placeholder="What should the author know?"
-                    value={comment}
-                    onChange={(e) => setComment(e.target.value)}
-                    disabled={!review.capabilities.comment || busy}
-                  />
-                  <Button
-                    className="wide"
-                    variant="outline"
-                    disabled={busy || !comment.trim() || !review.capabilities.comment}
-                    onClick={() => decision("comment")}
-                  >
-                    <Send />
-                    Add comment
-                  </Button>
-                  {review.capabilities.approve && current && (
-                    <div className="decision-buttons">
+        </div>
+        <Dialog.Root open={decisionOpen} onOpenChange={setDecisionOpen}>
+          <Dialog.Portal>
+            <Dialog.Backdrop className="review-backdrop" />
+            <Dialog.Popup
+              className="review-dialog decision-dialog"
+              initialFocus={published ? undefined : () => document.getElementById("comment")}
+            >
+              <div className="panel-heading">
+                <Dialog.Title>{published ? "Review details" : "Submit review"}</Dialog.Title>
+                <Dialog.Close
+                  render={<Button variant="ghost" size="icon" aria-label="Close review options" />}
+                >
+                  <X />
+                </Dialog.Close>
+              </div>
+              <Dialog.Description>
+                Decisions apply to the selected revision. Only an approved current revision can be
+                published.
+              </Dialog.Description>
+              <div className="decision-content">
+                <div className="decision-card">
+                  <div className="sidebar-label">REVIEW STATUS</div>
+                  <h2>{status}</h2>
+                  <ul className="requirements">
+                    <li className={req.approved && !req.changesRequested ? "met" : ""}>
+                      <Check size={14} />
+                      {req.changesRequested
+                        ? "Changes need attention"
+                        : req.approved
+                          ? "Revision approved"
+                          : "Approval required"}
+                    </li>
+                    <li className={!req.targetAdvanced ? "met" : ""}>
+                      <GitBranch size={14} />
+                      {published
+                        ? "Snapshot landed"
+                        : req.targetAdvanced
+                          ? "Published content has advanced"
+                          : "Target matches review base"}
+                    </li>
+                    <li className="met">
+                      <Shield size={14} />
+                      Wildwood controls publication
+                    </li>
+                  </ul>
+                  {!published && (
+                    <>
+                      <label className="comment-label" htmlFor="comment">
+                        {file && tab === "changes" ? "Feedback on this file" : "Review feedback"}
+                      </label>
+                      <textarea
+                        id="comment"
+                        placeholder="What should the author know?"
+                        value={comment}
+                        onChange={(e) => setComment(e.target.value)}
+                        disabled={!review.capabilities.comment || busy}
+                      />
                       <Button
-                        disabled={busy}
+                        className="wide"
                         variant="outline"
-                        onClick={() => decision("request_changes")}
+                        disabled={busy || !comment.trim() || !review.capabilities.comment}
+                        onClick={() => decision("comment")}
                       >
-                        Request changes
+                        <Send />
+                        Add comment
                       </Button>
-                      <Button
-                        disabled={busy || req.targetAdvanced}
-                        onClick={() => decision("approve")}
-                      >
-                        <Check />
-                        Approve
-                      </Button>
-                    </div>
+                      {review.capabilities.approve && current && (
+                        <div className="decision-buttons">
+                          <Button
+                            disabled={busy}
+                            variant="outline"
+                            onClick={() => decision("request_changes")}
+                          >
+                            Request changes
+                          </Button>
+                          <Button
+                            disabled={busy || req.targetAdvanced}
+                            onClick={() => decision("approve")}
+                          >
+                            <Check />
+                            Approve
+                          </Button>
+                        </div>
+                      )}
+                      {review.capabilities.publish && (
+                        <Button
+                          className="wide publish"
+                          disabled={busy || (review.status !== "landing" && blocked)}
+                          onClick={() => {
+                            setDecisionOpen(false);
+                            setConfirmPublish(true);
+                          }}
+                        >
+                          {review.status === "landing"
+                            ? "Reconcile publication"
+                            : "Publish approved revision"}
+                          <ArrowUpRight />
+                        </Button>
+                      )}
+                    </>
                   )}
-                  {review.capabilities.publish && (
+                  {review.capabilities.publish && !published && (
                     <Button
-                      className="wide publish"
-                      disabled={busy || (review.status !== "landing" && blocked)}
-                      onClick={() => setConfirmPublish(true)}
+                      className="wide handoff-button"
+                      variant="outline"
+                      disabled={blocked || busy || review.status !== "open"}
+                      onClick={() => {
+                        setDecisionOpen(false);
+                        setCredential(null);
+                        setHandoff(true);
+                      }}
                     >
-                      {review.status === "landing"
-                        ? "Reconcile publication"
-                        : "Publish approved revision"}
-                      <ArrowUpRight />
+                      Delegate publication
                     </Button>
                   )}
-                </>
-              )}
-              {review.capabilities.publish && !published && (
-                <Button
-                  className="wide handoff-button"
-                  variant="outline"
-                  disabled={blocked || busy || review.status !== "open"}
-                  onClick={() => {
-                    setCredential(null);
-                    setHandoff(true);
-                  }}
-                >
-                  Delegate publication
-                </Button>
-              )}
-              {published && (
-                <p className="muted">
-                  The reviewed snapshot is now published. Deployment status is managed by the host
-                  application.
+                  {published && (
+                    <p className="muted">
+                      The reviewed snapshot is now published. Deployment status is managed by the
+                      host application.
+                    </p>
+                  )}
+                </div>
+                <div className="review-details">
+                  <h3>Review details</h3>
+                  <div className="preview-links">
+                    <a
+                      href={`${context.endpoint}/review/preview?id=${review.id}&revision=${revision}&side=before`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Before preview <ArrowUpRight size={12} />
+                    </a>
+                    <a
+                      href={`${context.endpoint}/review/preview?id=${review.id}&revision=${revision}&side=after`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      After preview <ArrowUpRight size={12} />
+                    </a>
+                  </div>
+                  <dl>
+                    <dt>Provider</dt>
+                    <dd>{review.authority.label}</dd>
+                    <dt>Schema</dt>
+                    <dd>{rev.version}</dd>
+                    <dt>Preview context</dt>
+                    <dd>
+                      {Object.entries(rev.variant)
+                        .map(([k, v]) => `${k}: ${v}`)
+                        .join(", ") || "Default"}
+                    </dd>
+                    <dt>Base</dt>
+                    <dd>
+                      <code>{rev.base.slice(0, 10)}</code>
+                    </dd>
+                  </dl>
+                  {review.capabilities.invite && (
+                    <Button
+                      variant="outline"
+                      className="wide"
+                      onClick={() => {
+                        setDecisionOpen(false);
+                        setInvite(true);
+                        setLink("");
+                        setCopied(false);
+                      }}
+                    >
+                      <UserPlus />
+                      Invite reviewer
+                    </Button>
+                  )}
+                  {review.handoffs?.map((g) => (
+                    <div key={g.grant} className="review-grant">
+                      <span>
+                        Publication grant<small>Expires {when(g.expires)}</small>
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label="Revoke publication grant"
+                        disabled={busy}
+                        onClick={() => command({ type: "review-handoff-revoke", grant: g.grant })}
+                      >
+                        <X />
+                      </Button>
+                    </div>
+                  ))}
+                  {review.grants?.map((g) => (
+                    <div className="review-grant" key={g.id}>
+                      <span>
+                        {g.name || "Unclaimed invitation"}
+                        <small>
+                          {g.scope} · expires {when(g.expires)}
+                        </small>
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Revoke ${g.name || "invitation"}`}
+                        disabled={busy}
+                        onClick={() => command({ type: "review-revoke", grant: g.id })}
+                      >
+                        <X />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {error && (
+                <p className="error" role="alert">
+                  {error}
                 </p>
               )}
-            </div>
-            <div className="review-details">
-              <h3>Review details</h3>
-              <div className="preview-links">
-                <a
-                  href={`${context.endpoint}/review/preview?id=${review.id}&revision=${revision}&side=before`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Before preview <ArrowUpRight size={12} />
-                </a>
-                <a
-                  href={`${context.endpoint}/review/preview?id=${review.id}&revision=${revision}&side=after`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  After preview <ArrowUpRight size={12} />
-                </a>
-              </div>
-              <dl>
-                <dt>Provider</dt>
-                <dd>{review.authority.label}</dd>
-                <dt>Schema</dt>
-                <dd>{rev.version}</dd>
-                <dt>Preview context</dt>
-                <dd>
-                  {Object.entries(rev.variant)
-                    .map(([k, v]) => `${k}: ${v}`)
-                    .join(", ") || "Default"}
-                </dd>
-                <dt>Base</dt>
-                <dd>
-                  <code>{rev.base.slice(0, 10)}</code>
-                </dd>
-              </dl>
-              {review.capabilities.invite && (
-                <Button
-                  variant="outline"
-                  className="wide"
-                  onClick={() => {
-                    setInvite(true);
-                    setLink("");
-                    setCopied(false);
-                  }}
-                >
-                  <UserPlus />
-                  Invite reviewer
-                </Button>
-              )}
-              {review.handoffs?.map((g) => (
-                <div key={g.grant} className="review-grant">
-                  <span>
-                    Publication grant<small>Expires {when(g.expires)}</small>
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Revoke publication grant"
-                    disabled={busy}
-                    onClick={() => command({ type: "review-handoff-revoke", grant: g.grant })}
-                  >
-                    <X />
-                  </Button>
-                </div>
-              ))}
-              {review.grants?.map((g) => (
-                <div className="review-grant" key={g.id}>
-                  <span>
-                    {g.name || "Unclaimed invitation"}
-                    <small>
-                      {g.scope} · expires {when(g.expires)}
-                    </small>
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Revoke ${g.name || "invitation"}`}
-                    disabled={busy}
-                    onClick={() => command({ type: "review-revoke", grant: g.id })}
-                  >
-                    <X />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </aside>
-        </div>
+            </Dialog.Popup>
+          </Dialog.Portal>
+        </Dialog.Root>
         <Dialog.Root
           open={handoff}
           onOpenChange={(open) => {
@@ -1135,8 +1126,8 @@ function App() {
           </Dialog.Portal>
         </Dialog.Root>
       </div>
-      {agentOpen && (
-        <aside className="review-agent-dock">
+      {review.capabilities.updateDraft && (
+        <aside className="review-agent-dock" hidden={!agentOpen} aria-label="Content agent">
           <Suspense fallback={<div className="agent-empty">Opening agent…</div>}>
             <AgentPanel
               endpoint={context.endpoint}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Dialog } from "@base-ui/react/dialog";
 import { Popover } from "@base-ui/react/popover";
@@ -19,6 +19,7 @@ import {
   Shield,
   Image,
   Save,
+  Ellipsis,
 } from "lucide-react";
 import { Editor } from "./editor-loader";
 import { retryKey } from "./editor-model";
@@ -26,6 +27,8 @@ import { RelativeTime } from "./relative-time";
 import { Wordmark } from "./wordmark";
 import { Button } from "./ui/button";
 import { installContentIndicator } from "./content-indicator";
+
+const AgentPanel = lazy(() => import("./agent/panel").then((m) => ({ default: m.AgentPanel })));
 
 type State = {
   endpoint: string;
@@ -67,7 +70,8 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
     [error, setError] = useState("");
   const [selecting, setSelecting] = useState(false),
     [menuOpen, setMenuOpen] = useState(false);
-  const [section, setSection] = useState<"home" | "share" | "drafts">("home");
+  const [section, setSection] = useState<"agent" | "home" | "share" | "drafts">("agent");
+  const [agentStarted, setAgentStarted] = useState(false);
   const [panel, setPanel] = useState<"editor" | "agent" | "review" | null>(null);
   const [doc, setDoc] = useState<Result | null>(null),
     [source, setSource] = useState(""),
@@ -231,7 +235,10 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
           open={menuOpen}
           onOpenChange={(open) => {
             setMenuOpen(open);
-            if (open) setSection("home");
+            if (open) {
+              setSection("agent");
+              setAgentStarted(true);
+            }
           }}
         >
           <Popover.Trigger
@@ -242,15 +249,15 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
             <Wordmark />
             {s.mode === "draft" && <span className="launcher-dot" />}
           </Popover.Trigger>
-          <Popover.Portal container={portal}>
+          <Popover.Portal container={portal} keepMounted>
             <Popover.Positioner side="top" align="end" sideOffset={12} className="floating">
-              <Popover.Popup className="surface workspace" aria-busy={pending}>
+              <Popover.Popup className="agent-workspace" aria-busy={pending}>
                 <div className="panel-heading">
-                  {section !== "home" && (
+                  {section !== "home" && section !== "agent" && (
                     <Button
                       variant="ghost"
                       size="icon"
-                      aria-label="Back"
+                      aria-label="Back to options"
                       onClick={() => setSection("home")}
                     >
                       <ChevronLeft />
@@ -261,263 +268,302 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
                       ? "Share preview"
                       : section === "drafts"
                         ? "Your drafts"
-                        : "Wildwood"}
+                        : section === "home"
+                          ? "Options"
+                          : "Wildwood"}
                   </Popover.Title>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={section === "agent" ? "Open options" : "Back to agent"}
+                    aria-expanded={section !== "agent"}
+                    onClick={() => setSection(section === "agent" ? "home" : "agent")}
+                  >
+                    {section === "agent" ? <Ellipsis /> : <Bot />}
+                  </Button>
                   <Popover.Close
                     render={<Button variant="ghost" size="icon" aria-label="Close Wildwood" />}
                   >
                     <X />
                   </Popover.Close>
                 </div>
-                {section === "home" && (
-                  <>
-                    <div className="workspace-context">
-                      <span className={`dot ${s.mode === "draft" ? "draft" : ""}`} />
-                      <strong>{mode}</strong>
-                      <span>{s.actor?.name || "Guest"}</span>
-                    </div>
-                    <div className="workspace-actions">
-                      {s.canEdit && (
-                        <>
+                <div className="toolbar-agent" hidden={section !== "agent"}>
+                  {agentStarted &&
+                    (editor ? (
+                      <Suspense fallback={<div className="agent-empty">Opening agent…</div>}>
+                        <AgentPanel endpoint={s.endpoint} draft={s.draft} />
+                      </Suspense>
+                    ) : (
+                      <div className="agent-empty">
+                        <Bot size={28} />
+                        <h2>Your content, with a collaborator.</h2>
+                        <p>
+                          {s.actor
+                            ? "Ask your site owner for editor access to work with the agent."
+                            : "Sign in to work with your content agent."}
+                        </p>
+                        {!s.actor && (
+                          <a
+                            className="text-link"
+                            href={`${s.endpoint}/sign-in?next=${encodeURIComponent(location.pathname + location.search)}`}
+                          >
+                            Sign in <ArrowUpRight size={14} />
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                </div>
+                <div className="surface workspace-options" hidden={section === "agent"}>
+                  {section === "home" && (
+                    <>
+                      <div className="workspace-context">
+                        <span className={`dot ${s.mode === "draft" ? "draft" : ""}`} />
+                        <strong>{mode}</strong>
+                        <span>{s.actor?.name || "Guest"}</span>
+                      </div>
+                      <div className="workspace-actions">
+                        {s.canEdit && (
+                          <>
+                            <Button
+                              className="workspace-action"
+                              variant="ghost"
+                              disabled={pending}
+                              onClick={() => {
+                                setSelecting(!selecting);
+                                setMenuOpen(false);
+                                setError("");
+                                setMessage("");
+                              }}
+                            >
+                              <MousePointer2 />
+                              {selecting ? "Turn off edit mode" : "Edit content"}
+                            </Button>
+                            <Button
+                              className="workspace-action"
+                              variant="ghost"
+                              onClick={() => {
+                                setShare("");
+                                setError("");
+                                setSection("share");
+                              }}
+                            >
+                              <Share2 />
+                              Share preview
+                            </Button>
+                            <Button
+                              className="workspace-action"
+                              variant="ghost"
+                              disabled={pending}
+                              onClick={async () => {
+                                const r = await call({ type: "review" });
+                                if (r.ok) {
+                                  setReview(r.url!);
+                                  setPanel("review");
+                                  setMenuOpen(false);
+                                }
+                              }}
+                            >
+                              <FileCheck />
+                              Review changes
+                            </Button>
+                          </>
+                        )}
+                        {editor && (
+                          <a
+                            className="workspace-action"
+                            href={`${s.endpoint}/agent${s.draft ? `?draft=${encodeURIComponent(s.draft)}` : ""}`}
+                          >
+                            <ArrowUpRight /> Open full workspace
+                          </a>
+                        )}
+                        <Button
+                          className="workspace-action"
+                          variant="ghost"
+                          onClick={() => {
+                            setPanel("agent");
+                            setMenuOpen(false);
+                          }}
+                        >
+                          <Bot />
+                          Connect agent
+                        </Button>
+                        {editor && (
+                          <>
+                            <div className="workspace-separator" />
+                            {s.mode === "published" && s.drafts[0] && (
+                              <Button
+                                className="workspace-action draft-action recent-draft"
+                                variant="ghost"
+                                disabled={pending}
+                                onClick={() => call({ type: "resume", id: s.drafts[0].id })}
+                              >
+                                <GitBranch />
+                                <span className="draft-label">
+                                  <span className="draft-eyebrow">Resume draft</span>
+                                  <span className="draft-name">{s.drafts[0].data.name}</span>
+                                </span>
+                                <RelativeTime value={s.drafts[0].updatedAt} />
+                              </Button>
+                            )}
+                            <Button
+                              className="workspace-action"
+                              variant="ghost"
+                              disabled={pending}
+                              onClick={() => call({ type: "draft" })}
+                            >
+                              <Plus />
+                              Create draft
+                            </Button>
+                            <Button
+                              className="workspace-action"
+                              variant="ghost"
+                              onClick={() => setSection("drafts")}
+                            >
+                              <GitBranch />
+                              Your drafts
+                            </Button>
+                          </>
+                        )}
+                        {s.mode !== "published" && (
                           <Button
                             className="workspace-action"
                             variant="ghost"
                             disabled={pending}
-                            onClick={() => {
-                              setSelecting(!selecting);
-                              setMenuOpen(false);
-                              setError("");
-                              setMessage("");
-                            }}
+                            onClick={() => call({ type: "exit" })}
                           >
-                            <MousePointer2 />
-                            {selecting ? "Turn off edit mode" : "Edit content"}
+                            <LogOut />
+                            Back to published
                           </Button>
+                        )}
+                        <div className="workspace-separator" />
+                        {s.actor && (
+                          <a className="workspace-link" href={`${s.endpoint}/media-library`}>
+                            <Image />
+                            Media library
+                          </a>
+                        )}
+                        <a
+                          className="workspace-link"
+                          href={`${s.endpoint}/${s.actor ? "access" : "sign-in"}`}
+                        >
+                          <Shield />
+                          {s.actor ? "Manage access" : "Sign in"}
+                        </a>
+                      </div>
+                      <p className="snapshot">
+                        Snapshot <code>{s.snapshot.slice(0, 8)}</code>
+                      </p>
+                    </>
+                  )}
+                  {section === "drafts" && (
+                    <div className="workspace-actions draft-list">
+                      {s.drafts.length ? (
+                        s.drafts.map((d) => (
                           <Button
-                            className="workspace-action"
-                            variant="ghost"
-                            onClick={() => {
-                              setShare("");
-                              setError("");
-                              setSection("share");
-                            }}
-                          >
-                            <Share2 />
-                            Share preview
-                          </Button>
-                          <Button
-                            className="workspace-action"
+                            key={d.id}
+                            className="workspace-action draft-action"
                             variant="ghost"
                             disabled={pending}
                             onClick={async () => {
-                              const r = await call({ type: "review" });
-                              if (r.ok) {
-                                setReview(r.url!);
-                                setPanel("review");
-                                setMenuOpen(false);
-                              }
+                              const r = await call({ type: "resume", id: d.id });
+                              if (r.ok) setSection("home");
                             }}
                           >
-                            <FileCheck />
-                            Review changes
-                          </Button>
-                        </>
-                      )}
-                      {editor && (
-                        <a
-                          className="workspace-action"
-                          href={`${s.endpoint}/agent${s.draft ? `?draft=${encodeURIComponent(s.draft)}` : ""}`}
-                        >
-                          <Bot /> Work with agent <ArrowUpRight size={12} />
-                        </a>
-                      )}
-                      <Button
-                        className="workspace-action"
-                        variant="ghost"
-                        onClick={() => {
-                          setPanel("agent");
-                          setMenuOpen(false);
-                        }}
-                      >
-                        <Bot />
-                        Connect agent
-                      </Button>
-                      {editor && (
-                        <>
-                          <div className="workspace-separator" />
-                          {s.mode === "published" && s.drafts[0] && (
-                            <Button
-                              className="workspace-action draft-action recent-draft"
-                              variant="ghost"
-                              disabled={pending}
-                              onClick={() => call({ type: "resume", id: s.drafts[0].id })}
-                            >
-                              <GitBranch />
-                              <span className="draft-label">
-                                <span className="draft-eyebrow">Resume draft</span>
-                                <span className="draft-name">{s.drafts[0].data.name}</span>
-                              </span>
-                              <RelativeTime value={s.drafts[0].updatedAt} />
-                            </Button>
-                          )}
-                          <Button
-                            className="workspace-action"
-                            variant="ghost"
-                            disabled={pending}
-                            onClick={() => call({ type: "draft" })}
-                          >
-                            <Plus />
-                            Create draft
-                          </Button>
-                          <Button
-                            className="workspace-action"
-                            variant="ghost"
-                            onClick={() => setSection("drafts")}
-                          >
                             <GitBranch />
-                            Your drafts
-                          </Button>
-                        </>
-                      )}
-                      {s.mode !== "published" && (
-                        <Button
-                          className="workspace-action"
-                          variant="ghost"
-                          disabled={pending}
-                          onClick={() => call({ type: "exit" })}
-                        >
-                          <LogOut />
-                          Back to published
-                        </Button>
-                      )}
-                      <div className="workspace-separator" />
-                      {s.actor && (
-                        <a className="workspace-link" href={`${s.endpoint}/media-library`}>
-                          <Image />
-                          Media library
-                        </a>
-                      )}
-                      <a
-                        className="workspace-link"
-                        href={`${s.endpoint}/${s.actor ? "access" : "sign-in"}`}
-                      >
-                        <Shield />
-                        {s.actor ? "Manage access" : "Sign in"}
-                      </a>
-                    </div>
-                    <p className="snapshot">
-                      Snapshot <code>{s.snapshot.slice(0, 8)}</code>
-                    </p>
-                  </>
-                )}
-                {section === "drafts" && (
-                  <div className="workspace-actions draft-list">
-                    {s.drafts.length ? (
-                      s.drafts.map((d) => (
-                        <Button
-                          key={d.id}
-                          className="workspace-action draft-action"
-                          variant="ghost"
-                          disabled={pending}
-                          onClick={async () => {
-                            const r = await call({ type: "resume", id: d.id });
-                            if (r.ok) setSection("home");
-                          }}
-                        >
-                          <GitBranch />
-                          <span className="draft-name">{d.data.name}</span>
-                          <RelativeTime value={d.updatedAt} />
-                        </Button>
-                      ))
-                    ) : (
-                      <p className="hint">No active drafts.</p>
-                    )}
-                    {!!s.completed?.length && (
-                      <>
-                        <p className="hint">Completed · Read-only</p>
-                        {s.completed.map((d) => (
-                          <a
-                            key={d.id}
-                            className="workspace-link draft-action"
-                            href={`${s.endpoint}/review?id=${encodeURIComponent(d.review)}`}
-                          >
-                            <FileCheck />
                             <span className="draft-name">{d.data.name}</span>
                             <RelativeTime value={d.updatedAt} />
+                          </Button>
+                        ))
+                      ) : (
+                        <p className="hint">No active drafts.</p>
+                      )}
+                      {!!s.completed?.length && (
+                        <>
+                          <p className="hint">Completed · Read-only</p>
+                          {s.completed.map((d) => (
+                            <a
+                              key={d.id}
+                              className="workspace-link draft-action"
+                              href={`${s.endpoint}/review?id=${encodeURIComponent(d.review)}`}
+                            >
+                              <FileCheck />
+                              <span className="draft-name">{d.data.name}</span>
+                              <RelativeTime value={d.updatedAt} />
+                            </a>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {section === "share" && (
+                    <>
+                      <Popover.Description className="description">
+                        A private, read-only link to your draft.
+                      </Popover.Description>
+                      <label>
+                        Preview follows
+                        <select
+                          value={String(moving)}
+                          onChange={(e) => {
+                            setMoving(e.target.value === "true");
+                            setShare("");
+                          }}
+                        >
+                          <option value="false">This exact snapshot</option>
+                          <option value="true">Latest draft changes</option>
+                        </select>
+                      </label>
+                      <label>
+                        Expires in
+                        <select
+                          value={minutes}
+                          onChange={(e) => {
+                            setMinutes(e.target.value);
+                            setShare("");
+                          }}
+                        >
+                          <option value="60">1 hour</option>
+                          <option value="1440">1 day</option>
+                          <option value="10080">7 days</option>
+                        </select>
+                      </label>
+                      {share ? (
+                        <>
+                          <label>
+                            Preview link
+                            <div className="copy-row">
+                              <input readOnly value={share} />
+                              {copyButton(share, "preview link")}
+                            </div>
+                          </label>
+                          <a className="text-link" href={share} target="_blank" rel="noreferrer">
+                            Open preview <ArrowUpRight size={14} />
                           </a>
-                        ))}
-                      </>
-                    )}
-                  </div>
-                )}
-                {section === "share" && (
-                  <>
-                    <Popover.Description className="description">
-                      A private, read-only link to your draft.
-                    </Popover.Description>
-                    <label>
-                      Preview follows
-                      <select
-                        value={String(moving)}
-                        onChange={(e) => {
-                          setMoving(e.target.value === "true");
-                          setShare("");
-                        }}
-                      >
-                        <option value="false">This exact snapshot</option>
-                        <option value="true">Latest draft changes</option>
-                      </select>
-                    </label>
-                    <label>
-                      Expires in
-                      <select
-                        value={minutes}
-                        onChange={(e) => {
-                          setMinutes(e.target.value);
-                          setShare("");
-                        }}
-                      >
-                        <option value="60">1 hour</option>
-                        <option value="1440">1 day</option>
-                        <option value="10080">7 days</option>
-                      </select>
-                    </label>
-                    {share ? (
-                      <>
-                        <label>
-                          Preview link
-                          <div className="copy-row">
-                            <input readOnly value={share} />
-                            {copyButton(share, "preview link")}
-                          </div>
-                        </label>
-                        <a className="text-link" href={share} target="_blank" rel="noreferrer">
-                          Open preview <ArrowUpRight size={14} />
-                        </a>
-                      </>
-                    ) : (
-                      <Button
-                        className="full"
-                        disabled={pending}
-                        onClick={async () => {
-                          const r = await call({
-                            type: "share",
-                            moving,
-                            minutes: Number(minutes),
-                          });
-                          if (r.ok) setShare(r.url!);
-                        }}
-                      >
-                        {pending ? <Loader2 className="spin" /> : <Share2 />}Create link
-                      </Button>
-                    )}
-                  </>
-                )}
-                {(error || message || pending) && (
-                  <p className={error ? "error" : "hint"} role={error ? "alert" : "status"}>
-                    {pending ? "Working…" : error || message}
-                  </p>
-                )}
+                        </>
+                      ) : (
+                        <Button
+                          className="full"
+                          disabled={pending}
+                          onClick={async () => {
+                            const r = await call({
+                              type: "share",
+                              moving,
+                              minutes: Number(minutes),
+                            });
+                            if (r.ok) setShare(r.url!);
+                          }}
+                        >
+                          {pending ? <Loader2 className="spin" /> : <Share2 />}Create link
+                        </Button>
+                      )}
+                    </>
+                  )}
+                  {(error || message || pending) && (
+                    <p className={error ? "error" : "hint"} role={error ? "alert" : "status"}>
+                      {pending ? "Working…" : error || message}
+                    </p>
+                  )}
+                </div>
               </Popover.Popup>
             </Popover.Positioner>
           </Popover.Portal>
