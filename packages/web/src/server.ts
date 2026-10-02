@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { ContentEngine, Collections, SqlDatabase, Ref } from "wildwood-core";
 import { createReconciliation, resolutionsSchema } from "./reconciliation";
+import { mediaResponse } from "./media";
 import { draftName } from "./draft-name";
 import { pageLocation } from "./page-context";
 import { registerContentTools, toolResult, toolError } from "./content-tools";
@@ -907,6 +908,20 @@ export function createWeb<C extends Collections>(options: {
         );
       }
       const current = await view(request.headers);
+      if (path === "/media" && ["GET", "HEAD"].includes(request.method)) {
+        const engine = options.engines[current.version];
+        const filename = url.searchParams.get("path") ?? "";
+        engine.matchCollection(filename);
+        if (
+          url.searchParams.has("snapshot") &&
+          url.searchParams.get("snapshot") !== current.snapshot
+        )
+          return json({ error: "Media view changed; reload the page" }, 409);
+        const file = (await engine.files(current.snapshot)).find((f) => f.path === filename);
+        if (!file || file.mode === "120000" || engine.matchCollection(filename))
+          return json({ error: "Asset not found" }, 404);
+        return mediaResponse(await engine.bytes(file.blob), filename, request);
+      }
       if (!current.actor)
         return new Response(null, {
           status: 303,
@@ -915,6 +930,63 @@ export function createWeb<C extends Collections>(options: {
             "Cache-Control": "no-store",
           },
         });
+      if (path === "/asset-upload" && request.method === "POST") {
+        sameOrigin(request);
+        const person = requireEditor(current.actor);
+        if (current.mode !== "draft" || !current.ref)
+          throw new Error("Select your editable draft before uploading");
+        const engine = options.engines[current.version];
+        const input = z
+          .object({
+            path: z.string().min(1).max(1024),
+            revision: z.coerce.number().int().nonnegative(),
+            command: z.string().min(1).max(200),
+          })
+          .parse(Object.fromEntries(url.searchParams));
+        if (engine.matchCollection(input.path))
+          throw new Error("Use content editing for schema-backed paths");
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        const reader = request.body?.getReader();
+        if (reader)
+          for (;;) {
+            const next = await reader.read();
+            if (next.done) break;
+            size += next.value.length;
+            if (size > 4 * 1024 * 1024) {
+              await reader.cancel();
+              return json({ error: "Upload exceeds 4 MiB" }, 413);
+            }
+            chunks.push(next.value);
+          }
+        const saved = await engine.apply({
+          ref: current.ref.name,
+          expectedRevision: input.revision,
+          idempotencyKey: `upload:${person.id}:${current.ref.name}:${input.command}`,
+          changes: [{ path: input.path, content: Buffer.concat(chunks) }],
+          audit: { actor: person.id, source: "media-upload" },
+        });
+        return json({ ok: true, ...saved });
+      }
+      if (path === "/media-library" && request.method === "GET") {
+        const engine = options.engines[current.version];
+        const offset = Math.max(0, Math.min(100000, Number(url.searchParams.get("offset")) || 0));
+        const files = (await engine.files(current.snapshot)).filter(
+          (f) => f.mode !== "120000" && !engine.matchCollection(f.path),
+        );
+        const cards = files
+          .slice(offset, offset + 48)
+          .map((file) => {
+            const href = `${base}/media?${new URLSearchParams({ path: file.path, snapshot: current.snapshot })}`;
+            const image = /\.(png|jpe?g|gif|webp|avif)$/i.test(file.path);
+            return `<figure>${image ? `<img src="${htmlEscape(href)}" alt="${htmlEscape(file.path)}" loading="lazy">` : '<div class="asset-placeholder">File</div>'}<figcaption><a href="${htmlEscape(href)}">${htmlEscape(file.path)}</a><small>${file.size === undefined ? "" : `${file.size.toLocaleString()} bytes`}</small></figcaption></figure>`;
+          })
+          .join("");
+        return page(
+          "Media library",
+          `<p>${current.mode === "draft" ? "Your draft" : "Current view"} · ${files.length} files</p>${current.mode === "draft" && current.ref ? `<form id="asset-upload" data-revision="${current.ref.revision}"><label>File<input type="file" id="asset-file" required></label><label>Repository path<input id="asset-path" placeholder="media/photo.png" required></label><button>Upload to draft</button><p>Up to 4 MiB. Uploads become public only after review and publication.</p></form>` : "<p>Select a draft from the site toolbar to upload files.</p>"}<div class="asset-grid">${cards || "<p>No media in this view yet.</p>"}</div>${offset + 48 < files.length ? `<a href="?offset=${offset + 48}">More files</a>` : ""}`,
+        );
+      }
       if (path === "/command" && request.method === "POST") {
         sameOrigin(request);
         const raw = await request.text();
@@ -1018,6 +1090,20 @@ export function createWeb<C extends Collections>(options: {
             url.searchParams.get("revision") ?? undefined,
           ),
         );
+      }
+      if (path === "/review/media" && ["GET", "HEAD"].includes(request.method)) {
+        const filename = url.searchParams.get("path") ?? "";
+        const side = url.searchParams.get("side");
+        if (side !== "before" && side !== "after")
+          return json({ error: "Choose before or after" }, 400);
+        const bytes = await reviews.media(
+          current.actor,
+          url.searchParams.get("id") ?? "",
+          url.searchParams.get("revision") ?? "",
+          filename,
+          side,
+        );
+        return mediaResponse(bytes, filename, request);
       }
       if (path === "/review/file" && request.method === "GET") {
         return json(

@@ -7,6 +7,7 @@ import {
   type SqlExecutor,
 } from "wildwood-core";
 import type { Actor } from "./server";
+import { mediaType } from "./media";
 export type ReviewAuthority = { kind: "native" } | { kind: "external"; label: string };
 export type PageContext = { url: string; version: string; variant: Record<string, string> };
 export type Change = {
@@ -310,6 +311,8 @@ export function createReviews<C extends Collections>({
     const decode = async (blob: string | null) => {
       if (!blob) return { source: "", binary: false, size: 0 };
       const bytes = await cms.bytes(blob);
+      const media = mediaType(bytes);
+      if (media.kind !== "file") return { source: null, binary: true, size: bytes.length, media };
       if (bytes.byteLength > 512 * 1024)
         return { source: null, binary: false, size: bytes.byteLength, tooLarge: true };
       try {
@@ -621,6 +624,17 @@ export function createReviews<C extends Collections>({
     submit,
     get,
     file,
+    async media(actor: Actor, id: string, rid: string, path: string, side: "before" | "after") {
+      const r = await get(actor, id, rid);
+      const change = r.revision.changes.find((c) => c.path === path);
+      if (
+        !change ||
+        !change[side] ||
+        change[side === "before" ? "beforeMode" : "afterMode"] === "120000"
+      )
+        throw new Error("Media not in this revision");
+      return cms.bytes(change[side]!);
+    },
     decide,
     publish,
     invite,

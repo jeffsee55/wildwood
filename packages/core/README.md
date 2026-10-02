@@ -109,7 +109,7 @@ Blob storage is authoritative, not a cache. Back it up alongside SQL. Custom ada
 
 ## Git import, commit, and server
 
-The optional Node adapter requires a native `git` executable. Ordinary saves create no Git blobs or trees. Import preserves file bytes/modes and packs the original reachable history into the blob store. Export hydrates a bare repository and creates a commit only when needed.
+The optional Node adapter requires a native `git` executable. Ordinary saves create no Git blobs or trees. Import preserves file bytes/modes and packs the original reachable history into dedicated SQL pack storage. Export hydrates a bare repository and creates a commit only when needed.
 
 ```ts
 import { importGit, exportGit, createGitHandler } from 'wildwood-core/git';
@@ -137,7 +137,7 @@ const handleGit = createGitHandler({
 
 Imported snapshots re-export with the original commit ID. Edited snapshots export as children of the nearest recorded Git ancestor. One snapshot gets one recorded Git commit; repeated exports reuse it. Exported ref updates use Git compare-and-swap. Export is a trusted administrative operation, not yet a durable workflow command.
 
-Current Git adapter limits: UTF-8 paths, SHA-1 repositories, regular/executable files and symlinks (collection documents cannot be symlinks), no submodule ingestion, buffered packs capped at 256 MiB, full ancestry packs rather than incremental pack storage. It is an interoperability reference implementation, not the eventual large-repository server. The clone/fetch HTTP handler requires persistent local storage and is not a Vercel serverless handler; merge computation uses disposable temporary storage. A blob-native streaming pack transport can replace it without changing content snapshots.
+Current Git adapter limits: UTF-8 paths, SHA-1 repositories, regular/executable files and symlinks (collection documents cannot be symlinks), no submodule ingestion, buffered packs capped at 256 MiB, incremental packs in dedicated SQL storage. It is an interoperability reference implementation, not the eventual large-repository server. The clone/fetch HTTP handler requires persistent local storage and is not a Vercel serverless handler; merge computation uses disposable temporary storage. A blob-native streaming pack transport can replace it without changing content snapshots.
 
 Receive-pack will need quarantined objects, per-ref authorization, expected-head checks, validation/preparation, atomic multi-ref publication, and recovery after interrupted responses. It intentionally does not mutate Git refs independently of the content engine.
 
@@ -159,8 +159,16 @@ Built-in `markdown` and `json` codecs retain an input JSON Schema and a safe top
 
 ## Native Git reconciliation
 
-`planGitMerge(engine, { base, ours, theirs })` checkpoints the three snapshots into Git and runs `git merge-tree --write-tree`. The plan, merged tree, conflict stages, messages, and full ancestry packs are durable in the configured database/blob store. No working directory is durable. This uses Git’s merge engine, not a custom file or line merger.
+`planGitMerge(engine, { base, ours, theirs })` checkpoints the three snapshots into Git and runs `git merge-tree --write-tree`. The plan, merged tree, conflict stages, messages, and incremental pack dependencies are durable in the database. No working directory is durable. This uses Git’s merge engine, not a custom file or line merger.
 
 `readGitConflict(engine, planId, path)` reads the original, draft, published, and Git-produced conflict-marker text (bounded to 128 KiB per version). `resolveGitMerge(engine, planId, resolutions, confirmConflicts)` requires a choice for every staged conflict and explicit confirmation of Git’s conflict messages, then returns content changes plus the two-parent commit and archive. It does not advance a branch. Hosts must authorize the plan and atomically save its commit mapping with the content ref and base metadata. The web package supplies this transaction, stale-plan checks, and retry handling.
 
-Native Git 2.38+ is required. `WILDWOOD_GIT_EXECUTABLE` can select a trusted executable; repository content cannot set it. SHA-1 and the existing Git adapter limits apply. Merge plans currently retain full packs; automatic pruning and incremental packs are not implemented.
+Native Git 2.38+ is required. `WILDWOOD_GIT_EXECUTABLE` can select a trusted executable; repository content cannot set it. SHA-1 and the existing Git adapter limits apply. Use `compactGitStorage(engine)` for explicit storage maintenance. It consolidates Git objects, installs durable redirects for old archive IDs, and reclaims superseded pack bytes in one transaction. It preserves all commits and pinned plans; it does not truncate content history. Concurrent compactions use a database lease, and concurrent writers can continue referencing old archive IDs. `restoreGitArchive(engine, bareDirectory, archiveId)` hydrates dependencies and redirects. Legacy full packs are adopted lazily; their original shared content blobs remain intact to avoid deleting bytes that another consumer may reference.
+
+## Unmodeled files and optional asset storage
+
+`createContent({ ..., assetBlobs })` routes new file bytes outside every collection to this optional immutable `BlobStore`. Schema-backed files continue using the default `blobs` store (SQL unless supplied). With no `assetBlobs`, every file uses the default store. Overlapping collection patterns still fail rather than bypassing validation.
+
+The database retains every path, mode, content hash, size, storage location, and snapshot membership. `files(snapshot)` includes storage metadata for new writes; `bytes(hash)` resolves the recorded location and verifies its hash. Storage selection is durable and independent of later schema changes. Existing bytes are not automatically migrated when an adapter is added. Keep an adapter connected while historical snapshots reference it.
+
+For example, `assetBlobs: fileBlobs('/persistent/assets')` uses the filesystem adapter; a private object-store adapter implements the same `put`/`get` contract. Git imports, exports, merges, deletions, and pinned snapshots retain the same semantics for binary assets. Asset garbage collection is separate from Git pack compaction and is not implemented.

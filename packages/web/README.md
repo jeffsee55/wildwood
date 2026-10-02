@@ -262,4 +262,12 @@ Agents call `get_draft_update`, inspect conflicts with `read_merge_conflict`, th
 
 The update transaction guards both heads and saves the new draft ref, base metadata, audit event, and Git commit mapping together. It never publishes. Previous review decisions remain attached to the old snapshot. The review UI offers the same Git update and resolution flow and submits the result for fresh approval.
 
-Native Git must be available to this runtime. The docs deployment bundles Git and its Linux loader/libraries from the build image, with traced assets verified through `/cms/health`. Durable Git packs and plans live in the same database/blob store as content. No GitHub content repository or persistent filesystem is required.
+Native Git must be available to this runtime. The docs deployment bundles Git and its Linux loader/libraries from the build image, with traced assets verified through `/cms/health`. Durable Git packs and plans live in dedicated database tables. No GitHub content repository or persistent filesystem is required.
+
+## Media and unmodeled files
+
+MCP exposes `list_files`, `read_file`, and `write_asset` (canonical base64, up to 512 KiB). Source tools also accept text files outside collection schemas. Asset writes retain draft authorization, expected revisions, audit events, and idempotent retries; `write_asset` cannot bypass a document schema.
+
+The toolbar links to `/cms/media-library`. Select a draft to upload files up to 4 MiB with the browser. `/cms/media?path=...&snapshot=...` serves only the active authorized view; a supplied snapshot must match it. `/cms/review/media` checks review access and the exact revision before returning a file version. Media responses support byte ranges, disable shared caching, and never redirect to public blob URLs. Recognized raster images, audio, and video render in comparisons; SVG/HTML and unknown formats are sandboxed downloads. Symlinks are never served.
+
+The host renders Markdown images using the same snapshot context as its document. See the docs app for an example mapping `/media/example.png` to the authorized media endpoint.

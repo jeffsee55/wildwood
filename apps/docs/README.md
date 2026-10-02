@@ -50,3 +50,9 @@ Local tests cover real HTTP OAuth registration, consent, PKCE, token refresh, na
 Unconfigured Vercel PR previews render repository seed content in an in-memory, read-only workspace with sign-in disabled. They do not fall back to the production database. Configure a separate preview database and OAuth provider only when persistent preview editing is required. Production continues to require a durable remote database.
 
 Native Git is bundled during Linux Vercel builds by `scripts/git-runtime.mjs`. Next traces `.git-runtime` into the function. `/cms/health` checks the executable. Agent branch updates hydrate temporary repositories; Git packs and merge plans persist in the database/blob store.
+
+## Optional asset bytes and Git maintenance
+
+Unmodeled files use SQL by default. Set `WILDWOOD_DOCS_ASSET_BLOB_TOKEN` (or Vercel’s linked `BLOB_READ_WRITE_TOKEN`) to a **private** Vercel Blob store token to send new asset bytes there. File trees, hashes, schema documents, and Git packs remain in the database. The adapter uses [Vercel's private Blob API](https://vercel.com/docs/vercel-blob/private-storage); public blob access is intentionally not used. Do not remove the store/token while any historical snapshot references its objects.
+
+After building core, run `node --env-file=<production-env-file> apps/docs/scripts/compact-git.mjs` from the repository root to compact Git storage. The command prints storage counts only. It retains all Git history and old archive IDs, and removes duplicate bytes from the dedicated pack tables. Legacy shared content blobs and external media are not garbage-collected. Maintenance is explicit, not performed inside user requests; schedule it with your hosting infrastructure if desired.

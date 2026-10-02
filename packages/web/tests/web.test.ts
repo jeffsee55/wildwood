@@ -302,6 +302,8 @@ test("a delegated MCP credential reads only its draft and stops working after re
   expect(body.result.tools.map((t: { name: string }) => t.name)).toEqual([
     "validate_content",
     "discover_content",
+    "list_files",
+    "read_file",
     "read_documents",
     "read_source",
     "resolve_reference",

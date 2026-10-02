@@ -1,8 +1,13 @@
+import { vercelAssetBlobs } from "./asset-blobs";
 import { createClient } from "@libsql/client";
 import { collection, createContent, libsql, markdown, ConflictError } from "wildwood-core";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import seed from "./content.generated.json";
+import seedData from "./content.generated.json";
+const seed = seedData.map((file) => ({
+  path: file.path,
+  content: file.encoding === "base64" ? Buffer.from(file.content, "base64") : file.content,
+}));
 
 const configuredDatabase =
   process.env.WILDWOOD_DOCS_DATABASE_URL ||
@@ -33,11 +38,14 @@ const base = z.object({
   author: z.string(),
   body: z.string(),
 });
+const assetBlobToken =
+  process.env.WILDWOOD_DOCS_ASSET_BLOB_TOKEN || process.env.BLOB_READ_WRITE_TOKEN;
 function engine(version: "1" | "2") {
   return createContent({
     repository: "wildwood-manual",
     version: `docs-${version}`,
     database,
+    assetBlobs: assetBlobToken ? vercelAssetBlobs(assetBlobToken) : undefined,
     variants: { locale: { options: ["en", "fr"], default: "en", path: "suffix" } },
     collections: {
       docs: collection({

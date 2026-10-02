@@ -1,5 +1,6 @@
 /** Optional Node/Git transport. The content engine does not create Git objects on save. */
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -73,6 +74,78 @@ async function metadata<C extends Collections>(engine: ContentEngine<C>) {
   await engine.database.execute(`CREATE TABLE IF NOT EXISTS ww2_git_commits (
     repository TEXT NOT NULL, snapshot TEXT NOT NULL, oid TEXT NOT NULL, archive TEXT NOT NULL,
     PRIMARY KEY(repository,snapshot))`);
+  await engine.database.execute(`CREATE TABLE IF NOT EXISTS ww2_git_packs (
+    id TEXT PRIMARY KEY, bytes TEXT, size INTEGER NOT NULL, dependencies TEXT NOT NULL,
+    redirect TEXT, created INTEGER NOT NULL)`);
+  await engine.database.execute(`CREATE TABLE IF NOT EXISTS ww2_git_maintenance (
+    id INTEGER PRIMARY KEY, token TEXT NOT NULL, expires INTEGER NOT NULL)`);
+}
+
+// Dedicated pack storage keeps reclamation independent of content/asset byte lifetimes.
+async function savePack<C extends Collections>(
+  engine: ContentEngine<C>,
+  bytes: Buffer,
+  dependencies: string[] = [],
+  legacyId?: string,
+) {
+  const parents = [...new Set(dependencies)].sort();
+  // Empty or identical incremental packs can have different required histories.
+  const id = legacyId ?? hash(JSON.stringify([hash(bytes), parents]));
+  await engine.database.execute(
+    "INSERT INTO ww2_git_packs(id,bytes,size,dependencies,created) VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING",
+    [id, bytes.toString("base64"), bytes.length, JSON.stringify(parents), Date.now()],
+  );
+  return id;
+}
+async function hydratePack<C extends Collections>(
+  engine: ContentEngine<C>,
+  directory: string,
+  id: string,
+  loaded = new Set<string>(),
+  visiting = new Set<string>(),
+) {
+  if (loaded.has(id)) return;
+  if (visiting.has(id)) throw new Error("Cyclic Git pack dependencies");
+  visiting.add(id);
+  const row = (await engine.database.execute("SELECT * FROM ww2_git_packs WHERE id=?", [id]))
+    .rows[0];
+  if (!row) {
+    const legacy = Buffer.from(await engine.bytes(id));
+    await savePack(engine, legacy, [], id);
+    await run(directory, ["index-pack", "--stdin"], legacy);
+  } else if (row.redirect) {
+    await hydratePack(engine, directory, String(row.redirect), loaded, visiting);
+  } else {
+    for (const parent of JSON.parse(String(row.dependencies)) as string[])
+      await hydratePack(engine, directory, parent, loaded, visiting);
+    if (!row.bytes) throw new Error("Missing Git pack bytes");
+    const bytes = Buffer.from(String(row.bytes), "base64");
+    if (
+      hash(bytes) !== id &&
+      hash(JSON.stringify([hash(bytes), JSON.parse(String(row.dependencies))])) !== id
+    )
+      throw new Error("Corrupt Git pack");
+    await run(directory, ["index-pack", "--stdin"], bytes);
+  }
+  visiting.delete(id);
+  loaded.add(id);
+}
+async function incrementalPack<C extends Collections>(
+  engine: ContentEngine<C>,
+  directory: string,
+  roots: string[],
+  parents: { oid: string; archive: string }[],
+) {
+  const pack = await run(
+    directory,
+    ["pack-objects", "--stdout", "--revs"],
+    [...roots, ...parents.map((p) => `^${p.oid}`)].join("\n") + "\n",
+  );
+  return savePack(
+    engine,
+    pack,
+    parents.map((p) => p.archive),
+  );
 }
 
 /** Import exact file bytes/modes and retain the original commit ancestry as a pack. */
@@ -115,8 +188,7 @@ export async function importGit<C extends Collections>(
     });
   }
   const pack = await run(args.directory, ["pack-objects", "--stdout", "--revs"], `${oid}\n`);
-  const archive = hash(pack);
-  await engine.blobs.put(archive, pack);
+  const archive = await savePack(engine, pack);
   const head = await engine.branch(args.targetRef);
   const result = await engine.apply({
     ref: head.name,
@@ -190,12 +262,7 @@ export async function exportGit<C extends Collections>(
       [args.snapshot, engine.config.repository, engine.config.repository],
     );
     const parent = ancestry.rows[0];
-    if (parent)
-      await run(
-        args.directory,
-        ["index-pack", "--stdin"],
-        await engine.bytes(String(parent.archive)),
-      );
+    if (parent) await hydratePack(engine, args.directory, String(parent.archive));
     let oid: string;
     if (parent?.snapshot === args.snapshot) {
       oid = String(parent.oid);
@@ -231,9 +298,12 @@ export async function exportGit<C extends Collections>(
       )
         .toString()
         .trim();
-      const pack = await run(args.directory, ["pack-objects", "--stdout", "--revs"], `${oid}\n`);
-      const archive = hash(pack);
-      await engine.blobs.put(archive, pack);
+      const archive = await incrementalPack(
+        engine,
+        args.directory,
+        [oid],
+        parent ? [{ oid: String(parent.oid), archive: String(parent.archive) }] : [],
+      );
       const saved = await engine.database.execute(
         "INSERT INTO ww2_git_commits(repository,snapshot,oid,archive) VALUES(?,?,?,?) ON CONFLICT DO NOTHING",
         [engine.config.repository, args.snapshot, oid, archive],
@@ -244,16 +314,23 @@ export async function exportGit<C extends Collections>(
           [engine.config.repository, args.snapshot],
         );
         oid = String(winner.rows[0].oid);
-        await run(
-          args.directory,
-          ["index-pack", "--stdin"],
-          await engine.bytes(String(winner.rows[0].archive)),
-        );
+        await hydratePack(engine, args.directory, String(winner.rows[0].archive));
       }
     }
     await run(args.directory, ["update-ref", `refs/heads/${branch}`, oid, oldOid]);
     await run(args.directory, ["symbolic-ref", "HEAD", `refs/heads/${branch}`]);
-    return { oid, snapshot: args.snapshot, directory: resolve(args.directory) };
+    const mapping = (
+      await engine.database.execute(
+        "SELECT archive FROM ww2_git_commits WHERE repository=? AND snapshot=?",
+        [engine.config.repository, args.snapshot],
+      )
+    ).rows[0];
+    return {
+      oid,
+      archive: String(mapping.archive),
+      snapshot: args.snapshot,
+      directory: resolve(args.directory),
+    };
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
@@ -466,13 +543,7 @@ export async function planGitMerge<C extends Collections>(
         message = parts.shift()!;
       messages.push({ paths, type, message });
     }
-    const pack = await run(
-      directory,
-      ["pack-objects", "--stdout", "--revs"],
-      `${ours.oid}\n${theirs.oid}\n${tree}\n`,
-    );
-    const archive = hash(pack);
-    await engine.blobs.put(archive, pack);
+    const archive = await incrementalPack(engine, directory, [tree], [ours, theirs]);
     const plan: GitMergePlan = {
       id,
       ...input,
@@ -503,7 +574,7 @@ async function hydrated<C extends Collections, T>(
     directory = join(temp, "repo.git");
   try {
     await run(temp, ["init", "--bare", directory]);
-    await run(directory, ["index-pack", "--stdin"], await engine.bytes(plan.archive));
+    await hydratePack(engine, directory, plan.archive);
     return await fn(directory, temp);
   } finally {
     await rm(temp, { recursive: true, force: true });
@@ -638,13 +709,105 @@ export async function resolveGitMerge<C extends Collections>(
       before.delete(file.path);
     }
     for (const path of before.keys()) changes.push({ path, delete: true });
-    const pack = await run(directory, ["pack-objects", "--stdout", "--revs"], `${commit}\n`),
-      archive = hash(pack);
-    await engine.blobs.put(archive, pack);
+    const archive = await incrementalPack(
+      engine,
+      directory,
+      [commit],
+      [
+        { oid: plan.oursCommit, archive: plan.archive },
+        { oid: plan.theirsCommit, archive: plan.archive },
+      ],
+    );
     return { commit, archive, changes };
   });
 }
 
 export async function gitVersion() {
   return (await run(process.cwd(), ["--version"])).toString().trim();
+}
+
+/** Consolidate pack objects without discarding any commit, snapshot, or pinned merge plan.
+ * Redirects are installed before redundant bytes are reclaimed. Concurrent readers/writers
+ * can keep old archive IDs; hydration follows the durable redirects.
+ */
+export async function compactGitStorage<C extends Collections>(engine: ContentEngine<C>) {
+  await mergeMetadata(engine);
+  const token = randomUUID(),
+    started = Date.now();
+  await engine.database.transaction(async (tx) => {
+    const lease = (await tx.execute("SELECT expires FROM ww2_git_maintenance WHERE id=1")).rows[0];
+    if (lease && Number(lease.expires) > started)
+      throw new Error("Git maintenance is already running");
+    await tx.execute(
+      "INSERT INTO ww2_git_maintenance(id,token,expires) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET token=excluded.token,expires=excluded.expires",
+      [token, started + 15 * 60 * 1000],
+    );
+  });
+  const temp = await mkdtemp(join(tmpdir(), "wildwood-compact-"));
+  try {
+    await run(temp, ["init", "--bare", "."]);
+    const loaded = new Set<string>();
+    // Adopt pre-incremental archives. Legacy shared content blobs are left intact.
+    const legacy = await engine.database.execute(
+      "SELECT archive FROM ww2_git_commits WHERE repository=? UNION SELECT json_extract(data,'$.archive') AS archive FROM ww2_git_merges WHERE repository=?",
+      [engine.config.repository, engine.config.repository],
+    );
+    for (const row of legacy.rows) await hydratePack(engine, temp, String(row.archive), loaded);
+    const packs = (
+      await engine.database.execute("SELECT id,size FROM ww2_git_packs WHERE redirect IS NULL")
+    ).rows;
+    for (const row of packs) await hydratePack(engine, temp, String(row.id), loaded);
+    if (!packs.length)
+      return { packsBefore: 0, packsAfter: 0, bytesBefore: 0, bytesAfter: 0, reclaimedBytes: 0 };
+    const objects = await run(temp, [
+      "cat-file",
+      "--batch-all-objects",
+      "--batch-check=%(objectname)",
+    ]);
+    const compact = await run(temp, ["pack-objects", "--stdout"], objects);
+    // Confirm closure (including both merge parents) before redirecting any reader.
+    await run(temp, ["fsck", "--full", "--strict", "--no-reflogs"]);
+    const id = await savePack(engine, compact);
+    const before = packs.reduce((sum, row) => sum + Number(row.size), 0);
+    await engine.database.transaction(async (tx) => {
+      const lease = (await tx.execute("SELECT token,expires FROM ww2_git_maintenance WHERE id=1"))
+        .rows[0];
+      if (lease?.token !== token || Number(lease.expires) <= Date.now())
+        throw new Error("Git maintenance lease expired; retry");
+      // The compact pack contains every object in each selected input, so old IDs
+      // remain readable even if an in-flight writer references one after this commit.
+      await tx.execute(
+        "UPDATE ww2_git_packs SET redirect=NULL,dependencies='[]',bytes=?,size=? WHERE id=?",
+        [compact.toString("base64"), compact.length, id],
+      );
+      for (const row of packs)
+        if (row.id !== id)
+          await tx.execute(
+            "UPDATE ww2_git_packs SET redirect=?,dependencies='[]',bytes=NULL WHERE id=?",
+            [id, String(row.id)],
+          );
+    });
+    return {
+      packsBefore: packs.length,
+      packsAfter: 1,
+      bytesBefore: before,
+      bytesAfter: compact.length,
+      reclaimedBytes: before - compact.length,
+    };
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+    await engine.database.execute("DELETE FROM ww2_git_maintenance WHERE id=1 AND token=?", [
+      token,
+    ]);
+  }
+}
+
+/** Restore an archive and its incremental dependencies into an existing bare repository. */
+export async function restoreGitArchive<C extends Collections>(
+  engine: ContentEngine<C>,
+  directory: string,
+  archive: string,
+) {
+  await metadata(engine);
+  await hydratePack(engine, directory, archive);
 }

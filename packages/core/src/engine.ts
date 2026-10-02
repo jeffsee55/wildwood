@@ -62,6 +62,7 @@ export class ContentEngine<C extends Collections> {
     readonly database: SqlDatabase,
     config: Config<C>,
     blobs?: BlobStore,
+    readonly assetBlobs?: BlobStore,
   ) {
     if (!config.repository || !config.version)
       throw new Error("repository and version are required");
@@ -195,17 +196,29 @@ export class ContentEngine<C extends Collections> {
     await this.ready();
     await this.assertSnapshot(snapshot);
     const result = await this.database.execute(
-      `${membership} SELECT path,blob,mode FROM effective_files ORDER BY path`,
-      [snapshot, this.config.repository],
+      `${membership} SELECT path,blob,mode,l.size,l.storage FROM effective_files f LEFT JOIN ww2_blob_locations l ON l.id=f.blob AND l.repository=? ORDER BY path`,
+      [snapshot, this.config.repository, this.config.repository],
     );
     return result.rows.map((row) => ({
       path: String(row.path),
       blob: String(row.blob),
       mode: String(row.mode) as SnapshotFile["mode"],
+      ...(row.size !== null && row.size !== undefined
+        ? { size: Number(row.size), storage: String(row.storage) as "default" | "assets" }
+        : {}),
     }));
   }
   async bytes(blob: string): Promise<Uint8Array> {
-    const bytes = await this.blobs.get(blob);
+    await this.ready();
+    const location = (
+      await this.database.execute(
+        "SELECT storage FROM ww2_blob_locations WHERE repository=? AND id=?",
+        [this.config.repository, blob],
+      )
+    ).rows[0];
+    if (location?.storage === "assets" && !this.assetBlobs)
+      throw new Error("Configure assetBlobs to read this asset");
+    const bytes = await (location?.storage === "assets" ? this.assetBlobs! : this.blobs).get(blob);
     if (!bytes || hash(bytes) !== blob) throw new Error(`Missing or corrupt content: ${blob}`);
     return bytes;
   }
@@ -214,6 +227,11 @@ export class ContentEngine<C extends Collections> {
     return {
       repository: this.config.repository,
       version: this.config.version,
+      assets: {
+        supported: true,
+        storage: this.assetBlobs ? "external" : "default",
+        tree: "database",
+      },
       variants: this.config.variants,
       collections: Object.entries(this.config.collections).map(([name, c]) => ({
         name,
@@ -228,16 +246,24 @@ export class ContentEngine<C extends Collections> {
     };
   }
 
-  collectionFor(path: string) {
+  matchCollection(path: string) {
     validPath(path);
     const matches = Object.entries(this.config.collections).filter(([, c]) =>
       minimatch(path, c.match, { dot: true }),
     );
-    if (matches.length !== 1)
+    if (matches.length > 1)
       throw new ValidationError([
         { path, message: "Path must match exactly one content collection" },
       ]);
-    return { name: matches[0][0], ...matches[0][1] };
+    return matches.length ? { name: matches[0][0], ...matches[0][1] } : null;
+  }
+  collectionFor(path: string) {
+    const collection = this.matchCollection(path);
+    if (!collection)
+      throw new ValidationError([
+        { path, message: "Path must match exactly one content collection" },
+      ]);
+    return collection;
   }
 
   /** Validate a proposed content batch without writing blobs, snapshots, or refs. */
@@ -251,10 +277,10 @@ export class ContentEngine<C extends Collections> {
       try {
         if (paths.has(change.path)) throw new Error("Duplicate change in batch");
         paths.add(change.path);
-        const c = this.collectionFor(change.path);
+        const c = this.matchCollection(change.path);
         if (!("delete" in change)) {
           if (change.mode === "120000") throw new Error("Content cannot be a symbolic link");
-          c.parse(
+          c?.parse(
             typeof change.content === "string"
               ? change.content
               : new TextDecoder("utf-8", { fatal: true }).decode(change.content),
@@ -332,7 +358,19 @@ export class ContentEngine<C extends Collections> {
       throw new ConflictError("Ref advanced; read the new revision before editing");
     }
     for (const change of changes)
-      if (change.bytes && change.blob) await this.blobs.put(change.blob, change.bytes);
+      if (change.bytes && change.blob) {
+        const external = !this.matchCollection(change.path) && !!this.assetBlobs;
+        await (external ? this.assetBlobs! : this.blobs).put(change.blob, change.bytes);
+        await this.database.execute(
+          "INSERT INTO ww2_blob_locations(repository,id,storage,size) VALUES(?,?,?,?) ON CONFLICT DO NOTHING",
+          [
+            this.config.repository,
+            change.blob,
+            external ? "assets" : "default",
+            change.bytes.byteLength,
+          ],
+        );
+      }
     const existing = new Map((await this.files(head.snapshot)).map((file) => [file.path, file]));
     const actual = changes.filter((change) =>
       change.blob === null

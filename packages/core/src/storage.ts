@@ -85,6 +85,7 @@ export function sqlBlobs(db: SqlDatabase): BlobStore {
 }
 export const schema = [
   `CREATE TABLE IF NOT EXISTS ww2_blobs (id TEXT PRIMARY KEY, bytes TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS ww2_blob_locations (repository TEXT NOT NULL, id TEXT NOT NULL, storage TEXT NOT NULL, size INTEGER NOT NULL, PRIMARY KEY(repository,id))`,
   `CREATE TABLE IF NOT EXISTS ww2_snapshots (id TEXT PRIMARY KEY, repository TEXT NOT NULL, parent TEXT REFERENCES ww2_snapshots(id), created_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS ww2_changes (snapshot TEXT NOT NULL REFERENCES ww2_snapshots(id), path TEXT NOT NULL, blob TEXT, mode TEXT NOT NULL, PRIMARY KEY (snapshot,path))`,
   `CREATE TABLE IF NOT EXISTS ww2_ref_locks (repository TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(repository,name))`,

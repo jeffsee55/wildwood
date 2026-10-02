@@ -482,3 +482,57 @@ test("generation identity survives equivalent parsers compiled with different fu
   });
   await expect(changed.ready()).rejects.toThrow("Schema changed without a version bump");
 });
+
+test("unmodeled bytes use the optional asset store while tree metadata and documents remain in SQL", async () => {
+  const base = setup();
+  const stored = new Map<string, Uint8Array>();
+  const assetBlobs = {
+    put: async (id: string, bytes: Uint8Array) => {
+      stored.set(id, bytes);
+    },
+    get: async (id: string) => stored.get(id) ?? null,
+  };
+  const engine = createContent({ ...base.config, database: base.database, assetBlobs });
+  await engine.branch("main");
+  const bytes = Buffer.from([0, 255, 1, 128]);
+  const first = await engine.apply({
+    ref: "main",
+    expectedRevision: 0,
+    idempotencyKey: "assets",
+    changes: [
+      { path: "media/photo.bin", content: bytes },
+      { path: "docs/a.md", content: "---\ntitle: Article\n---\nBody" },
+    ],
+  });
+  const files = await engine.files(first.snapshot),
+    asset = files.find((f) => f.path === "media/photo.bin")!;
+  expect(asset).toMatchObject({ size: 4, storage: "assets" });
+  expect(stored.size).toBe(1);
+  expect(
+    (await engine.database.execute("SELECT id FROM ww2_blobs WHERE id=?", [asset.blob])).rows,
+  ).toHaveLength(0);
+  expect(Buffer.from(await engine.bytes(asset.blob))).toEqual(bytes);
+  const restarted = createContent({ ...base.config, database: base.database, assetBlobs });
+  expect((await restarted.query("docs", { ref: "main" })).items[0].value.title).toBe("Article");
+  expect(
+    (
+      await restarted.validateChanges({
+        ref: "main",
+        expectedRevision: 1,
+        changes: [{ path: "media/other.bin", content: bytes }],
+      })
+    ).valid,
+  ).toBe(true);
+  await restarted.apply({
+    ref: "main",
+    expectedRevision: 1,
+    idempotencyKey: "remove",
+    changes: [{ path: "media/photo.bin", delete: true }],
+  });
+  expect(
+    (await restarted.files((await restarted.ref("main")).snapshot)).map((f) => f.path),
+  ).not.toContain(asset.path);
+  expect(Buffer.from(await restarted.bytes(asset.blob))).toEqual(bytes);
+  expect(await restarted.files(first.snapshot)).toContainEqual(asset);
+  await expect(base.bytes(asset.blob)).rejects.toThrow("assetBlobs");
+});

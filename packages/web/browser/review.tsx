@@ -77,8 +77,20 @@ type Review = {
   };
 };
 type FileDiff = Change & {
-  beforeContent: { source: string | null; size: number; binary: boolean; tooLarge?: boolean };
-  afterContent: { source: string | null; size: number; binary: boolean; tooLarge?: boolean };
+  beforeContent: {
+    source: string | null;
+    size: number;
+    binary: boolean;
+    tooLarge?: boolean;
+    media?: { type: string; kind: "image" | "audio" | "video" | "file" };
+  };
+  afterContent: {
+    source: string | null;
+    size: number;
+    binary: boolean;
+    tooLarge?: boolean;
+    media?: { type: string; kind: "image" | "audio" | "video" | "file" };
+  };
 };
 const context = JSON.parse(document.querySelector("#context")!.textContent!);
 const when = (n: number) =>
@@ -527,7 +539,51 @@ function App() {
                   {loadingFile ? (
                     <div className="empty-diff">Loading file…</div>
                   ) : loaded ? (
-                    <Diff value={loaded} split={split} />
+                    loaded.beforeContent.media || loaded.afterContent.media ? (
+                      <div className="media-comparison">
+                        {(["before", "after"] as const).map((side) => {
+                          const content =
+                            loaded[side === "before" ? "beforeContent" : "afterContent"];
+                          const url =
+                            context.endpoint +
+                            "/review/media?" +
+                            new URLSearchParams({ id: review.id, revision, path: file, side });
+                          return (
+                            <figure key={side}>
+                              <figcaption>
+                                {side === "before" ? "Before" : "After"} ·{" "}
+                                {content.size.toLocaleString()} bytes
+                              </figcaption>
+                              {!loaded[side] ? (
+                                <p>No file</p>
+                              ) : (
+                                <>
+                                  <div className="media-canvas">
+                                    {content.media?.kind === "image" ? (
+                                      <img
+                                        src={url}
+                                        alt={`${side === "before" ? "Before" : "After"}: ${file}`}
+                                      />
+                                    ) : content.media?.kind === "video" ? (
+                                      <video controls preload="metadata" src={url} />
+                                    ) : content.media?.kind === "audio" ? (
+                                      <audio controls preload="metadata" src={url} />
+                                    ) : (
+                                      <p>Preview unavailable</p>
+                                    )}
+                                  </div>
+                                  <a href={url} download>
+                                    Download {side} version
+                                  </a>
+                                </>
+                              )}
+                            </figure>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <Diff value={loaded} split={split} />
+                    )
                   ) : null}
                 </div>
               ) : (

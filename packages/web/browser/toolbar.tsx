@@ -1,3 +1,4 @@
+import { FileText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Dialog } from "@base-ui/react/dialog";
@@ -329,6 +330,12 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
                         </Button>
                       )}
                       <div className="workspace-separator" />
+                      {s.actor && (
+                        <a className="workspace-link" href={`${s.endpoint}/media-library`}>
+                          <FileText />
+                          Media library
+                        </a>
+                      )}
                       <a
                         className="workspace-link"
                         href={`${s.endpoint}/${s.actor ? "access" : "sign-in"}`}

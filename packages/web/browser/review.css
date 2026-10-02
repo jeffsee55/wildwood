@@ -1013,3 +1013,41 @@ select:focus {
 .merge-sources details {
   margin-top: 8px;
 }
+
+.media-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 1.25rem;
+}
+.media-comparison figure {
+  margin: 0;
+  min-width: 0;
+}
+.media-comparison figcaption {
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+}
+.media-canvas {
+  background: repeating-conic-gradient(#181b20 0% 25%, #252a31 0% 50%) 50% / 20px 20px;
+  min-height: 160px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 0.75rem;
+}
+.media-canvas img,
+.media-canvas video {
+  max-width: 100%;
+  max-height: 480px;
+  object-fit: contain;
+}
+.media-canvas audio {
+  width: 100%;
+}
+@media (max-width: 700px) {
+  .media-comparison {
+    grid-template-columns: 1fr;
+  }
+}

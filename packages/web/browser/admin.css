@@ -116,3 +116,39 @@ main:has(#local-oauth) {
     background: #eef2eb;
   }
 }
+
+main:has(.asset-grid) {
+  max-width: 1000px;
+}
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-top: 24px;
+}
+.asset-grid figure {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid #39404a;
+  border-radius: 8px;
+  min-width: 0;
+}
+.asset-grid img {
+  width: 100%;
+  height: 180px;
+  object-fit: contain;
+  background: #181b20;
+}
+.asset-grid figcaption {
+  overflow-wrap: anywhere;
+  margin-top: 12px;
+}
+.asset-grid small {
+  display: block;
+  opacity: 0.7;
+}
+.asset-placeholder {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+}
