@@ -47,7 +47,7 @@ for (const output of bundle.outputFiles) {
   files[key] = { path: `js/${name}`, body: output.text, type: "text/javascript; charset=utf-8" };
 }
 for (const name of ["toolbar.css", "review.css", "agent.css", "admin.js", "admin.css"]) {
-  const body =
+  let body =
     name.endsWith(".css") && name !== "admin.css"
       ? execFileSync(
           new URL("../node_modules/.bin/tailwindcss", import.meta.url).pathname,
@@ -55,6 +55,21 @@ for (const name of ["toolbar.css", "review.css", "agent.css", "admin.js", "admin
           { cwd, encoding: "utf8" },
         )
       : await readFile(new URL(`../browser/${name}`, import.meta.url), "utf8");
+  if (name === "toolbar.css") {
+    // Chromium does not register @property declarations inside a shadow root.
+    // Mirror Tailwind's non-inheriting defaults in its lowest-priority layer so
+    // borders, rings, transforms and shadows work without host-page CSS.
+    const defaults = [...body.matchAll(/@property\s+([^\s{]+)\s*\{([^}]+)\}/g)]
+      .map(([, property, rule]) => {
+        let initial = /initial-value:\s*([^;}]+)/.exec(rule)?.[1] ?? "initial";
+        // Typed registrations normalize unitless zero lengths to pixels. Without
+        // registration, calc(1px + 0) would invalidate rings and transforms.
+        if (initial === "0" && /syntax:[^;]*<length/.test(rule)) initial = "0px";
+        return `${property}:${initial};`;
+      })
+      .join("");
+    body += `\n@layer properties { :host, :host *, :host ::before, :host ::after {${defaults}} }`;
+  }
   const digest = createHash("sha256").update(body).digest("hex").slice(0, 20);
   files[name] = {
     path: `${digest}/${name}`,

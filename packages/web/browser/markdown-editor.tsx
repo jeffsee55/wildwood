@@ -1,3 +1,7 @@
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "./ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import { Textarea } from "./ui/textarea";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "./ui/collapsible";
 import { useDeferredValue, useRef, useState } from "react";
 import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
 import {
@@ -85,28 +89,32 @@ export default function MarkdownEditor({
     });
   }
   return (
-    <div className="markdown-editor">
+    <Tabs
+      className="markdown-editor"
+      value={mode}
+      onValueChange={(value) => setMode(value as "write" | "split" | "preview")}
+    >
       <div className="editor-tools">
         <div className="format-actions" role="group" aria-label="Markdown formatting">
           {markdown &&
             formats.map(([kind, Icon, label, key]) => (
-              <Button
-                key={kind}
-                variant="ghost"
-                size="icon"
-                disabled={disabled || mode === "preview"}
-                aria-label={label}
-                title={key ? `${label} (⌘ / Ctrl ${key})` : label}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => format(kind)}
-              >
-                <Icon />
-              </Button>
+              <Tooltip key={kind}>
+                <TooltipTrigger
+                  render={<Button variant="ghost" size="icon" />}
+                  disabled={disabled || mode === "preview"}
+                  aria-label={label}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => format(kind)}
+                >
+                  <Icon />
+                </TooltipTrigger>
+                <TooltipContent>{key ? `${label} (⌘ / Ctrl ${key})` : label}</TooltipContent>
+              </Tooltip>
             ))}
           {!markdown && <span className="editor-language">Source</span>}
         </div>
         {markdown && (
-          <div className="editor-modes" role="group" aria-label="Editor layout">
+          <TabsList className="editor-modes" aria-label="Editor layout">
             {(
               [
                 ["write", FileCode2, "Write"],
@@ -114,22 +122,17 @@ export default function MarkdownEditor({
                 ["preview", Eye, "Preview"],
               ] as const
             ).map(([value, Icon, label]) => (
-              <Button
-                key={value}
-                variant={mode === value ? "secondary" : "ghost"}
-                aria-pressed={mode === value}
-                onClick={() => setMode(value)}
-              >
+              <TabsTrigger key={value} value={value}>
                 <Icon />
                 <span>{label}</span>
-              </Button>
+              </TabsTrigger>
             ))}
-          </div>
+          </TabsList>
         )}
       </div>
-      <div className={`editor-panes ${mode}`}>
+      <TabsContent key={mode} value={mode} className={`editor-panes ${mode}`}>
         {mode !== "preview" && (
-          <textarea
+          <Textarea
             ref={textarea}
             aria-label="Document source"
             value={source}
@@ -157,10 +160,16 @@ export default function MarkdownEditor({
         {mode !== "write" && (
           <div className="markdown-preview" aria-label="Markdown preview" tabIndex={0}>
             {preview.metadata && (
-              <details className="preview-metadata">
-                <summary>Document properties</summary>
-                <pre>{preview.metadata}</pre>
-              </details>
+              <Collapsible className="preview-metadata">
+                <CollapsibleTrigger
+                  render={<Button variant="ghost" className="disclosure-trigger" />}
+                >
+                  Document properties
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <pre>{preview.metadata}</pre>
+                </CollapsibleContent>
+              </Collapsible>
             )}
             {preview.body.trim() ? (
               <Markdown
@@ -181,7 +190,7 @@ export default function MarkdownEditor({
             )}
           </div>
         )}
-      </div>
+      </TabsContent>
       <div className="editor-status">
         <span>
           {source.trim() ? source.trim().split(/\s+/).length.toLocaleString() : 0} words{" "}
@@ -191,6 +200,6 @@ export default function MarkdownEditor({
           Ln {position.line}, Col {position.column}
         </span>
       </div>
-    </div>
+    </Tabs>
   );
 }

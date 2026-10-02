@@ -9,26 +9,6 @@
   font-family: ui-sans-serif, system-ui, sans-serif;
   overflow: hidden;
 }
-.agent-panel button {
-  background: transparent;
-  border: 0;
-  color: inherit;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border-radius: 6px;
-  padding: 7px;
-}
-.agent-panel button:hover {
-  background: var(--muted);
-}
-.agent-panel button:focus-visible,
-.agent-panel textarea:focus-visible,
-.agent-panel input:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
 .agent-header {
   display: flex;
   justify-content: space-between;
@@ -86,14 +66,6 @@
   gap: 6px;
   font-size: 12px;
 }
-.agent-settings input {
-  width: 100%;
-  padding: 9px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--background);
-  color: inherit;
-}
 .agent-settings p {
   margin: 0;
   font-size: 12px;
@@ -102,8 +74,6 @@
 }
 .agent-settings > button {
   justify-self: end;
-  border: 1px solid var(--border);
-  background: var(--background);
 }
 .agent-transcript {
   flex: 1;
@@ -151,11 +121,11 @@
   margin-top: 26px;
 }
 .agent-starters button {
-  border: 1px solid var(--border);
   text-align: left;
   justify-content: space-between;
+  height: auto;
+  white-space: normal;
   padding: 12px 14px;
-  font-size: 12px;
 }
 .agent-user {
   align-self: flex-end;
@@ -224,18 +194,7 @@
   overflow: hidden;
   font-size: 12px;
 }
-.agent-tool summary,
-.agent-thinking summary {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  cursor: pointer;
-  list-style: none;
-}
-.agent-tool summary {
-  padding: 10px;
-}
-.agent-tool summary span {
+.agent-tool [data-slot="collapsible-trigger"] span {
   margin-left: auto;
   color: var(--muted-foreground);
 }
@@ -244,8 +203,8 @@
   border-radius: 0;
   border-top: 1px solid var(--border);
 }
-.agent-tool[open] summary > svg,
-.agent-thinking[open] summary > svg {
+.agent-tool[data-open] [data-slot="collapsible-trigger"] > svg,
+.agent-thinking[data-open] [data-slot="collapsible-trigger"] > svg {
   transform: rotate(90deg);
 }
 .agent-thinking {
@@ -299,7 +258,6 @@
   color: inherit;
   font: inherit;
   line-height: 1.6;
-  outline: none;
 }
 .agent-composer footer {
   display: flex;
@@ -318,11 +276,6 @@
 .agent-composer footer > div {
   display: flex;
   gap: 6px;
-}
-.agent-composer .agent-send {
-  background: var(--primary);
-  color: var(--primary-foreground);
-  border-radius: 8px;
 }
 .agent-footnote {
   text-align: center;
@@ -364,7 +317,7 @@
   }
 }
 
-.agent-tool summary code {
+.agent-tool [data-slot="collapsible-trigger"] code {
   font-family: inherit;
   font-size: inherit;
 }
@@ -384,4 +337,18 @@
 
 .agent-transcript > * {
   flex-shrink: 0;
+}
+
+.agent-tool .disclosure-trigger {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 10px;
+  height: auto;
+  border-radius: 0;
+}
+.agent-thinking .disclosure-trigger {
+  padding: 0;
+  height: auto;
+  font-size: inherit;
+  color: inherit;
 }

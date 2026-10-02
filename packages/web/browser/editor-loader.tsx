@@ -1,3 +1,4 @@
+import { Textarea } from "./ui/textarea";
 import { Component, lazy, Suspense, type ReactNode, type ComponentProps } from "react";
 const MarkdownEditor = lazy(() => import("./markdown-editor"));
 class EditorBoundary extends Component<
@@ -18,7 +19,7 @@ export function Editor(props: ComponentProps<typeof MarkdownEditor>) {
       <p className="hint" role="status">
         Rich editor unavailable. Your source is still editable.
       </p>
-      <textarea
+      <Textarea
         aria-label="Document source"
         value={props.source}
         disabled={props.disabled}

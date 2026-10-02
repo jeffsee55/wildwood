@@ -1,3 +1,4 @@
+import { Button } from "./ui/button";
 import { Fragment, memo, useMemo, useState } from "react";
 import { FileText, Bot, MessageSquare, UnfoldVertical, X } from "lucide-react";
 import { diffWordsWithSpace } from "diff";
@@ -82,7 +83,8 @@ export const Diff = memo(function Diff({
       className={`gutter ${selected?.side === side && line !== undefined && line >= selected.start && line <= selected.end ? "line-selected" : ""}`}
     >
       {line !== undefined && (
-        <button
+        <Button
+          variant="ghost"
           aria-label={`Select ${side} line ${line}`}
           aria-pressed={selected?.side === side && line >= selected.start && line <= selected.end}
           onClick={(e) =>
@@ -94,7 +96,7 @@ export const Diff = memo(function Diff({
           }
         >
           {line}
-        </button>
+        </Button>
       )}
     </td>
   );
@@ -144,20 +146,24 @@ export const Diff = memo(function Diff({
             {selected.side} · lines {selected.start}–{selected.end}
           </span>
           {onAskAgent && (
-            <button onClick={() => onAskAgent(selected)}>
+            <Button variant="ghost" onClick={() => onAskAgent(selected)}>
               <Bot size={13} />
               Ask agent
-            </button>
+            </Button>
           )}
           {onComment && (
-            <button onClick={() => onComment(selected)}>
+            <Button variant="ghost" onClick={() => onComment(selected)}>
               <MessageSquare size={13} />
               Comment
-            </button>
+            </Button>
           )}
-          <button aria-label="Clear line selection" onClick={() => setSelection(null)}>
+          <Button
+            variant="ghost"
+            aria-label="Clear line selection"
+            onClick={() => setSelection(null)}
+          >
             <X size={13} />
-          </button>
+          </Button>
         </div>
       )}
       {split && (
@@ -188,10 +194,13 @@ export const Diff = memo(function Diff({
               s.kind === "gap" ? (
                 <tr key={`gap-${s.start}`} className="diff-gap">
                   <td colSpan={split ? 4 : 3}>
-                    <button onClick={() => setExpanded((e) => new Set(e).add(s.start))}>
+                    <Button
+                      variant="ghost"
+                      onClick={() => setExpanded((e) => new Set(e).add(s.start))}
+                    >
                       <UnfoldVertical size={13} />
                       Show {s.end - s.start + 1} unchanged lines
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ) : (

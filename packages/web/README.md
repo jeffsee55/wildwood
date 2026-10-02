@@ -60,6 +60,14 @@ The host must allow the asset origin in its CSP. Deployments that cache HTML
 across releases need to retain referenced asset versions or provide deployment
 skew protection; the current registry includes the current package build only.
 
+## Browser component system
+
+The interactive toolbar, agent, editor, and review use the shadcn **Base UI / Nova** registry components in `browser/ui`. `components.json` configures the neutral theme, Lucide icons, and component aliases. Add future controls through that registry rather than importing Base UI directly in feature code. The upstream MIT notice is retained in `browser/ui/LICENSE.shadcn`.
+
+The components originate from `https://ui.shadcn.com/r/styles/base-nova/{name}.json` (retrieved October 2, 2026). Local adaptations resolve imports/icons, keep popup portals within the toolbar's Shadow DOM through `PortalProvider`, use the toolbar overlay stacking level, and allow the agent popover to stay mounted. Chat, source editing, and diff layouts remain application compositions; common control styles belong to the component layer.
+
+The asset builder mirrors Tailwind's registered property defaults into the toolbar shadow stylesheet's properties layer. Chromium does not apply shadow-scoped `@property` registrations, and missing defaults otherwise break borders, focus rings, shadows, and transforms. Unitless zero length defaults are normalized to pixels so expressions such as ring-width calculations remain valid. Generated declarations follow the installed Tailwind output instead of maintaining a second manual list.
+
 ## Embedded agent and review workspace
 
 The toolbar opens directly into a real `libfx/browser` conversation; its **Options** control exposes editing, drafts, sharing, media, and external MCP connections. Review places files on the left, source in the center, and the same agent on the right. On small screens, **Show agent** opens the conversation over the source. `/cms/agent` remains available as a full-page workspace. Each session creates one isolated draft, or resumes the explicitly selected draft owned by the editor. There is no project registry, repository import, virtual shell, sandbox, or second implementation of content tools.

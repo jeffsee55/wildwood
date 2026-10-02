@@ -3,7 +3,7 @@
   "compilerOptions": {
     "types": ["node"],
     "jsx": "react-jsx",
-    "paths": {},
+    "paths": { "@/*": ["./*"] },
     "incremental": false
   },
   "include": ["src", "tests", "tsdown.config.ts", "browser"]

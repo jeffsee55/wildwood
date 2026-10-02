@@ -1,3 +1,9 @@
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../ui/tooltip";
+import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
+import { Label } from "../ui/label";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "../ui/collapsible";
+import { Button } from "../ui/button";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import ReactMarkdown from "react-markdown";
 import {
@@ -77,21 +83,25 @@ export function AgentPanel({
       </div>
     );
   return (
-    <SessionPanel
-      key={runtime.state.session.id}
-      runtime={runtime}
-      reference={reference}
-      onReferenceUsed={onReferenceUsed}
-      onChanged={onChanged}
-      onNew={
-        !draft
-          ? () => {
-              void runtime.close();
-              setRuntime(new AgentRuntime(endpoint, runtime.config, freshSession(runtime.config)));
-            }
-          : undefined
-      }
-    />
+    <TooltipProvider delay={400}>
+      <SessionPanel
+        key={runtime.state.session.id}
+        runtime={runtime}
+        reference={reference}
+        onReferenceUsed={onReferenceUsed}
+        onChanged={onChanged}
+        onNew={
+          !draft
+            ? () => {
+                void runtime.close();
+                setRuntime(
+                  new AgentRuntime(endpoint, runtime.config, freshSession(runtime.config)),
+                );
+              }
+            : undefined
+        }
+      />
+    </TooltipProvider>
   );
 }
 
@@ -161,17 +171,26 @@ function SessionPanel({
         </div>
         <div>
           {onNew && (
-            <button aria-label="New agent draft" disabled={state.running} onClick={onNew}>
+            <Button
+              variant="ghost"
+              aria-label="New agent draft"
+              disabled={state.running}
+              onClick={onNew}
+            >
               <Plus size={16} />
-            </button>
+            </Button>
           )}
-          <button
-            aria-label="Agent settings"
-            aria-expanded={settings}
-            onClick={() => setSettings(!settings)}
-          >
-            <Settings2 size={16} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger
+              render={<Button variant="ghost" size="icon" />}
+              aria-label="Agent settings"
+              aria-expanded={settings}
+              onClick={() => setSettings(!settings)}
+            >
+              <Settings2 size={16} />
+            </TooltipTrigger>
+            <TooltipContent>Agent settings</TooltipContent>
+          </Tooltip>
         </div>
       </header>
       <div className="agent-draft">
@@ -187,9 +206,9 @@ function SessionPanel({
             setSettings(false);
           }}
         >
-          <label>
+          <Label>
             Model
-            <input
+            <Input
               aria-label="Gateway model"
               value={model}
               disabled={state.running}
@@ -197,10 +216,10 @@ function SessionPanel({
               placeholder="provider/model"
               onChange={(e) => setModel(e.target.value)}
             />
-          </label>
-          <label>
+          </Label>
+          <Label>
             Personal AI Gateway key
-            <input
+            <Input
               type="password"
               autoComplete="off"
               aria-label="Personal AI Gateway key"
@@ -212,14 +231,14 @@ function SessionPanel({
               }
               onChange={(e) => setPersonalKey(e.target.value)}
             />
-          </label>
+          </Label>
           <p>
             {runtime.config.siteKey
               ? "The site key is available. A personal key overrides it."
               : "Your key is required to run the agent."}{" "}
             Personal keys stay in memory for this page and are cleared when you leave or reload.
           </p>
-          <button type="submit">Done</button>
+          <Button type="submit">Done</Button>
         </form>
       )}
       <div
@@ -247,7 +266,8 @@ function SessionPanel({
                 "Explore the content model and suggest improvements",
                 "Review the French translations for consistency",
               ].map((text) => (
-                <button
+                <Button
+                  variant="outline"
                   key={text}
                   onClick={() => {
                     setPrompt(text);
@@ -256,7 +276,7 @@ function SessionPanel({
                 >
                   {text}
                   <ArrowUp size={14} />
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -283,12 +303,17 @@ function SessionPanel({
             <span>
               {reference.path.split("/").pop()}:{reference.start}–{reference.end}
             </span>
-            <button type="button" aria-label="Remove selected context" onClick={onReferenceUsed}>
+            <Button
+              variant="ghost"
+              type="button"
+              aria-label="Remove selected context"
+              onClick={onReferenceUsed}
+            >
               <X size={12} />
-            </button>
+            </Button>
           </div>
         )}
-        <textarea
+        <Textarea
           ref={composer}
           aria-label="Message the content agent"
           placeholder={
@@ -320,12 +345,18 @@ function SessionPanel({
           </span>
           <div>
             {state.running && (
-              <button type="button" aria-label="Stop agent" onClick={() => runtime.stop()}>
+              <Button
+                variant="ghost"
+                type="button"
+                aria-label="Stop agent"
+                onClick={() => runtime.stop()}
+              >
                 <Square size={14} />
-              </button>
+              </Button>
             )}
-            <button
+            <Button
               type="submit"
+              size="icon"
               className="agent-send"
               aria-label={state.running ? "Send guidance" : "Send message"}
               disabled={
@@ -333,7 +364,7 @@ function SessionPanel({
               }
             >
               <ArrowUp size={17} />
-            </button>
+            </Button>
           </div>
         </footer>
       </form>
@@ -360,18 +391,20 @@ function ThreadItemView({ item }: { item: ThreadItem }) {
     );
   if (item.kind === "reasoning")
     return (
-      <details className="agent-thinking">
-        <summary>
+      <Collapsible className="agent-thinking">
+        <CollapsibleTrigger render={<Button variant="ghost" className="disclosure-trigger" />}>
           <ChevronRight size={12} />
           {item.done ? "Thought" : "Thinking…"}
-        </summary>
-        <p>{item.text}</p>
-      </details>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <p>{item.text}</p>
+        </CollapsibleContent>
+      </Collapsible>
     );
   if (item.kind === "tool")
     return (
-      <details className="agent-tool">
-        <summary>
+      <Collapsible className="agent-tool">
+        <CollapsibleTrigger render={<Button variant="ghost" className="disclosure-trigger" />}>
           <ChevronRight size={12} />
           <code>{item.name}</code>
           <span>
@@ -383,10 +416,12 @@ function ThreadItemView({ item }: { item: ThreadItem }) {
               "Done"
             )}
           </span>
-        </summary>
-        <pre>{JSON.stringify(item.input, null, 2)}</pre>
-        <pre>{item.output ?? "Waiting for output…"}</pre>
-      </details>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <pre>{JSON.stringify(item.input, null, 2)}</pre>
+          <pre>{item.output ?? "Waiting for output…"}</pre>
+        </CollapsibleContent>
+      </Collapsible>
     );
   if (item.kind === "turn")
     return (
