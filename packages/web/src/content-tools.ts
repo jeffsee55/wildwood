@@ -123,7 +123,7 @@ export function registerContentTools<C extends Collections>(
     );
   }
   async function source(refName: string, filename: string) {
-    engine.collectionFor(filename);
+    engine.matchCollection(filename);
     const head = await engine.ref(refName);
     const file = (await engine.files(head.snapshot)).find((f) => f.path === filename);
     if (!file || file.mode === "120000") throw new Error("Content file not found");
@@ -214,6 +214,52 @@ export function registerContentTools<C extends Collections>(
           },
         ],
       }),
+    );
+    register(
+      "list_files",
+      "List the versioned file tree, including schema-backed documents and binary assets. Tree metadata stays in the database regardless of byte storage.",
+      {
+        draft,
+        prefix: z.string().max(1024).default(""),
+        offset: z.number().int().min(0).default(0),
+        limit: z.number().int().min(1).max(100).default(50),
+        snapshot: z.string().optional(),
+      },
+      async (input) => {
+        const head = await engine.ref(await options.authorize(input.draft, false));
+        if (input.snapshot && input.snapshot !== head.snapshot)
+          throw new ConflictError("File tree changed during pagination");
+        const files = (await engine.files(head.snapshot)).filter((f) =>
+          f.path.startsWith(input.prefix),
+        );
+        return {
+          ...head,
+          files: files
+            .slice(input.offset, input.offset + input.limit)
+            .map((f) => ({ ...f, collection: engine.matchCollection(f.path)?.name ?? null })),
+          nextOffset: files.length > input.offset + input.limit ? input.offset + input.limit : null,
+        };
+      },
+    );
+    register(
+      "read_file",
+      "Read metadata and optionally base64 bytes for a file in the authorized branch. Binary reads are bounded to 512 KiB; use previews for larger media.",
+      { draft, path, includeContent: z.boolean().default(false) },
+      async (input) => {
+        engine.matchCollection(input.path);
+        const head = await engine.ref(await options.authorize(input.draft, false));
+        const file = (await engine.files(head.snapshot)).find((f) => f.path === input.path);
+        if (!file || file.mode === "120000") throw new Error("File not found");
+        const bytes = await engine.bytes(file.blob);
+        if (input.includeContent && bytes.length > 512 * 1024)
+          throw new Error("File exceeds inline read limit");
+        return {
+          ...head,
+          ...file,
+          size: bytes.length,
+          ...(input.includeContent ? { base64: Buffer.from(bytes).toString("base64") } : {}),
+        };
+      },
     );
     register(
       "read_documents",
@@ -356,6 +402,34 @@ export function registerContentTools<C extends Collections>(
   }
   if (options.write) {
     register(
+      "write_asset",
+      "Write a binary or unmodeled file using canonical base64 (up to 512 KiB). Schema-backed paths must use content tools. Bytes use the optional asset store; paths and versions remain in the database. Never publishes.",
+      { draft, path, revision, command, base64: z.string().max(700000) },
+      async (input) => {
+        const ref = await options.authorize(input.draft, true);
+        if (engine.matchCollection(input.path))
+          throw new Error("Schema-backed paths require content editing tools");
+        const bytes = Buffer.from(input.base64, "base64");
+        if (bytes.toString("base64") !== input.base64 || bytes.length > 512 * 1024)
+          throw new Error("Invalid base64 or asset exceeds 512 KiB");
+        const saved = await engine.apply({
+          ref,
+          expectedRevision: input.revision,
+          idempotencyKey: `agent:${options.credentialId}:${ref}:${input.command}`,
+          changes: [{ path: input.path, content: bytes }],
+          audit: { actor: options.actor, source: "mcp-asset" },
+        });
+        await options.saved?.(ref, saved.revision, saved.snapshot, [input.path]);
+        return {
+          ...saved,
+          path: input.path,
+          size: bytes.length,
+          next: "Create a preview or submit_review. Published files are unchanged.",
+        };
+      },
+      true,
+    );
+    register(
       "validate_changes",
       "Validate a proposed batch against content schemas without saving or advancing the draft.",
       { draft, revision, changes },
@@ -381,7 +455,7 @@ export function registerContentTools<C extends Collections>(
       const batch = input.changes.map((c) =>
         "delete" in c ? c : { path: c.path, content: c.source },
       );
-      for (const change of batch) engine.collectionFor(change.path);
+      for (const change of batch) engine.matchCollection(change.path);
       const result = await engine.apply({
         ref,
         expectedRevision: input.revision,

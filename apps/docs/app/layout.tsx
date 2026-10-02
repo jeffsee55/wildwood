@@ -7,6 +7,7 @@ import "./globals.css";
 import { Toolbar } from "wildwood-web/next";
 import { sourcemap } from "wildwood-web/sourcemap";
 import { getWeb } from "@/lib/cms";
+import { LanguageControls } from "./language-controls";
 import { previewOnly } from "@/lib/content";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -19,7 +20,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
   const web = await getWeb();
   const toolbarState = await web.state(ctx);
   return (
-    <html lang={ctx.locale}>
+    <html lang={ctx.locale} translate={ctx.actor ? "no" : undefined}>
       <body>
         <div className="manual">
           <header>
@@ -38,14 +39,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
           </header>
           <div className="controls">
             <form key={`${ctx.locale}-${ctx.version}`} action={preferences}>
-              <label>
-                Language{" "}
-                <select disabled={ctx.pinned} name="locale" defaultValue={ctx.locale}>
-                  <option value="en">English</option>
-                  <option value="fr">Français</option>
-                </select>
-              </label>
-              <button disabled={ctx.pinned}>Apply</button>
+              <LanguageControls locale={ctx.locale} pinned={ctx.pinned} />
             </form>
           </div>
           <div className="columns">

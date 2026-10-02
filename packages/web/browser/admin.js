@@ -112,3 +112,39 @@ document.querySelector("#local-oauth")?.addEventListener("click", () =>
     location.assign(response.redirect_uri || response.url || "/");
   }),
 );
+
+const uploadForm = document.querySelector("#asset-upload");
+let uploadAttempt;
+uploadForm?.addEventListener("change", () => {
+  uploadAttempt = undefined;
+});
+document.querySelector("#asset-file")?.addEventListener("change", (event) => {
+  const file = event.target.files?.[0];
+  if (file) document.querySelector("#asset-path").value = "media/" + file.name;
+});
+uploadForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  run(async () => {
+    const file = document.querySelector("#asset-file").files?.[0];
+    if (!file || file.size > 4 * 1024 * 1024) throw new Error("Choose a file up to 4 MiB");
+    uploadAttempt ??= crypto.randomUUID();
+    const query = new URLSearchParams({
+      path: document.querySelector("#asset-path").value,
+      revision: uploadForm.dataset.revision,
+      command: uploadAttempt,
+    });
+    const button = uploadForm.querySelector("button");
+    button.disabled = true;
+    try {
+      const response = await fetch(ctx.endpoint + "/asset-upload?" + query, {
+        method: "POST",
+        body: file,
+      });
+      const result = await response.json();
+      if (!response.ok || result.ok === false) throw new Error(result.error || "Upload failed");
+      location.reload();
+    } finally {
+      button.disabled = false;
+    }
+  });
+});

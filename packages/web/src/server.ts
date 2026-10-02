@@ -2,7 +2,10 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { ContentEngine, Collections, SqlDatabase, Ref } from "wildwood-core";
 import { createReconciliation, resolutionsSchema } from "./reconciliation";
+import { mediaResponse } from "./media";
+import { PayloadTooLarge, readBody } from "./http";
 import { draftName } from "./draft-name";
+import { gatewayResponse } from "./gateway";
 import { pageLocation } from "./page-context";
 import { registerContentTools, toolResult, toolError } from "./content-tools";
 import { assets } from "./assets.generated";
@@ -33,6 +36,7 @@ const mapSchema = z.object({
   path: z.array(z.union([z.string(), z.number().int().nonnegative()])),
 });
 const inputSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("compact-git") }),
   z.object({ type: z.literal("draft-merge-plan"), id: text }),
   z.object({ type: z.literal("draft-merge-file"), plan: text, path: text }),
   z.object({
@@ -65,6 +69,7 @@ const inputSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("publish"), id: text, revision: text }),
   z.object({
     type: z.literal("review-decision"),
+    command: z.string().min(1).max(200).optional(),
     id: text,
     revision: text,
     decision: z.enum(["comment", "approve", "request_changes"]),
@@ -132,6 +137,8 @@ export function createWeb<C extends Collections>(options: {
     ) => (r: Request) => Promise<Response>;
   };
   ownerEmail?: string;
+  /** Optional server-owned AI Gateway key; never serialized to the browser. */
+  agent?: { apiKey?: string; model?: string };
   reviewAuthority?: ReviewAuthority;
   /** Maps physical content files to site routes for pinned review previews. */
   documentUrl?: (path: string) => string | undefined;
@@ -244,7 +251,7 @@ export function createWeb<C extends Collections>(options: {
       user.emailVerified &&
       options.ownerEmail &&
       user.email.toLowerCase() === options.ownerEmail.toLowerCase();
-    const membership = await get(`member:${user.id}`, "member");
+    const membership = owner ? null : await get(`member:${user.id}`, "member");
     return {
       id: user.id,
       name: user.name,
@@ -256,31 +263,30 @@ export function createWeb<C extends Collections>(options: {
     prefs: { version?: string; variant?: Record<string, string> } = {},
   ): Promise<View> {
     await ready();
-    const person = await actor(headers);
+    const selection = cookie(headers, "ww-view");
+    const [person, selected] = await Promise.all([
+      actor(headers),
+      selection ? get(digest(selection)) : null,
+    ]);
     let version = prefs.version && options.engines[prefs.version] ? prefs.version : options.version;
     let variant = prefs.variant ?? options.variant ?? {};
     // Validate even caller-provided preferences; they are query context, never access authority.
     for (const [axis, spec] of Object.entries(cms.config.variants ?? {}))
       if (!spec.options.includes(variant[axis] ?? spec.default)) throw new Error("Unknown variant");
-    const selection = cookie(headers, "ww-view");
-    const selected = selection ? await get(digest(selection)) : null;
     if (selected?.kind === "draft-view" && person && selected.actor === person.id) {
-      const draft = await get(String(selected.data.draft), "draft");
-      if (
-        draft &&
-        draft.actor === person.id &&
-        person.role !== "reader" &&
-        (await reviews.draftStatus(String(draft.id))).status !== "published"
-      ) {
-        const ref = await cms.ref(String(draft.data.ref));
+      const draft =
+        person.role !== "reader"
+          ? await reviews.draftView(String(selected.data.draft), person.id)
+          : null;
+      if (draft && draft.status !== "published") {
         return {
           version,
           variant,
-          snapshot: ref.snapshot,
-          ref,
+          snapshot: draft.ref.snapshot,
+          ref: draft.ref,
           mode: "draft",
           actor: person,
-          viewId: String(draft.id),
+          viewId: draft.id,
         };
       }
     }
@@ -375,9 +381,18 @@ export function createWeb<C extends Collections>(options: {
         input.decision,
         input.body,
         input.path,
+        input.command,
       );
     }
     const person = requireEditor(current.actor);
+    if (input.type === "compact-git") {
+      if (person.role !== "owner") throw new Error("Owner access required for storage maintenance");
+      const result = await (await import("wildwood-core/git")).compactGitStorage(cms);
+      return {
+        ...result,
+        message: `Storage optimized: ${result.packsBefore} packs consolidated into ${result.packsAfter}; ${Math.max(0, result.reclaimedBytes).toLocaleString()} duplicate bytes reclaimed. History preserved.`,
+      };
+    }
     if (input.type === "draft-merge-plan") return reconciliation.plan(person, input.id);
     if (input.type === "draft-merge-file")
       return reconciliation.file(person, input.plan, input.path);
@@ -482,6 +497,30 @@ export function createWeb<C extends Collections>(options: {
       };
     }
     const ref = requireDraft(current);
+    // A receipt commits with the ref. Replays are checked before stale-map validation,
+    // so a lost response can be reconciled even after the draft advances.
+    const receiptId =
+      input.type === "save"
+        ? `editor-save:${digest(JSON.stringify([person.id, ref.name, input.command]))}`
+        : undefined;
+    const fingerprint = receiptId
+      ? digest(
+          JSON.stringify({
+            input,
+            view: current.viewId,
+            version: current.version,
+            variant: Object.entries(current.variant).sort(),
+          }),
+        )
+      : undefined;
+    if (receiptId) {
+      const receipt = await get(receiptId, "editor-save");
+      if (receipt) {
+        if (receipt.actor !== person.id || receipt.data.fingerprint !== fingerprint)
+          throw new Error("Save key already used with different content or view");
+        return receipt.data.result as RecordData;
+      }
+    }
     if ((await reviews.draftStatus(current.viewId!)).status !== "open")
       throw new Error("This draft is read-only. Create a new draft.");
     if (input.type === "document" || input.type === "save") {
@@ -489,9 +528,12 @@ export function createWeb<C extends Collections>(options: {
       cms.collectionFor(map.source);
       const file = (await cms.files(current.snapshot)).find((f) => f.path === map.source);
       if (!file || file.mode === "120000") throw new Error("Source file unavailable");
-      if (input.type === "document")
+      if (input.type === "document") {
+        const bytes = await cms.bytes(file.blob);
+        if (bytes.byteLength > 512 * 1024)
+          throw new Error("This file is too large for the in-page editor");
         return {
-          source: new TextDecoder().decode(await cms.bytes(file.blob)),
+          source: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
           revision: ref.revision,
           map: JSON.stringify(map),
           path: map.source,
@@ -502,6 +544,7 @@ export function createWeb<C extends Collections>(options: {
               ([k, v]) => v !== cms.config.variants?.[k]?.default,
             ),
         };
+      }
       let path = map.source;
       if (input.override) {
         path = map.canonical;
@@ -518,23 +561,40 @@ export function createWeb<C extends Collections>(options: {
           throw new Error("An override already exists; reload to select it");
       }
       const pageUrl = input.pageUrl ? pageLocation(input.pageUrl, options.origin) : undefined;
-      const saved = await cms.apply({
+      const result = { message: "Saved. The server is rendering the updated page.", refresh: true };
+      await cms.apply({
         ref: ref.name,
         expectedRevision: input.revision,
         idempotencyKey: `web:${person.id}:${input.command}`,
         changes: [{ path, content: input.source }],
         audit: { actor: person.id, source: "editor" },
+        intent: { fingerprint },
+        onCommit: async (tx, saved) => {
+          if (pageUrl)
+            await reviews.recordEdit(
+              {
+                ref: ref.name,
+                revision: saved.revision,
+                snapshot: saved.snapshot,
+                path,
+                actor: person.id,
+                page: { url: pageUrl, version: current.version, variant: current.variant },
+              },
+              tx,
+            );
+          await tx.execute(
+            "INSERT INTO ww_web_records(repository,id,kind,actor,data) VALUES(?,?,?,?,?)",
+            [
+              repository,
+              receiptId!,
+              "editor-save",
+              person.id,
+              JSON.stringify({ fingerprint, result }),
+            ],
+          );
+        },
       });
-      if (pageUrl)
-        await reviews.recordEdit({
-          ref: ref.name,
-          revision: saved.revision,
-          snapshot: saved.snapshot,
-          path,
-          actor: person.id,
-          page: { url: pageUrl, version: current.version, variant: current.variant },
-        });
-      return { message: "Saved. The server is rendering the updated page.", refresh: true };
+      return result;
     }
     if (input.type === "share") {
       const token = secret(),
@@ -603,32 +663,33 @@ export function createWeb<C extends Collections>(options: {
     throw new Error("Unsupported command");
   }
   async function state(current: View) {
-    const drafts = current.actor
-      ? await Promise.all(
-          (await list("draft", current.actor.id)).map(async (draft) => {
-            const row = (
-              await db.execute(
-                "SELECT s.created_at FROM ww2_refs r JOIN ww2_snapshots s ON s.id=r.snapshot WHERE r.repository=? AND r.name=?",
-                [repository, String(draft.data.ref)],
-              )
-            ).rows[0];
-            const updatedAt = Math.max(
-              Number(draft.data.created),
-              Date.parse(String(row?.created_at)) || 0,
-            );
-            return {
-              ...draft,
-              ...(await reviews.draftStatus(String(draft.id))),
-              updatedAt,
-              data: {
-                ...draft.data,
-                created: Number(draft.data.created),
-                name: draft.data.name ?? draftName(String(draft.data.ref)),
-              },
-            };
-          }),
-        )
-      : [];
+    const records = current.actor ? await list("draft", current.actor.id) : [];
+    const [statuses, timestamps] = records.length
+      ? await Promise.all([
+          reviews.draftStatuses(records.map((draft) => draft.id)),
+          db.execute(
+            `SELECT r.name,s.created_at FROM ww2_refs r JOIN ww2_snapshots s ON s.id=r.snapshot
+        WHERE r.repository=? AND r.name IN (SELECT value FROM json_each(?))`,
+            [repository, JSON.stringify(records.map((draft) => String(draft.data.ref)))],
+          ),
+        ])
+      : [
+          new Map<string, { status: "open" | "landing" | "published"; review?: string }>(),
+          { rows: [] },
+        ];
+    const times = new Map(
+      timestamps.rows.map((row) => [String(row.name), Date.parse(String(row.created_at)) || 0]),
+    );
+    const drafts = records.map((draft) => ({
+      ...draft,
+      ...statuses.get(draft.id),
+      updatedAt: Math.max(Number(draft.data.created), times.get(String(draft.data.ref)) ?? 0),
+      data: {
+        ...draft.data,
+        created: Number(draft.data.created),
+        name: draft.data.name ?? draftName(String(draft.data.ref)),
+      },
+    }));
     return {
       endpoint: base,
       mcpUrl: `${options.origin}${base}/mcp`,
@@ -639,6 +700,7 @@ export function createWeb<C extends Collections>(options: {
       actor: current.actor,
       version: current.version,
       variant: current.variant,
+      draft: current.mode === "draft" ? current.viewId : undefined,
       canEdit: current.mode === "draft" && !!current.actor && current.actor.role !== "reader",
       drafts: drafts
         .filter((d) => d.status !== "published")
@@ -695,7 +757,172 @@ export function createWeb<C extends Collections>(options: {
         };
         if (request.headers.get("if-none-match") === etag)
           return new Response(null, { status: 304, headers });
-        return new Response(request.method === "HEAD" ? null : asset.body, { headers });
+        return new Response(
+          request.method === "HEAD"
+            ? null
+            : asset.encoding === "base64"
+              ? Buffer.from(asset.body, "base64")
+              : asset.body,
+          { headers },
+        );
+      }
+      if (path === "/agent/gateway") {
+        if (request.method === "GET") {
+          if (request.headers.get("sec-fetch-site") !== "same-origin")
+            return json({ error: "Cross-origin request rejected" }, 403);
+        } else sameOrigin(request);
+        const person = await actor(request.headers);
+        if (!person || person.role === "reader")
+          return json({ error: "Editor sign-in required" }, 403);
+        await ready();
+        const rate = await db.execute(
+          "INSERT INTO ww_web_rate_limits(repository,subject,window,count) VALUES(?,?,?,1) ON CONFLICT(repository,subject) DO UPDATE SET count=CASE WHEN window=excluded.window THEN count+1 ELSE 1 END, window=excluded.window RETURNING count",
+          [repository, `gateway:${person.id}`, Math.floor(Date.now() / 60000)],
+        );
+        if (Number(rate.rows[0].count) > 60)
+          return json({ error: "Too many model requests. Retry in a minute." }, 429);
+        return await gatewayResponse(request, options.agent?.apiKey);
+      }
+      if (path === "/agent/config" && request.method === "GET") {
+        const person = await actor(request.headers);
+        if (!person || person.role === "reader")
+          return json({ error: "Editor sign-in required" }, 403);
+        return json({
+          actor: person,
+          repository,
+          siteKey: !!options.agent?.apiKey,
+          model: options.agent?.model ?? "anthropic/claude-sonnet-4.5",
+          wasm: `${base}/assets/${assets["fx-core.wasm"].path}`,
+        });
+      }
+      if (path === "/agent/start" && request.method === "POST") {
+        sameOrigin(request);
+        const person = requireEditor(await actor(request.headers));
+        const input = z
+          .object({ session: z.string().uuid(), draft: z.string().max(200).optional() })
+          .parse(JSON.parse(new TextDecoder().decode(await readBody(request, 4096))));
+        const sessionId = `embedded:${person.id}:${input.session}`;
+        const previous = await get(sessionId, "embedded-session");
+        let draftId = previous ? String(previous.data.draft) : input.draft;
+        if (!draftId) {
+          // Stable identity makes a lost start response safe to retry across workers.
+          draftId = digest(sessionId);
+          await db.transaction(async (tx) => {
+            const exists = (
+              await tx.execute("SELECT id FROM ww_web_records WHERE repository=? AND id=?", [
+                repository,
+                draftId!,
+              ])
+            ).rows[0];
+            if (exists) return;
+            const main = (
+              await tx.execute(
+                "SELECT snapshot,revision FROM ww2_refs WHERE repository=? AND name=?",
+                [repository, publishedRef],
+              )
+            ).rows[0];
+            if (!main) throw new Error("Published content unavailable");
+            const ref = `draft/${draftId}`;
+            await tx.execute(
+              "INSERT INTO ww2_refs(repository,name,snapshot,revision) VALUES(?,?,?,0)",
+              [repository, ref, String(main.snapshot)],
+            );
+            await tx.execute(
+              "INSERT INTO ww_web_records(repository,id,kind,actor,data) VALUES(?,?,?,?,?)",
+              [
+                repository,
+                draftId!,
+                "draft",
+                person.id,
+                JSON.stringify({
+                  ref,
+                  name: draftName(ref),
+                  base: String(main.snapshot),
+                  baseRevision: Number(main.revision),
+                  created: Date.now(),
+                }),
+              ],
+            );
+          });
+        }
+        const draft = await get(draftId, "draft");
+        if (
+          !draft ||
+          draft.actor !== person.id ||
+          (await reviews.draftStatus(draftId)).status !== "open"
+        )
+          return json({ error: "Choose your own open draft for this session." }, 403);
+        if (previous && input.draft && input.draft !== draftId)
+          throw new Error("Session belongs to another draft");
+        if (!previous)
+          await db.execute(
+            "INSERT OR IGNORE INTO ww_web_records(repository,id,kind,actor,data) VALUES(?,?,?,?,?)",
+            [
+              repository,
+              sessionId,
+              "embedded-session",
+              person.id,
+              JSON.stringify({ draft: draftId }),
+            ],
+          );
+        const bound = await get(sessionId, "embedded-session");
+        if (bound?.data.draft !== draftId) throw new Error("Session belongs to another draft");
+        const token = secret();
+        await put(
+          "agent",
+          person.id,
+          {
+            ref: draft.data.ref,
+            draft: draftId,
+            version: options.version,
+            variant: options.variant ?? {},
+            read: true,
+            write: true,
+            createDrafts: false,
+            retryScope: sessionId,
+            name: "Embedded agent",
+            audience: `${options.origin}${base}/mcp`,
+          },
+          Date.now() + 8 * 3600_000,
+          digest(token),
+        );
+        return json({
+          token,
+          draft: draftId,
+          name: draft.data.name,
+          ref: draft.data.ref,
+          endpoint: `${options.origin}${base}/mcp`,
+          version: options.version,
+          variant: options.variant ?? {},
+          review: (await reviews.draftStatus(draftId)).review,
+        });
+      }
+      if (path === "/agent" && request.method === "GET") {
+        const person = await actor(request.headers);
+        if (!person)
+          return new Response(null, {
+            status: 303,
+            headers: {
+              Location: `${base}/sign-in?next=${encodeURIComponent(url.pathname + url.search)}`,
+            },
+          });
+        requireEditor(person);
+        const context = JSON.stringify({
+          endpoint: base,
+          draft: url.searchParams.get("draft"),
+        }).replaceAll("<", "\\u003c");
+        return new Response(
+          `<!doctype html><html lang="en" translate="no"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent — Wildwood</title><link rel="stylesheet" href="${base}/assets/${assets["agent.css"].path}"><body><div id="agent-root"></div><script id="context" type="application/json">${context}</script><script type="module" src="${base}/assets/${assets["agent.js"].path}"></script></body></html>`,
+          {
+            headers: {
+              "Content-Type": "text/html; charset=utf-8",
+              "Cache-Control": "private, no-store",
+              "Referrer-Policy": "no-referrer",
+              "Content-Security-Policy":
+                "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+            },
+          },
+        );
       }
       if (path === "/health" && request.method === "GET") {
         await ready();
@@ -807,7 +1034,7 @@ export function createWeb<C extends Collections>(options: {
           bearer_methods_supported: ["header"],
           scopes_supported: ["content:read", "content:write", "drafts:create"],
         });
-      if (path === "/mcp") return mcpRequest(request);
+      if (path === "/mcp") return await mcpRequest(request);
       if (path === "/local-login" && request.method === "POST") {
         sameOrigin(request);
         if (!development) return json({ error: "Not found" }, 404);
@@ -907,6 +1134,20 @@ export function createWeb<C extends Collections>(options: {
         );
       }
       const current = await view(request.headers);
+      if (path === "/media" && ["GET", "HEAD"].includes(request.method)) {
+        const engine = options.engines[current.version];
+        const filename = url.searchParams.get("path") ?? "";
+        engine.matchCollection(filename);
+        if (
+          url.searchParams.has("snapshot") &&
+          url.searchParams.get("snapshot") !== current.snapshot
+        )
+          return json({ error: "Media view changed; reload the page" }, 409);
+        const file = (await engine.files(current.snapshot)).find((f) => f.path === filename);
+        if (!file || file.mode === "120000" || engine.matchCollection(filename))
+          return json({ error: "Asset not found" }, 404);
+        return mediaResponse(await engine.bytes(file.blob), filename, request);
+      }
       if (!current.actor)
         return new Response(null, {
           status: 303,
@@ -915,15 +1156,58 @@ export function createWeb<C extends Collections>(options: {
             "Cache-Control": "no-store",
           },
         });
+      if (path === "/asset-upload" && request.method === "POST") {
+        sameOrigin(request);
+        const person = requireEditor(current.actor);
+        if (current.mode !== "draft" || !current.ref)
+          throw new Error("Select your editable draft before uploading");
+        const engine = options.engines[current.version];
+        const input = z
+          .object({
+            path: z.string().min(1).max(1024),
+            revision: z.coerce.number().int().nonnegative(),
+            command: z.string().min(1).max(200),
+          })
+          .parse(Object.fromEntries(url.searchParams));
+        if (engine.matchCollection(input.path))
+          throw new Error("Use content editing for schema-backed paths");
+        const bytes = await readBody(request, 4 * 1024 * 1024);
+        const saved = await engine.apply({
+          ref: current.ref.name,
+          expectedRevision: input.revision,
+          idempotencyKey: `upload:${person.id}:${current.ref.name}:${input.command}`,
+          changes: [{ path: input.path, content: bytes }],
+          audit: { actor: person.id, source: "media-upload" },
+        });
+        return json({ ok: true, ...saved });
+      }
+      if (path === "/media-library" && request.method === "GET") {
+        const engine = options.engines[current.version];
+        const offset = Math.max(0, Math.min(100000, Number(url.searchParams.get("offset")) || 0));
+        const files = (await engine.files(current.snapshot)).filter(
+          (f) => f.mode !== "120000" && !engine.matchCollection(f.path),
+        );
+        const cards = files
+          .slice(offset, offset + 48)
+          .map((file) => {
+            const href = `${base}/media?${new URLSearchParams({ path: file.path, snapshot: current.snapshot })}`;
+            const image = /\.(png|jpe?g|gif|webp|avif)$/i.test(file.path);
+            return `<figure>${image ? `<img src="${htmlEscape(href)}" alt="${htmlEscape(file.path)}" loading="lazy">` : '<div class="asset-placeholder">File</div>'}<figcaption><a href="${htmlEscape(href)}">${htmlEscape(file.path)}</a><small>${file.size === undefined ? "" : `${file.size.toLocaleString()} bytes`}</small></figcaption></figure>`;
+          })
+          .join("");
+        return page(
+          "Media library",
+          `<p>${current.mode === "draft" ? "Your draft" : "Current view"} · ${files.length} ${files.length === 1 ? "file" : "files"}</p>${current.mode === "draft" && current.ref ? `<form id="asset-upload" data-revision="${current.ref.revision}"><label>File<input type="file" id="asset-file" required></label><label>Repository path<input id="asset-path" placeholder="media/photo.png" required></label><button>Upload to draft</button><p>Up to 4 MiB. Uploads become public only after review and publication.</p></form>` : "<p>Select a draft from the site toolbar to upload files.</p>"}<div class="asset-grid">${cards || "<p>No media in this view yet.</p>"}</div>${offset + 48 < files.length ? `<a href="?offset=${offset + 48}">More files</a>` : ""}`,
+        );
+      }
       if (path === "/command" && request.method === "POST") {
         sameOrigin(request);
-        const raw = await request.text();
-        if (raw.length > 256 * 1024) return json({ error: "Request too large" }, 413);
-        const input = JSON.parse(raw);
+        const input = JSON.parse(new TextDecoder().decode(await readBody(request, 1024 * 1024)));
         // Backend pages manage access/review only. In-page content writes must use the RSC action bridge.
         if (
           ![
             "revoke",
+            "compact-git",
             "grant-editor",
             "access-request",
             "publish",
@@ -965,7 +1249,7 @@ export function createWeb<C extends Collections>(options: {
         const requests = person.role === "owner" ? await list("access") : [];
         return page(
           "Access",
-          `<p>Signed in as ${htmlEscape(person.name)} · ${person.role}</p>${person.role === "reader" ? '<button data-command="access-request">Request editing access</button>' : ""}<h2>Shared previews and connected agents</h2>${records.length ? records.map((r) => `<section><p>${htmlEscape(String(r.kind))} · ${htmlEscape(String(r.data.name ?? r.data.ref ?? r.data.snapshot ?? "Agent connection"))}</p><p>${r.expires === null ? (r.data.createDrafts ? "No expiry · until revoked" : "No expiry · until revoked or draft completed") : `Expires ${new Date(Number(r.expires)).toISOString()}`}</p><button data-command="revoke" data-id="${htmlEscape(String(r.id))}">Revoke</button></section>`).join("") : "<p>No active shared access.</p>"}${requests.length ? "<h2>Access requests</h2>" + requests.map((r) => `<section><p>${htmlEscape(String(r.data.name))}</p><button data-command="grant-editor" data-id="${htmlEscape(String(r.id))}">Grant editing access</button></section>`).join("") : ""}<button id="logout">Sign out</button>`,
+          `<p>Signed in as ${htmlEscape(person.name)} · ${person.role}</p>${person.role === "reader" ? '<button data-command="access-request">Request editing access</button>' : ""}<h2>Shared previews and connected agents</h2>${records.length ? records.map((r) => `<section><p>${htmlEscape(String(r.kind))} · ${htmlEscape(String(r.data.name ?? r.data.ref ?? r.data.snapshot ?? "Agent connection"))}</p><p>${r.expires === null ? (r.data.createDrafts ? "No expiry · until revoked" : "No expiry · until revoked or draft completed") : `Expires ${new Date(Number(r.expires)).toISOString()}`}</p><button data-command="revoke" data-id="${htmlEscape(String(r.id))}">Revoke</button></section>`).join("") : "<p>No active shared access.</p>"}${requests.length ? "<h2>Access requests</h2>" + requests.map((r) => `<section><p>${htmlEscape(String(r.data.name))}</p><button data-command="grant-editor" data-id="${htmlEscape(String(r.id))}">Grant editing access</button></section>`).join("") : ""}${person.role === "owner" ? '<h2>Storage</h2><p>Reclaim duplicate Git pack bytes while preserving all commits, branches, and reviews.</p><button data-command="compact-git">Optimize storage</button>' : ""}<button id="logout">Sign out</button>`,
         );
       }
       if (path === "/review/preview" && request.method === "GET") {
@@ -1019,6 +1303,20 @@ export function createWeb<C extends Collections>(options: {
           ),
         );
       }
+      if (path === "/review/media" && ["GET", "HEAD"].includes(request.method)) {
+        const filename = url.searchParams.get("path") ?? "";
+        const side = url.searchParams.get("side");
+        if (side !== "before" && side !== "after")
+          return json({ error: "Choose before or after" }, 400);
+        const bytes = await reviews.media(
+          current.actor,
+          url.searchParams.get("id") ?? "",
+          url.searchParams.get("revision") ?? "",
+          filename,
+          side,
+        );
+        return mediaResponse(bytes, filename, request);
+      }
       if (path === "/review/file" && request.method === "GET") {
         return json(
           await reviews.file(
@@ -1043,7 +1341,7 @@ export function createWeb<C extends Collections>(options: {
               "Cache-Control": "private, no-store",
               "Referrer-Policy": "no-referrer",
               "Content-Security-Policy":
-                "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+                "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
             },
           },
         );
@@ -1052,7 +1350,7 @@ export function createWeb<C extends Collections>(options: {
     } catch (error) {
       return json(
         { ok: false, error: error instanceof Error ? error.message : "Request failed" },
-        400,
+        error instanceof PayloadTooLarge ? 413 : 400,
       );
     }
   }
@@ -1072,26 +1370,18 @@ export function createWeb<C extends Collections>(options: {
     const origin = request.headers.get("origin");
     if (origin && origin !== options.origin)
       return json({ error: "Cross-origin MCP request rejected" }, 403);
+    // This stateless server returns JSON per request and has no notification stream.
+    // An open, immediately-closed SSE response makes clients reconnect indefinitely.
+    if (request.method === "GET")
+      return new Response(null, {
+        status: 405,
+        headers: { Allow: "POST", "Cache-Control": "no-store" },
+      });
     if (request.method === "POST") {
-      // Bound the stream as well as Content-Length; chunked bodies are not exempt.
-      const reader = request.body?.getReader();
-      const chunks: Uint8Array[] = [];
-      let length = 0;
-      if (reader)
-        for (;;) {
-          const next = await reader.read();
-          if (next.done) break;
-          length += next.value.byteLength;
-          if (length > 1024 * 1024) {
-            await reader.cancel();
-            return json({ error: "MCP request exceeds 1 MiB" }, 413);
-          }
-          chunks.push(next.value);
-        }
       request = new Request(request.url, {
         method: request.method,
         headers: request.headers,
-        body: Buffer.concat(chunks),
+        body: new Uint8Array(await readBody(request, 1024 * 1024)),
       });
     }
     const bearer = request.headers.get("authorization")?.replace(/^Bearer /i, "");
@@ -1370,7 +1660,7 @@ export function createWeb<C extends Collections>(options: {
         engine,
         read: !!grant && grant.read !== false,
         write: !!grant?.write,
-        credentialId,
+        credentialId: typeof grant?.retryScope === "string" ? grant.retryScope : credentialId,
         actor: delegated?.actor ?? "agent",
         variant: (grant?.variant as Record<string, string>) ?? options.variant,
         saved: async (ref, revision, snapshot, paths) => {

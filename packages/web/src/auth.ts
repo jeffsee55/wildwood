@@ -127,9 +127,9 @@ export function createIdentity(options: {
     },
     async ready() {
       await (migration ??= migrate().catch((error) => {
-          migration = undefined;
-          throw error;
-        }));
+        migration = undefined;
+        throw error;
+      }));
     },
     async handler(request: Request) {
       await this.ready();

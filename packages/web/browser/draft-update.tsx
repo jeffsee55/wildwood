@@ -1,5 +1,12 @@
+import { SelectField } from "./ui/select-field";
+import { Dialog, DialogContent, DialogClose, DialogTitle, DialogDescription } from "./ui/dialog";
+import { Checkbox } from "./ui/checkbox";
+import { Textarea } from "./ui/textarea";
+import { Label } from "./ui/label";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "./ui/collapsible";
 import { useState, useRef } from "react";
-import { Dialog } from "@base-ui/react/dialog";
+import { requestJson } from "./request";
+import { retryKey } from "./editor-model";
 import { Button } from "./ui/button";
 type Plan = {
   plan: string;
@@ -31,16 +38,7 @@ export function DraftUpdate({
     [choices, setChoices] = useState<Record<string, Resolution>>({}),
     [confirmed, setConfirmed] = useState(false);
   const attempt = useRef<{ payload: string; key: string } | null>(null);
-  async function request(body: object) {
-    const r = await fetch(endpoint + "/command", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await r.json();
-    if (!r.ok || data.ok === false) throw new Error(data.error || "Request failed");
-    return data;
-  }
+  const request = (body: object) => requestJson(endpoint + "/command", body);
   async function start() {
     setOpen(true);
     setBusy(true);
@@ -78,9 +76,7 @@ export function DraftUpdate({
       resolutions: Object.values(choices),
       confirmConflicts: confirmed,
     };
-    const payload = JSON.stringify(body);
-    if (attempt.current?.payload !== payload)
-      attempt.current = { payload, key: crypto.randomUUID() };
+    attempt.current = retryKey(attempt.current, body);
     setBusy(true);
     setError("");
     try {
@@ -104,151 +100,151 @@ export function DraftUpdate({
   return (
     <>
       <Button onClick={start}>Update draft with Git</Button>
-      <Dialog.Root
+      <Dialog
         open={open}
         onOpenChange={(v) => {
           if (!busy) setOpen(v);
         }}
       >
-        <Dialog.Portal>
-          <Dialog.Backdrop className="review-backdrop" />
-          <Dialog.Popup className="review-dialog merge-dialog">
-            <Dialog.Title>Update your draft</Dialog.Title>
-            <Dialog.Description>
-              Git combines your branch with the latest published content. Review and approve the
-              updated draft before publishing.
-            </Dialog.Description>
-            {busy && !plan && <p>Computing Git merge…</p>}
-            {error && <p role="alert">{error}</p>}
-            {plan?.upToDate ? (
-              <p>This draft already includes the latest published content.</p>
-            ) : (
-              plan && (
-                <>
-                  {plan.clean ? (
-                    <p>Git merged the changes without conflicts.</p>
-                  ) : (
-                    <>
-                      <p>
-                        Review Git’s conflicts and choose the final content for each file. “Keep
-                        draft” and “Use published” select the entire file, including deletion when
-                        that side has no file.
-                      </p>
-                      <ul>
-                        {plan.messages
-                          .filter((m) => m.type.startsWith("CONFLICT"))
-                          .map((m, i) => (
-                            <li key={i}>{m.message}</li>
-                          ))}
-                      </ul>
-                    </>
-                  )}
-                  {plan.conflicts.map((path) => (
-                    <section className="merge-file" key={path}>
-                      <h3>{path}</h3>
-                      <Button disabled={busy} variant="outline" onClick={() => inspect(path)}>
-                        Compare versions
-                      </Button>
-                      {files[path] && (
-                        <div className="merge-sources">
-                          {(["base", "ours", "theirs", "merged"] as const).map((side) => (
-                            <details key={side}>
-                              <summary>
+        <DialogContent showCloseButton={false} className="review-dialog merge-dialog">
+          <DialogTitle>Update your draft</DialogTitle>
+          <DialogDescription>
+            Git combines your branch with the latest published content. Review and approve the
+            updated draft before publishing.
+          </DialogDescription>
+          {busy && !plan && <p>Computing Git merge…</p>}
+          {error && <p role="alert">{error}</p>}
+          {plan?.upToDate ? (
+            <p>This draft already includes the latest published content.</p>
+          ) : (
+            plan && (
+              <>
+                {plan.clean ? (
+                  <p>Git merged the changes without conflicts.</p>
+                ) : (
+                  <>
+                    <p>
+                      Review Git’s conflicts and choose the final content for each file. “Keep
+                      draft” and “Use published” select the entire file, including deletion when
+                      that side has no file.
+                    </p>
+                    <ul>
+                      {plan.messages
+                        .filter((m) => m.type.startsWith("CONFLICT"))
+                        .map((m, i) => (
+                          <li key={i}>{m.message}</li>
+                        ))}
+                    </ul>
+                  </>
+                )}
+                {plan.conflicts.map((path) => (
+                  <section className="merge-file" key={path}>
+                    <h3>{path}</h3>
+                    <Button disabled={busy} variant="outline" onClick={() => inspect(path)}>
+                      Compare versions
+                    </Button>
+                    {files[path] && (
+                      <div className="merge-sources">
+                        {(["base", "ours", "theirs", "merged"] as const).map((side) => (
+                          <Collapsible key={side}>
+                            <CollapsibleTrigger
+                              render={<Button variant="ghost" className="disclosure-trigger" />}
+                            >
+                              {
                                 {
-                                  {
-                                    base: "Original",
-                                    ours: "Your draft",
-                                    theirs: "Published",
-                                    merged: "Git merge with conflict markers",
-                                  }[side]
-                                }
-                              </summary>
+                                  base: "Original",
+                                  ours: "Your draft",
+                                  theirs: "Published",
+                                  merged: "Git merge with conflict markers",
+                                }[side]
+                              }
+                            </CollapsibleTrigger>
+                            <CollapsibleContent>
                               <pre>{show(files[path][side])}</pre>
-                            </details>
-                          ))}
-                        </div>
-                      )}
-                      <label>
-                        Resolution for {path}
-                        <select
-                          value={
-                            choices[path]
-                              ? "side" in choices[path]
-                                ? choices[path].side
-                                : "source" in choices[path]
-                                  ? "custom"
-                                  : "delete"
-                              : ""
-                          }
-                          disabled={busy}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setChoices((c) => {
-                              const next = { ...c };
-                              if (!v) delete next[path];
-                              else
-                                next[path] =
-                                  v === "custom"
-                                    ? { path, source: files[path]?.merged?.source ?? "" }
-                                    : v === "delete"
-                                      ? { path, delete: true }
-                                      : { path, side: v as "ours" | "theirs" };
-                              return next;
-                            });
-                          }}
-                        >
-                          <option value="">Choose resolution</option>
-                          <option value="ours">Keep draft</option>
-                          <option value="theirs">Use published</option>
-                          <option value="custom" disabled={!files[path]?.merged?.source}>
-                            Edit merged text
-                          </option>
-                          <option value="delete">Delete file</option>
-                        </select>
-                      </label>
-                      {choices[path] && "source" in choices[path] && (
-                        <textarea
-                          aria-label={`Resolved source for ${path}`}
-                          disabled={busy}
-                          value={(choices[path] as { source: string }).source}
-                          onChange={(e) =>
-                            setChoices((c) => ({ ...c, [path]: { path, source: e.target.value } }))
-                          }
-                        />
-                      )}
-                    </section>
-                  ))}
-                  {!plan.clean && (
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={confirmed}
+                            </CollapsibleContent>
+                          </Collapsible>
+                        ))}
+                      </div>
+                    )}
+                    <Label>
+                      Resolution for {path}
+                      <SelectField
+                        label="Conflict resolution"
+                        value={
+                          choices[path]
+                            ? "side" in choices[path]
+                              ? choices[path].side
+                              : "source" in choices[path]
+                                ? "custom"
+                                : "delete"
+                            : ""
+                        }
                         disabled={busy}
-                        onChange={(e) => setConfirmed(e.target.checked)}
-                      />{" "}
-                      I reviewed Git’s conflict messages and the selected resolutions.
-                    </label>
-                  )}
-                  <Button
-                    disabled={
-                      busy || (!plan.clean && !confirmed) || plan.conflicts.some((p) => !choices[p])
-                    }
-                    onClick={apply}
-                  >
-                    {busy ? "Updating…" : "Update draft and request fresh review"}
-                  </Button>
-                </>
-              )
-            )}
-            <Button variant="outline" disabled={busy} onClick={start}>
-              Refresh merge plan
-            </Button>
-            <Dialog.Close disabled={busy} render={<Button variant="ghost" />}>
-              Close
-            </Dialog.Close>
-          </Dialog.Popup>
-        </Dialog.Portal>
-      </Dialog.Root>
+                        onValueChange={(value) => {
+                          const v = value;
+                          setChoices((c) => {
+                            const next = { ...c };
+                            if (!v) delete next[path];
+                            else
+                              next[path] =
+                                v === "custom"
+                                  ? { path, source: files[path]?.merged?.source ?? "" }
+                                  : v === "delete"
+                                    ? { path, delete: true }
+                                    : { path, side: v as "ours" | "theirs" };
+                            return next;
+                          });
+                        }}
+                        options={[
+                          { value: "", label: "Choose resolution" },
+                          { value: "ours", label: "Keep draft" },
+                          { value: "theirs", label: "Use published" },
+                          {
+                            value: "custom",
+                            label: "Edit merged text",
+                            disabled: !files[path]?.merged?.source,
+                          },
+                          { value: "delete", label: "Delete file" },
+                        ]}
+                      />
+                    </Label>
+                    {choices[path] && "source" in choices[path] && (
+                      <Textarea
+                        aria-label={`Resolved source for ${path}`}
+                        disabled={busy}
+                        value={(choices[path] as { source: string }).source}
+                        onChange={(e) =>
+                          setChoices((c) => ({ ...c, [path]: { path, source: e.target.value } }))
+                        }
+                      />
+                    )}
+                  </section>
+                ))}
+                {!plan.clean && (
+                  <Label>
+                    <Checkbox checked={confirmed} disabled={busy} onCheckedChange={setConfirmed} />{" "}
+                    I reviewed Git’s conflict messages and the selected resolutions.
+                  </Label>
+                )}
+                <Button
+                  disabled={
+                    busy || (!plan.clean && !confirmed) || plan.conflicts.some((p) => !choices[p])
+                  }
+                  onClick={apply}
+                >
+                  {busy ? "Updating…" : "Update draft and request fresh review"}
+                </Button>
+              </>
+            )
+          )}
+          <Button variant="outline" disabled={busy} onClick={start}>
+            Refresh merge plan
+          </Button>
+          <DialogClose disabled={busy} render={<Button variant="ghost" />}>
+            Close
+          </DialogClose>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

@@ -17,7 +17,7 @@
 .typeset {
   /* rhythm */
   --typeset-font-body: var(--font-geist-sans);
-  --typeset-font-heading: var(--font-geist-mono);
+  --typeset-font-heading: var(--font-geist-sans);
   --typeset-font-mono: var(--font-geist-mono);
 
   --typeset-size: 1em;
@@ -86,7 +86,7 @@
 }
 .typeset :where(h4):where(:not(.not-typeset *)) {
   font-size: 1em;
-  font-family: var(--typeset-font-mono);
+  font-family: var(--typeset-font-body);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   opacity: 0.9;
@@ -130,7 +130,7 @@
 }
 .typeset :where(li::marker):where(:not(.not-typeset *)) {
   color: var(--typeset-muted);
-  font-family: var(--typeset-font-mono);
+  font-family: var(--typeset-font-body);
   font-size: 0.9em;
 }
 
@@ -199,7 +199,7 @@
   vertical-align: top;
 }
 .typeset :where(th):where(:not(.not-typeset *)) {
-  font-family: var(--typeset-font-mono);
+  font-family: var(--typeset-font-body);
   font-weight: 600;
   font-size: 0.9em;
   text-transform: uppercase;
@@ -220,7 +220,7 @@
 }
 .typeset :where(figcaption):where(:not(.not-typeset *)) {
   margin-block-start: 0.6em;
-  font-family: var(--typeset-font-mono);
+  font-family: var(--typeset-font-body);
   font-size: 0.82em;
   letter-spacing: 0.02em;
   color: var(--typeset-muted);
@@ -246,7 +246,7 @@
 .typeset :where(summary):where(:not(.not-typeset *)) {
   cursor: pointer;
   font-weight: 600;
-  font-family: var(--typeset-font-mono);
+  font-family: var(--typeset-font-body);
   font-size: 0.92em;
 }
 

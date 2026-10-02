@@ -2,6 +2,29 @@ packages:
   - "apps/*"
   - "packages/*"
 
+catalog:
+  "@babel/runtime": ^7.29.2
+  "@libsql/client": ^0.14.0
+  "@libsql/kysely-libsql": ^0.4.1
+  "@tailwindcss/cli": 4.2.2
+  "@tailwindcss/postcss": 4.2.2
+  "@types/node": ^22.18.0
+  "@types/react": ^19.2.0
+  "@types/react-dom": ^19.2.0
+  better-auth: 1.7.0-rc.1
+  next: 16.3.6
+  oxfmt: ^0.18.0
+  oxlint: ^1.26.0
+  postcss: 8.5.23
+  react: 19.2.7
+  "react-dom": 19.2.7
+  tailwindcss: 4.2.2
+  tsdown: ^0.22.7
+  turbo: 2.9.14
+  typescript: ^7.0.2
+  vitest: ^4.1.11
+  zod: ^4.4.3
+
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
   # ── toolchain — these publish frequently and we own the risk ──────
@@ -25,7 +48,6 @@ minimumReleaseAgeExclude:
   - "oxfmt"
   - "@oxfmt/*"
   - "turbo"
-  - "syncpack"
   # ── types — @types/* publishes daily, low risk ────────────────────
   - "@types/*"
   - "tailwindcss"
@@ -43,26 +65,15 @@ minimumReleaseAgeExclude:
   - "@tsdown/*"
   - "bumpp"
 
-catalog:
-  typescript: ^7.0.2
-  "@types/node": ^22.18.0
-  tsdown: ^0.22.7
-  vitest: ^4.1.10
-  oxlint: ^1.26.0
-  oxfmt: ^0.18.0
-  turbo: ^2.9.4
-  syncpack: ^13.0.0
-  react: 19.2.4
-  "react-dom": 19.2.4
-  "@types/react": ^19.2.0
-  "@types/react-dom": ^19.2.0
-  next: 16.2.1
-  "@babel/runtime": ^7.29.2
-  tailwindcss: 4.2.2
-  "@tailwindcss/postcss": 4.2.2
-  "@tailwindcss/cli": 4.2.2
-  postcss: 8.5.8
-  "@libsql/client": ^0.14.0
-  "@libsql/kysely-libsql": ^0.4.1
-  better-auth: 1.7.0-rc.1
-  zod: ^4.4.3
+# Security floors for transitive dependencies pinned by upstream packages.
+# Keep these within their existing major versions and review when upstream catches up.
+overrides:
+  "hono@<4.13.7": ^4.13.7
+  "@hono/node-server@<1.19.15": ^1.19.15
+  "ws@>=8 <8.21.0": ^8.21.0
+  "fast-uri@>=3 <3.1.8": ^3.1.8
+  "qs@<6.16.0": ^6.16.0
+  "ip-address@>=10 <10.7.1": ^10.7.1
+  "body-parser@>=2 <2.3.0": ^2.3.0
+  "baseline-browser-mapping@<2.11.0": ^2.11.0
+  "esbuild@>=0.27.3 <0.28.1": ^0.28.1

@@ -79,9 +79,11 @@ await content.query('pages', {
 });
 
 await content.resolveReference(document, 'author');
+// Same snapshot, generation and variant; preserves order, duplicates and nulls.
+await content.resolveReferences(documents, 'author');
 ```
 
-A missing target resolves to null and fails positive referenced predicates. `validateReferences(snapshot)` checks references in each declared variant context; the web publication path requires it. Validation currently supports up to 256 variant combinations. Reference arrays and reverse references are also future query features. Direct filters support scalar equality and greater-than; predicates compose with `and`/`or`. Sorting supports a direct field or one reference hop, with canonical path as a stable tie-breaker. Pagination currently uses bounded limit/offset.
+A missing target resolves to null and fails positive referenced predicates. `validateReferences(snapshot)` checks references in each declared variant context; the web publication path requires it. Validation caches successful immutable snapshot/generation results and rechecks changed source/target canonical paths when the parent is already validated. It collapses axis values with identical fallback candidate sets and supports up to 256 distinct variant selections. Reference arrays and reverse references are also future query features. Direct filters support scalar equality and greater-than; predicates compose with `and`/`or`. Sorting supports a direct field or one reference hop, with canonical path as a stable tie-breaker. Pagination currently uses bounded limit/offset.
 
 ## Storage behavior
 
@@ -89,9 +91,9 @@ A missing target resolves to null and fails positive referenced predicates. `val
 - An edit stores changed bytes and immutable projections, then appends one snapshot and one change row per affected path. Deletions are tombstones.
 - Publication checks the expected ref revision and records the idempotent command result in the same transaction as the pointer update.
 - Validation failures leave the ref untouched. Unreachable staging objects/snapshots may remain; garbage collection is not yet implemented.
-- Queries use recursive SQL ancestry resolution, then variant ranking, then predicates and reference joins, and finally ordering/pagination. No query-result emptiness heuristic exists.
-- `checkpoint(snapshot)` records a full, rebuildable membership checkpoint atomically. It stops ancestor traversal at that snapshot without changing results. Scheduling/automatic thresholds are not implemented.
-- A new schema version prepares projections lazily without copying content or snapshot memberships. Preparation currently walks all effective files and checks their projection caches; mutation latency is intentionally not optimized.
+- Queries use recursive SQL ancestry resolution, then variant ranking, then predicates and reference joins, and finally ordering/pagination. Reference hydration can batch all sources in one selection query. No query-result emptiness heuristic exists.
+- `checkpoint(snapshot)` records a full, rebuildable membership checkpoint atomically using one SQL insert/select. Edits automatically checkpoint after 64 ancestry edges without a checkpoint. Existing historical snapshots stay immutable; pinned snapshots can be checkpointed explicitly.
+- Edits look up touched paths and ancestors, check descendants for newly added paths, and inherit unchanged-file validation from a ready parent in the same generation. Only changed files need projection preparation. New generations use a set-based missing-projection query, bounded SQL byte reads, and batched index writes; custom blob stores retain their adapter read path. Checkpoints occasionally perform full membership work.
 - Generation state is `building`, `ready`, or `failed`; failures retain diagnostics. Old engine instances continue querying their original generation. Use `prepare(snapshot)` at deployment time to avoid first-reader preparation latency.
 - Reuse the version only while interpretation stays identical. A signature detects declarative changes, but cannot inspect captured state inside arbitrary parser functions; bump the version when parser/schema behavior changes.
 - The initial physical schema is created automatically. Physical initialization uses idempotent DDL, batched atomically by the LibSQL adapter. There is no general ALTER migration runner; a content generation bump is not a physical schema migration.
@@ -109,7 +111,7 @@ Blob storage is authoritative, not a cache. Back it up alongside SQL. Custom ada
 
 ## Git import, commit, and server
 
-The optional Node adapter requires a native `git` executable. Ordinary saves create no Git blobs or trees. Import preserves file bytes/modes and packs the original reachable history into the blob store. Export hydrates a bare repository and creates a commit only when needed.
+The optional Node adapter requires a native `git` executable. Ordinary saves create no Git blobs or trees. Import preserves file bytes/modes and packs the original reachable history into dedicated SQL pack storage. Export hydrates a bare repository and creates a commit only when needed.
 
 ```ts
 import { importGit, exportGit, createGitHandler } from 'wildwood-core/git';
@@ -137,7 +139,7 @@ const handleGit = createGitHandler({
 
 Imported snapshots re-export with the original commit ID. Edited snapshots export as children of the nearest recorded Git ancestor. One snapshot gets one recorded Git commit; repeated exports reuse it. Exported ref updates use Git compare-and-swap. Export is a trusted administrative operation, not yet a durable workflow command.
 
-Current Git adapter limits: UTF-8 paths, SHA-1 repositories, regular/executable files and symlinks (collection documents cannot be symlinks), no submodule ingestion, buffered packs capped at 256 MiB, full ancestry packs rather than incremental pack storage. It is an interoperability reference implementation, not the eventual large-repository server. The clone/fetch HTTP handler requires persistent local storage and is not a Vercel serverless handler; merge computation uses disposable temporary storage. A blob-native streaming pack transport can replace it without changing content snapshots.
+Current Git adapter limits: UTF-8 paths, SHA-1 repositories, regular/executable files and symlinks (collection documents cannot be symlinks), no submodule ingestion, buffered packs capped at 256 MiB, incremental packs in dedicated SQL storage. It is an interoperability reference implementation, not the eventual large-repository server. The clone/fetch HTTP handler requires persistent local storage and is not a Vercel serverless handler; merge computation uses disposable temporary storage. A blob-native streaming pack transport can replace it without changing content snapshots.
 
 Receive-pack will need quarantined objects, per-ref authorization, expected-head checks, validation/preparation, atomic multi-ref publication, and recovery after interrupted responses. It intentionally does not mutate Git refs independently of the content engine.
 
@@ -159,8 +161,24 @@ Built-in `markdown` and `json` codecs retain an input JSON Schema and a safe top
 
 ## Native Git reconciliation
 
-`planGitMerge(engine, { base, ours, theirs })` checkpoints the three snapshots into Git and runs `git merge-tree --write-tree`. The plan, merged tree, conflict stages, messages, and full ancestry packs are durable in the configured database/blob store. No working directory is durable. This uses Git’s merge engine, not a custom file or line merger.
+Git export reuses the nearest exported ancestor’s tree and reads bytes only for paths changed since that ancestor. SQL checkpoints do not discard deltas needed by Git.
+
+`planGitMerge(engine, { base, ours, theirs })` checkpoints the three snapshots into Git and runs `git merge-tree --write-tree`. The plan, merged tree, conflict stages, messages, and incremental pack dependencies are durable in the database. No working directory is durable. This uses Git’s merge engine, not a custom file or line merger.
 
 `readGitConflict(engine, planId, path)` reads the original, draft, published, and Git-produced conflict-marker text (bounded to 128 KiB per version). `resolveGitMerge(engine, planId, resolutions, confirmConflicts)` requires a choice for every staged conflict and explicit confirmation of Git’s conflict messages, then returns content changes plus the two-parent commit and archive. It does not advance a branch. Hosts must authorize the plan and atomically save its commit mapping with the content ref and base metadata. The web package supplies this transaction, stale-plan checks, and retry handling.
 
-Native Git 2.38+ is required. `WILDWOOD_GIT_EXECUTABLE` can select a trusted executable; repository content cannot set it. SHA-1 and the existing Git adapter limits apply. Merge plans currently retain full packs; automatic pruning and incremental packs are not implemented.
+Native Git 2.38+ is required. `WILDWOOD_GIT_EXECUTABLE` can select a trusted executable; repository content cannot set it. SHA-1 and the existing Git adapter limits apply. Use `compactGitStorage(engine)` for explicit storage maintenance. It consolidates Git objects, installs durable redirects for old archive IDs, and reclaims superseded pack bytes in one transaction. It preserves all commits and pinned plans; it does not truncate content history. Concurrent compactions use a database lease, and concurrent writers can continue referencing old archive IDs. `restoreGitArchive(engine, bareDirectory, archiveId)` hydrates dependencies and redirects. Legacy full packs are adopted lazily; their original shared content blobs remain intact to avoid deleting bytes that another consumer may reference.
+
+## Unmodeled files and optional asset storage
+
+`createContent({ ..., assetBlobs })` routes new file bytes outside every collection to this optional immutable `BlobStore`. Schema-backed files continue using the default `blobs` store (SQL unless supplied). With no `assetBlobs`, every file uses the default store. Overlapping collection patterns still fail rather than bypassing validation.
+
+The database retains every path, mode, content hash, size, storage location, and snapshot membership. `files(snapshot)` includes storage metadata for new writes; `bytes(hash)` resolves the recorded location and verifies its hash. Storage selection is durable and independent of later schema changes. Existing bytes are not automatically migrated when an adapter is added. Keep an adapter connected while historical snapshots reference it.
+
+For example, `assetBlobs: fileBlobs('/persistent/assets')` uses the filesystem adapter; a private object-store adapter implements the same `put`/`get` contract. Git imports, exports, merges, deletions, and pinned snapshots retain the same semantics for binary assets. Asset garbage collection is separate from Git pack compaction and is not implemented.
+
+## Architecture benchmark
+
+Run `pnpm --filter wildwood-core build && node packages/core/benchmarks/architecture.mjs` from the repository root. The probe uses disposable in-memory databases, counts adapter calls (excluding transaction control), and compares edits, generation preparation, individual/batched references, variant validation, and checkpoints. It asserts that batched references and checkpointed queries preserve results. Local timings are not remote latency estimates.
+
+On the 1,000-document fixture, edits require a constant number of calls rather than one projection probe per file. This is not a claim of constant CPU time: indexed path lookups, bounded ancestry traversal, changed-byte hashing, and periodic full checkpoints still do work. Collection-level parser identities and structurally shared path indexes remain future options; schema versions still own their projections.

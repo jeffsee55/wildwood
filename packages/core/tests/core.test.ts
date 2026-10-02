@@ -482,3 +482,251 @@ test("generation identity survives equivalent parsers compiled with different fu
   });
   await expect(changed.ready()).rejects.toThrow("Schema changed without a version bump");
 });
+
+test("unmodeled bytes use the optional asset store while tree metadata and documents remain in SQL", async () => {
+  const base = setup();
+  const stored = new Map<string, Uint8Array>();
+  const assetBlobs = {
+    put: async (id: string, bytes: Uint8Array) => {
+      stored.set(id, bytes);
+    },
+    get: async (id: string) => stored.get(id) ?? null,
+  };
+  const engine = createContent({ ...base.config, database: base.database, assetBlobs });
+  await engine.branch("main");
+  const bytes = Buffer.from([0, 255, 1, 128]);
+  const first = await engine.apply({
+    ref: "main",
+    expectedRevision: 0,
+    idempotencyKey: "assets",
+    changes: [
+      { path: "media/photo.bin", content: bytes },
+      { path: "docs/a.md", content: "---\ntitle: Article\n---\nBody" },
+    ],
+  });
+  const files = await engine.files(first.snapshot),
+    asset = files.find((f) => f.path === "media/photo.bin")!;
+  expect(asset).toMatchObject({ size: 4, storage: "assets" });
+  expect(stored.size).toBe(1);
+  expect(
+    (await engine.database.execute("SELECT id FROM ww2_blobs WHERE id=?", [asset.blob])).rows,
+  ).toHaveLength(0);
+  expect(Buffer.from(await engine.bytes(asset.blob))).toEqual(bytes);
+  const restarted = createContent({ ...base.config, database: base.database, assetBlobs });
+  expect((await restarted.query("docs", { ref: "main" })).items[0].value.title).toBe("Article");
+  expect(
+    (
+      await restarted.validateChanges({
+        ref: "main",
+        expectedRevision: 1,
+        changes: [{ path: "media/other.bin", content: bytes }],
+      })
+    ).valid,
+  ).toBe(true);
+  await restarted.apply({
+    ref: "main",
+    expectedRevision: 1,
+    idempotencyKey: "remove",
+    changes: [{ path: "media/photo.bin", delete: true }],
+  });
+  expect(
+    (await restarted.files((await restarted.ref("main")).snapshot)).map((f) => f.path),
+  ).not.toContain(asset.path);
+  expect(Buffer.from(await restarted.bytes(asset.blob))).toEqual(bytes);
+  expect(await restarted.files(first.snapshot)).toContainEqual(asset);
+  await expect(base.bytes(asset.blob)).rejects.toThrow("assetBlobs");
+});
+
+test("single-file edits use bounded SQL calls and inherit only validated generations", async () => {
+  const engine = setup();
+  await engine.branch("main");
+  const head = await engine.apply({
+    ref: "main",
+    expectedRevision: 0,
+    idempotencyKey: "large-seed",
+    changes: Array.from({ length: 200 }, (_, i) => ({
+      path: `docs/${i}.md`,
+      content: doc(`Page ${i}`),
+    })),
+  });
+  const sql = vi.spyOn(engine.database, "execute");
+  const parse = vi.spyOn(engine, "bytes");
+  await engine.apply({
+    ref: "main",
+    expectedRevision: head.revision,
+    idempotencyKey: "single",
+    changes: [{ path: "docs/1.md", content: doc("Edited") }],
+  });
+  expect(sql.mock.calls.length).toBeLessThan(25);
+  expect(sql.mock.calls.some(([query]) => query.startsWith("SELECT id FROM ww2_projections"))).toBe(
+    false,
+  );
+  expect(parse).not.toHaveBeenCalled(); // SQL bytes arrive in the candidate batch.
+  expect((await engine.query("docs", { canonical: "docs/1.md" })).items[0].value.title).toBe(
+    "Edited",
+  );
+  const next = setup("next", engine.database);
+  await next.prepare((await engine.ref("main")).snapshot);
+  expect((await next.query("docs", { limit: 1000 })).items).toHaveLength(200);
+});
+
+test("targeted path checks handle replacements, deletion tombstones and literal prefixes", async () => {
+  const { engine } = await seed();
+  let head = await engine.apply({
+    ref: "main",
+    expectedRevision: 1,
+    idempotencyKey: "paths",
+    changes: [
+      { path: "media/a%_/x.bin", content: "child" },
+      { path: "media/a%_other/y.bin", content: "other" },
+    ],
+  });
+  await expect(
+    engine.apply({
+      ref: "main",
+      expectedRevision: head.revision,
+      idempotencyKey: "bad-parent",
+      changes: [{ path: "media/a%_", content: "parent" }],
+    }),
+  ).rejects.toThrow("parent path");
+  head = await engine.apply({
+    ref: "main",
+    expectedRevision: head.revision,
+    idempotencyKey: "replace-directory",
+    changes: [
+      { path: "media/a%_/x.bin", delete: true },
+      { path: "media/a%_", content: "parent" },
+    ],
+  });
+  await expect(
+    engine.apply({
+      ref: "main",
+      expectedRevision: head.revision,
+      idempotencyKey: "bad-child",
+      changes: [{ path: "media/a%_/new.bin", content: "child" }],
+    }),
+  ).rejects.toThrow("parent path");
+  head = await engine.apply({
+    ref: "main",
+    expectedRevision: head.revision,
+    idempotencyKey: "replace-file",
+    changes: [
+      { path: "media/a%_", delete: true },
+      { path: "media/a%_/new.bin", content: "child" },
+    ],
+  });
+  expect((await engine.files(head.snapshot)).map((file) => file.path)).toEqual(
+    expect.arrayContaining(["media/a%_/new.bin", "media/a%_other/y.bin"]),
+  );
+});
+
+test("automatic checkpoints bound long drafts while preserving pinned and deleted content", async () => {
+  const { engine, head: original } = await seed();
+  let head = original;
+  for (let i = 0; i < 130; i++)
+    head = await engine.apply({
+      ref: "main",
+      expectedRevision: head.revision,
+      idempotencyKey: `long-${i}`,
+      changes: [
+        { path: "docs/a.md", content: doc(`Edit ${i}`) },
+        ...(i === 0 ? [{ path: "docs/b.md", delete: true as const }] : []),
+      ],
+    });
+  expect(await count(engine, "ww2_checkpoints")).toBeGreaterThanOrEqual(2);
+  expect((await engine.query("docs", { snapshot: original.snapshot })).items).toHaveLength(2);
+  const latest = (await engine.query("docs")).items;
+  expect(latest).toHaveLength(1);
+  expect(latest[0].value.title).toBe("Edit 129");
+});
+
+test("batched reference hydration preserves order, duplicates, nulls and pinned contexts", async () => {
+  const { engine } = await seed();
+  const items = (await engine.query("docs")).items;
+  const inputs = [items[1], items[0], items[1]];
+  expect(await engine.resolveReferences(inputs, "author")).toEqual(
+    await Promise.all(inputs.map((d) => engine.resolveReference(d, "author"))),
+  );
+  const head = await engine.apply({
+    ref: "main",
+    expectedRevision: 1,
+    idempotencyKey: "remove-author",
+    changes: [{ path: "authors/bob.json", delete: true }],
+  });
+  const current = (await engine.query("docs", { snapshot: head.snapshot })).items;
+  expect((await engine.resolveReferences(current, "author"))[1]).toBeNull();
+  expect((await engine.resolveReferences(items, "author"))[1]).not.toBeNull();
+  await expect(engine.resolveReferences([items[0], current[0]], "author")).rejects.toThrow(
+    "snapshot",
+  );
+  await expect(
+    engine.resolveReferences([items[0], { ...items[1], variant: { locale: "fr" } }], "author"),
+  ).rejects.toThrow("variant");
+});
+
+test("reference validation caches successes and rechecks affected targets across fallback changes", async () => {
+  const { engine } = await seed();
+  let head = await engine.ref("main");
+  await engine.validateReferences(head.snapshot);
+  const execute = vi.spyOn(engine.database, "execute");
+  await engine.validateReferences(head.snapshot);
+  expect(execute.mock.calls.some(([sql]) => sql.includes("target.id IS NULL"))).toBe(false);
+  head = await engine.apply({
+    ref: "main",
+    expectedRevision: head.revision,
+    idempotencyKey: "author-variant",
+    changes: [{ path: "authors/alice.fr.json", content: '{"name":"Alicia","country":"France"}' }],
+  });
+  await engine.validateReferences(head.snapshot);
+  head = await engine.apply({
+    ref: "main",
+    expectedRevision: head.revision,
+    idempotencyKey: "fallback-broken",
+    changes: [{ path: "authors/alice.json", delete: true }],
+  });
+  await expect(engine.validateReferences(head.snapshot)).rejects.toThrow("Unresolved author");
+  expect(
+    (
+      await engine.database.execute("SELECT * FROM ww2_reference_builds WHERE snapshot=?", [
+        head.snapshot,
+      ])
+    ).rows,
+  ).toHaveLength(0);
+});
+
+test("reference validation collapses absent variant axes without losing fallback coverage", async () => {
+  const client = createClient({ url: ":memory:" });
+  clients.push(client);
+  const engine = createContent({
+    repository: "many-axes",
+    version: "1",
+    database: libsql(client),
+    variants: Object.fromEntries(
+      Array.from({ length: 10 }, (_, i) => [
+        `axis${i}`,
+        { options: [`a${i}`, `b${i}`], default: `a${i}`, path: "suffix" as const },
+      ]),
+    ),
+    collections: {
+      docs: collection({
+        match: "docs/*.json",
+        parse: json(z.object({ author: z.string() })),
+        references: { author: "authors" },
+      }),
+      authors: collection({ match: "authors/*.json", parse: json(z.object({ name: z.string() })) }),
+    },
+  });
+  await engine.branch("main");
+  const head = await engine.apply({
+    ref: "main",
+    expectedRevision: 0,
+    idempotencyKey: "seed",
+    changes: [
+      { path: "docs/page.json", content: '{"author":"/authors/team.json"}' },
+      { path: "authors/team.a0.json", content: '{"name":"Team"}' },
+    ],
+  });
+  // 1,024 configured combinations collapse to two distinct selections. The
+  // unrepresented b0 still has a missing author and must not be skipped.
+  await expect(engine.validateReferences(head.snapshot)).rejects.toThrow("Unresolved author");
+});

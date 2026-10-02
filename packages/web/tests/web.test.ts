@@ -1,12 +1,16 @@
 import { createClient } from "@libsql/client";
 import { createContent, collection, markdown, libsql } from "wildwood-core";
 import { z } from "zod";
-import { test, expect, afterEach } from "vitest";
+import { test, expect, afterEach, vi } from "vitest";
 import { createWeb, sourcemap, withSourcemap, assets } from "../src/server";
 import { wildwoodWellKnown, withWildwood } from "../src/next/config";
 const clients: ReturnType<typeof createClient>[] = [];
 afterEach(() => clients.splice(0).forEach((c) => c.close()));
-async function setup(external = false, publishedRef = "main") {
+async function setup(
+  external = false,
+  publishedRef = "main",
+  agent?: { apiKey: string; model?: string },
+) {
   const client = createClient({ url: ":memory:" });
   clients.push(client);
   const database = libsql(client);
@@ -36,6 +40,7 @@ async function setup(external = false, publishedRef = "main") {
     version: "1",
     origin: "http://localhost:9999",
     development: true,
+    agent,
     ref: publishedRef,
     ...(external ? { reviewAuthority: { kind: "external" as const, label: "GitHub" } } : {}),
     variant: { locale: "en" },
@@ -302,6 +307,8 @@ test("a delegated MCP credential reads only its draft and stops working after re
   expect(body.result.tools.map((t: { name: string }) => t.name)).toEqual([
     "validate_content",
     "discover_content",
+    "list_files",
+    "read_file",
     "read_documents",
     "read_source",
     "resolve_reference",
@@ -733,4 +740,265 @@ test("agent creation permission defaults on, retries safely, and grants access o
   ).toBe(true);
   await web.command(await web.view(headers), { type: "revoke", id: grant.id });
   expect((await call("list_drafts")).error).toBeDefined();
+});
+
+test("editor saves reconcile a lost response after the view advances, including variant overrides", async () => {
+  const { web, engine, headers, database } = await setup();
+  const view = await web.view(headers, { variant: { locale: "fr" } });
+  const doc = (await engine.query("docs", { snapshot: view.snapshot, variant: view.variant }))
+    .items[0];
+  const map = sourcemap(withSourcemap("web", doc), "body")["data-ww-contentmap"]!;
+  const input = {
+    type: "save",
+    map,
+    source: "---\ntitle: Bonjour\n---\nTexte",
+    revision: view.ref!.revision,
+    command: "uncertain",
+    override: true,
+    pageUrl: "http://localhost:9999/docs/a?locale=fr",
+  };
+  const first = await web.command(view, input);
+  const advanced = await web.view(headers, { variant: { locale: "fr" } });
+  expect(await web.command(advanced, input)).toEqual(first);
+  expect((await engine.ref(view.ref!.name)).revision).toBe(view.ref!.revision + 1);
+  expect((await database.execute("SELECT * FROM ww_web_edit_context")).rows).toHaveLength(1);
+  await expect(
+    web.command(advanced, { ...input, source: input.source + " changed" }),
+  ).rejects.toThrow("different content");
+  await expect(web.command(advanced, { ...input, command: "new-key" })).rejects.toThrow("stale");
+  const anotherView = await web.view(headers);
+  await expect(web.command(anotherView, input)).rejects.toThrow("different content or view");
+});
+
+test("review feedback retries reconcile one event and reject changed payloads", async () => {
+  const { web, headers } = await setup();
+  const view = await web.view(headers);
+  const review = await web.command(view, { type: "review" });
+  const action = {
+    type: "review-decision",
+    id: review.id,
+    revision: review.revision,
+    decision: "comment",
+    body: "A single comment",
+    command: "feedback-once",
+  };
+  const first = await web.command(view, action);
+  expect(await web.command(view, action)).toEqual(first);
+  await expect(web.command(view, { ...action, body: "Changed" })).rejects.toThrow(
+    "different feedback",
+  );
+  const data = await (
+    await web.handler(
+      new Request(`http://localhost:9999/cms/review/data?id=${review.id}`, { headers }),
+    )
+  ).json();
+  expect(data.activity).toHaveLength(1);
+});
+
+test("all lazy browser chunks are served immutably without authentication", async () => {
+  const { web } = await setup();
+  const chunks = Object.values(assets).filter((a) => a.path.startsWith("js/"));
+  expect(chunks.length).toBeGreaterThan(2);
+  for (const chunk of chunks) {
+    const response = await web.handler(
+      new Request(`http://localhost:9999/cms/assets/${chunk.path}`),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toContain("immutable");
+    expect(await response.text()).toBe(chunk.body);
+  }
+});
+
+test("editor ref, navigation context, and retry receipt roll back together", async () => {
+  const { web, engine, headers, database } = await setup();
+  const view = await web.view(headers);
+  const doc = (await engine.query("docs", { snapshot: view.snapshot })).items[0];
+  const input = {
+    type: "save",
+    map: sourcemap(withSourcemap("web", doc), "title")["data-ww-contentmap"],
+    source: "---\ntitle: Transactional\n---\nBody",
+    revision: view.ref!.revision,
+    command: "atomic-context",
+    pageUrl: "http://localhost:9999/docs/a",
+  };
+  // Initialize review metadata before injecting a failure in the content commit.
+  await web.command(view, { type: "review" });
+  const transaction = database.transaction.bind(database);
+  database.transaction = (fn) =>
+    transaction((tx) =>
+      fn({
+        execute: (sql, params) => {
+          if (sql.startsWith("INSERT OR IGNORE INTO ww_web_edit_context"))
+            throw new Error("Injected metadata failure");
+          return tx.execute(sql, params);
+        },
+      }),
+    );
+  await expect(web.command(view, input)).rejects.toThrow("Injected metadata failure");
+  database.transaction = transaction;
+  expect(await engine.ref(view.ref!.name)).toEqual(view.ref);
+  expect(
+    (await database.execute("SELECT id FROM ww_web_records WHERE kind='editor-save'")).rows,
+  ).toHaveLength(0);
+  await web.command(view, input);
+  expect((await engine.ref(view.ref!.name)).revision).toBe(view.ref!.revision + 1);
+});
+
+test("toolbar state batches draft metadata without changing ownership boundaries", async () => {
+  const { web, headers, database } = await setup();
+  const current = await web.view(headers);
+  await web.state(current); // Initialize review storage before counting steady-state work.
+  for (let i = 0; i < 12; i++) await web.command(current, { type: "draft" });
+  const execute = vi.spyOn(database, "execute");
+  const state = await web.state(current);
+  expect(state.drafts).toHaveLength(13);
+  expect(execute.mock.calls).toHaveLength(3);
+  expect(state.drafts.every((draft) => draft.status === "open")).toBe(true);
+  const anonymous = await web.view(new Headers());
+  expect((await web.state(anonymous)).drafts).toHaveLength(0);
+});
+
+test("draft view resolves in bounded reads and revoked drafts fall back to published", async () => {
+  const { web, headers, database } = await setup();
+  const before = await web.view(headers);
+  const execute = vi.spyOn(database, "execute");
+  expect(await web.view(headers)).toEqual(before);
+  expect(execute.mock.calls).toHaveLength(3);
+  await database.execute("UPDATE ww_web_records SET revoked=1 WHERE repository=? AND id=?", [
+    "web",
+    before.viewId!,
+  ]);
+  expect((await web.view(headers)).mode).toBe("published");
+});
+
+test("embedded sessions reuse one branch and expose the same draft-scoped MCP tools without publication authority", async () => {
+  const { web, engine, headers, database } = await setup();
+  const session = crypto.randomUUID();
+  async function start(input: Record<string, unknown>) {
+    return web.handler(
+      new Request("http://localhost:9999/cms/agent/start", {
+        method: "POST",
+        headers: {
+          cookie: headers.get("cookie")!,
+          origin: "http://localhost:9999",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+  const first = await (await start({ session })).json();
+  const second = await (await start({ session })).json();
+  expect(second.draft).toBe(first.draft);
+  expect(second.ref).toBe(first.ref);
+  expect(first.ref).not.toBe((await web.view(headers)).ref!.name);
+  expect(
+    (await database.execute("SELECT id FROM ww_web_records WHERE kind='embedded-session'")).rows,
+  ).toHaveLength(1);
+  const call = async (method: string, params: unknown, token = first.token) =>
+    (
+      await web.handler(
+        new Request(first.endpoint, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        }),
+      )
+    ).json();
+  const tools = (await call("tools/list", {})).result.tools.map((t: { name: string }) => t.name);
+  expect(tools).toContain("apply_changes");
+  expect(tools).toContain("submit_review");
+  expect(tools).toContain("get_review");
+  expect(tools).not.toContain("publish_review");
+  expect(tools).not.toContain("create_draft");
+  const foreign = (await web.view(headers)).viewId!;
+  expect(
+    (await call("tools/call", { name: "list_files", arguments: { draft: foreign } })).result
+      .isError,
+  ).toBe(true);
+  expect((await start({ session, draft: foreign })).status).toBe(400);
+  const write = {
+    name: "apply_changes",
+    arguments: {
+      revision: 0,
+      command: "stable-retry",
+      changes: [{ path: "a.md", source: "---\ntitle: Embedded edit\n---\nBody" }],
+    },
+  };
+  const saved = (await call("tools/call", write)).result;
+  const retried = (await call("tools/call", write, second.token)).result;
+  expect(retried).toEqual(saved);
+  expect((await engine.ref(first.ref)).revision).toBe(1);
+  expect((await engine.ref("main")).revision).toBe(1);
+  expect((await web.handler(new Request(first.endpoint))).status).toBe(405);
+});
+
+test("embedded sessions reject unowned or completed drafts, anonymous callers, and cross-origin requests", async () => {
+  const { web, headers, database } = await setup();
+  const view = await web.view(headers);
+  const post = (cookie: string, origin: string, draft?: string) =>
+    web.handler(
+      new Request("http://localhost:9999/cms/agent/start", {
+        method: "POST",
+        headers: { cookie, origin, "content-type": "application/json" },
+        body: JSON.stringify({ session: crypto.randomUUID(), draft }),
+      }),
+    );
+  expect((await post("", "http://localhost:9999")).status).toBe(400);
+  expect((await post(headers.get("cookie")!, "https://evil.test")).status).toBe(400);
+  await database.execute("UPDATE ww_web_records SET actor='other-person' WHERE id=?", [
+    view.viewId!,
+  ]);
+  expect((await post(headers.get("cookie")!, "http://localhost:9999", view.viewId)).status).toBe(
+    403,
+  );
+  await database.execute("UPDATE ww_web_records SET actor='local-owner' WHERE id=?", [
+    view.viewId!,
+  ]);
+  const review = await web.command(view, { type: "review" });
+  await web.command(view, {
+    type: "review-decision",
+    id: review.id,
+    revision: review.revision,
+    decision: "approve",
+  });
+  await web.command(view, { type: "publish", id: review.id, revision: review.revision });
+  expect((await post(headers.get("cookie")!, "http://localhost:9999", view.viewId)).status).toBe(
+    403,
+  );
+  const gateway = await web.handler(
+    new Request(
+      "http://localhost:9999/cms/agent/gateway?target=https://ai-gateway.vercel.sh/v4/ai/language-model",
+      { method: "POST", headers: { origin: "http://localhost:9999" }, body: "{}" },
+    ),
+  );
+  expect(gateway.status).toBe(403);
+  const config = await web.handler(
+    new Request("http://localhost:9999/cms/agent/config", { headers }),
+  );
+  expect(await config.json()).toMatchObject({ siteKey: false, actor: { id: "local-owner" } });
+  const bytes = await web.handler(
+    new Request(`http://localhost:9999/cms/assets/${assets["fx-core.wasm"].path}`),
+  );
+  expect(bytes.headers.get("content-type")).toBe("application/wasm");
+  expect(Array.from(new Uint8Array(await bytes.arrayBuffer()).slice(0, 4))).toEqual([
+    0, 97, 115, 109,
+  ]);
+});
+
+test("embedded configuration advertises a site key without serializing it", async () => {
+  const { web, headers } = await setup(false, "main", {
+    apiKey: "server-secret-do-not-send",
+    model: "custom/model",
+  });
+  const result = await web.handler(
+    new Request("http://localhost:9999/cms/agent/config", { headers }),
+  );
+  const text = await result.text();
+  expect(text).not.toContain("server-secret-do-not-send");
+  expect(JSON.parse(text)).toMatchObject({ siteKey: true, model: "custom/model" });
 });

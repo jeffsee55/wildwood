@@ -77,7 +77,8 @@ export function Toolbar({
         } catch {
           detail.done({
             ok: false,
-            error: "The request failed. Reload before retrying an uncertain save.",
+            error:
+              "The response was interrupted. Retry the same save to check whether it completed.",
           });
         }
       });
