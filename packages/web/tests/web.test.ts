@@ -852,3 +852,16 @@ test("toolbar state batches draft metadata without changing ownership boundaries
   const anonymous = await web.view(new Headers());
   expect((await web.state(anonymous)).drafts).toHaveLength(0);
 });
+
+test("draft view resolves in bounded reads and revoked drafts fall back to published", async () => {
+  const { web, headers, database } = await setup();
+  const before = await web.view(headers);
+  const execute = vi.spyOn(database, "execute");
+  expect(await web.view(headers)).toEqual(before);
+  expect(execute.mock.calls).toHaveLength(3);
+  await database.execute("UPDATE ww_web_records SET revoked=1 WHERE repository=? AND id=?", [
+    "web",
+    before.viewId!,
+  ]);
+  expect((await web.view(headers)).mode).toBe("published");
+});

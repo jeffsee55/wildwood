@@ -33,8 +33,8 @@ export async function contentAction(command: Command): Promise<CommandResult> {
   }
 }
 export async function preferences(form: FormData) {
-  const ctx = await getContext();
-  if (ctx.pinned) return;
+  // Preferences carry no authority. Shared/pinned views enforce the granted
+  // variant when reading, so this action needs no duplicate auth/content lookup.
   (await draftMode()).disable();
   const jar = await cookies();
   jar.set("ww-locale", form.get("locale") === "fr" ? "fr" : "en", {

@@ -248,7 +248,7 @@ export function createWeb<C extends Collections>(options: {
       user.emailVerified &&
       options.ownerEmail &&
       user.email.toLowerCase() === options.ownerEmail.toLowerCase();
-    const membership = await get(`member:${user.id}`, "member");
+    const membership = owner ? null : await get(`member:${user.id}`, "member");
     return {
       id: user.id,
       name: user.name,
@@ -260,31 +260,30 @@ export function createWeb<C extends Collections>(options: {
     prefs: { version?: string; variant?: Record<string, string> } = {},
   ): Promise<View> {
     await ready();
-    const person = await actor(headers);
+    const selection = cookie(headers, "ww-view");
+    const [person, selected] = await Promise.all([
+      actor(headers),
+      selection ? get(digest(selection)) : null,
+    ]);
     let version = prefs.version && options.engines[prefs.version] ? prefs.version : options.version;
     let variant = prefs.variant ?? options.variant ?? {};
     // Validate even caller-provided preferences; they are query context, never access authority.
     for (const [axis, spec] of Object.entries(cms.config.variants ?? {}))
       if (!spec.options.includes(variant[axis] ?? spec.default)) throw new Error("Unknown variant");
-    const selection = cookie(headers, "ww-view");
-    const selected = selection ? await get(digest(selection)) : null;
     if (selected?.kind === "draft-view" && person && selected.actor === person.id) {
-      const draft = await get(String(selected.data.draft), "draft");
-      if (
-        draft &&
-        draft.actor === person.id &&
-        person.role !== "reader" &&
-        (await reviews.draftStatus(String(draft.id))).status !== "published"
-      ) {
-        const ref = await cms.ref(String(draft.data.ref));
+      const draft =
+        person.role !== "reader"
+          ? await reviews.draftView(String(selected.data.draft), person.id)
+          : null;
+      if (draft && draft.status !== "published") {
         return {
           version,
           variant,
-          snapshot: ref.snapshot,
-          ref,
+          snapshot: draft.ref.snapshot,
+          ref: draft.ref,
           mode: "draft",
           actor: person,
-          viewId: String(draft.id),
+          viewId: draft.id,
         };
       }
     }

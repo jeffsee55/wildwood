@@ -623,6 +623,30 @@ export function createReviews<C extends Collections>({
     );
   }
   return {
+    async draftView(id: string, actor: string) {
+      await init();
+      const row = (
+        await db.execute(
+          `SELECT d.id,r.name,r.snapshot,r.revision,json_extract(v.data,'$.status') AS status
+        FROM ww_web_records d
+        JOIN ww2_refs r ON r.repository=d.repository AND r.name=json_extract(d.data,'$.ref')
+        LEFT JOIN ww_web_review_data v ON v.repository=d.repository AND v.id=? AND v.kind='review'
+        WHERE d.repository=? AND d.id=? AND d.kind='draft' AND d.actor=? AND d.revoked=0 AND (d.expires IS NULL OR d.expires>?)`,
+          [hash(`review:${id}`).slice(0, 24), repository, id, actor, Date.now()],
+        )
+      ).rows[0];
+      return row
+        ? {
+            id: String(row.id),
+            status: String(row.status ?? "open") as Review["status"],
+            ref: {
+              name: String(row.name),
+              snapshot: String(row.snapshot),
+              revision: Number(row.revision),
+            },
+          }
+        : null;
+    },
     async draftStatuses(ids: string[]) {
       await init();
       const keys = ids.map((id) => hash(`review:${id}`).slice(0, 24));
