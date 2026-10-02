@@ -60,3 +60,5 @@ After building core, run `node --env-file=<production-env-file> apps/docs/script
 Locale changes refresh the current view without invalidating immutable content caches. The layout, page and metadata share a request-memoized content load, and author references resolve together. Signed `ww-view` tokens remain the preview authority; Next Draft Mode is no longer enabled, and older bypass cookies are cleared on view/locale actions. Toolbar draft metadata is batched.
 
 Production builds prepare both supported schema generations against the current published snapshot before deployment. Preparation never moves refs or overwrites documents. For an explicitly configured remote environment, `WILDWOOD_PREPARE_CONTENT=1 node scripts/prepare-content.mjs` runs the same step. Active drafts under a newly introduced generation are still prepared on first access.
+
+Signed-in content views opt out of automatic browser translation so displayed variants and source-mapped selections remain faithful to the stored content. Anonymous visitors retain normal browser translation.

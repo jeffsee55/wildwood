@@ -20,7 +20,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
   const web = await getWeb();
   const toolbarState = await web.state(ctx);
   return (
-    <html lang={ctx.locale}>
+    <html lang={ctx.locale} translate={ctx.actor ? "no" : undefined}>
       <body>
         <div className="manual">
           <header>
