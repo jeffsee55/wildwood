@@ -47,7 +47,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [".next/**", "!.next/cache/**", "dist/**", ".git-runtime/**"],
+      "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**", "dist/**", ".git-runtime/**"],
       "env": [
         "GITHUB_APP_ID",
         "GITHUB_APP_NAME",

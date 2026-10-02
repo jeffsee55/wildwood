@@ -736,3 +736,105 @@ test("agent creation permission defaults on, retries safely, and grants access o
   await web.command(await web.view(headers), { type: "revoke", id: grant.id });
   expect((await call("list_drafts")).error).toBeDefined();
 });
+
+test("editor saves reconcile a lost response after the view advances, including variant overrides", async () => {
+  const { web, engine, headers, database } = await setup();
+  const view = await web.view(headers, { variant: { locale: "fr" } });
+  const doc = (await engine.query("docs", { snapshot: view.snapshot, variant: view.variant }))
+    .items[0];
+  const map = sourcemap(withSourcemap("web", doc), "body")["data-ww-contentmap"]!;
+  const input = {
+    type: "save",
+    map,
+    source: "---\ntitle: Bonjour\n---\nTexte",
+    revision: view.ref!.revision,
+    command: "uncertain",
+    override: true,
+    pageUrl: "http://localhost:9999/docs/a?locale=fr",
+  };
+  const first = await web.command(view, input);
+  const advanced = await web.view(headers, { variant: { locale: "fr" } });
+  expect(await web.command(advanced, input)).toEqual(first);
+  expect((await engine.ref(view.ref!.name)).revision).toBe(view.ref!.revision + 1);
+  expect((await database.execute("SELECT * FROM ww_web_edit_context")).rows).toHaveLength(1);
+  await expect(
+    web.command(advanced, { ...input, source: input.source + " changed" }),
+  ).rejects.toThrow("different content");
+  await expect(web.command(advanced, { ...input, command: "new-key" })).rejects.toThrow("stale");
+  const anotherView = await web.view(headers);
+  await expect(web.command(anotherView, input)).rejects.toThrow("different content or view");
+});
+
+test("review feedback retries reconcile one event and reject changed payloads", async () => {
+  const { web, headers } = await setup();
+  const view = await web.view(headers);
+  const review = await web.command(view, { type: "review" });
+  const action = {
+    type: "review-decision",
+    id: review.id,
+    revision: review.revision,
+    decision: "comment",
+    body: "A single comment",
+    command: "feedback-once",
+  };
+  const first = await web.command(view, action);
+  expect(await web.command(view, action)).toEqual(first);
+  await expect(web.command(view, { ...action, body: "Changed" })).rejects.toThrow(
+    "different feedback",
+  );
+  const data = await (
+    await web.handler(
+      new Request(`http://localhost:9999/cms/review/data?id=${review.id}`, { headers }),
+    )
+  ).json();
+  expect(data.activity).toHaveLength(1);
+});
+
+test("all lazy browser chunks are served immutably without authentication", async () => {
+  const { web } = await setup();
+  const chunks = Object.values(assets).filter((a) => a.path.startsWith("js/"));
+  expect(chunks.length).toBeGreaterThan(2);
+  for (const chunk of chunks) {
+    const response = await web.handler(
+      new Request(`http://localhost:9999/cms/assets/${chunk.path}`),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toContain("immutable");
+    expect(await response.text()).toBe(chunk.body);
+  }
+});
+
+test("editor ref, navigation context, and retry receipt roll back together", async () => {
+  const { web, engine, headers, database } = await setup();
+  const view = await web.view(headers);
+  const doc = (await engine.query("docs", { snapshot: view.snapshot })).items[0];
+  const input = {
+    type: "save",
+    map: sourcemap(withSourcemap("web", doc), "title")["data-ww-contentmap"],
+    source: "---\ntitle: Transactional\n---\nBody",
+    revision: view.ref!.revision,
+    command: "atomic-context",
+    pageUrl: "http://localhost:9999/docs/a",
+  };
+  // Initialize review metadata before injecting a failure in the content commit.
+  await web.command(view, { type: "review" });
+  const transaction = database.transaction.bind(database);
+  database.transaction = (fn) =>
+    transaction((tx) =>
+      fn({
+        execute: (sql, params) => {
+          if (sql.startsWith("INSERT OR IGNORE INTO ww_web_edit_context"))
+            throw new Error("Injected metadata failure");
+          return tx.execute(sql, params);
+        },
+      }),
+    );
+  await expect(web.command(view, input)).rejects.toThrow("Injected metadata failure");
+  database.transaction = transaction;
+  expect(await engine.ref(view.ref!.name)).toEqual(view.ref);
+  expect(
+    (await database.execute("SELECT id FROM ww_web_records WHERE kind='editor-save'")).rows,
+  ).toHaveLength(0);
+  await web.command(view, input);
+  expect((await engine.ref(view.ref!.name)).revision).toBe(view.ref!.revision + 1);
+});

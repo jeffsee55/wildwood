@@ -11,7 +11,7 @@
     "lint": "oxlint packages/core/src packages/core/tests packages/web/src packages/web/tests packages/web/browser apps/docs --ignore-pattern assets.generated.ts",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "check": "pnpm test && pnpm typecheck && pnpm build",
+    "check": "pnpm test && pnpm typecheck && pnpm lint && pnpm format:check && pnpm build",
     "check:deployment": "node apps/docs/scripts/check-deployment.mjs"
   },
   "devDependencies": {

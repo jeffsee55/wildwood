@@ -339,20 +339,41 @@ export function createReviews<C extends Collections>({
     type: Event["type"],
     body: string,
     path?: string,
+    command?: string,
   ) {
     await init();
+    const result = {
+      message:
+        type === "approve"
+          ? "Revision approved."
+          : type === "request_changes"
+            ? "Changes requested."
+            : "Comment added.",
+    };
     return db.transaction(async (tx) => {
       const r = await review(tx, id);
       const scope = await permission(tx, r, actor);
+      const activity = await events(tx, id);
+      const eventId = command ? hash(JSON.stringify([actor.id, command])) : randomUUID();
+      const previous = activity.find((event) => event.id === eventId);
+      if (previous) {
+        if (
+          previous.revision !== rid ||
+          previous.type !== type ||
+          previous.body !== body ||
+          previous.path !== path
+        )
+          throw new Error("Review action key already used with different feedback");
+        return result;
+      }
       if (r.status !== "open") throw new Error("Review is no longer open");
       const rev = latest(r, rid);
       if (type !== "comment" && (scope !== "approve" || latest(r).id !== rid))
         throw new Error("Approval requires the latest revision and reviewer permission");
       if (path && !rev.changes.some((c) => c.path === path))
         throw new Error("File not in this revision");
-      const activity = await events(tx, id);
       activity.push({
-        id: randomUUID(),
+        id: eventId,
         actor: actor.id,
         name: actor.name,
         revision: rid,
@@ -362,14 +383,7 @@ export function createReviews<C extends Collections>({
         created: Date.now(),
       });
       await write(tx, `events:${id}`, "events", activity);
-      return {
-        message:
-          type === "approve"
-            ? "Revision approved."
-            : type === "request_changes"
-              ? "Changes requested."
-              : "Comment added.",
-      };
+      return result;
     });
   }
   async function publish(actor: Actor, id: string, rid: string) {
@@ -592,16 +606,20 @@ export function createReviews<C extends Collections>({
     await write(db, key, "landing-grant", g);
     return { message: "Publication grant revoked. An operation already in progress may complete." };
   }
-  async function recordEdit(args: {
-    ref: string;
-    revision: number;
-    snapshot: string;
-    path: string;
-    actor: string;
-    page: PageContext;
-  }) {
-    await init();
-    await db.execute(
+  async function recordEdit(
+    args: {
+      ref: string;
+      revision: number;
+      snapshot: string;
+      path: string;
+      actor: string;
+      page: PageContext;
+    },
+    transaction?: SqlExecutor,
+  ) {
+    // Transaction callers initialized review metadata before acquiring the write lock.
+    if (!transaction) await init();
+    await (transaction ?? db).execute(
       "INSERT OR IGNORE INTO ww_web_edit_context(repository,ref,revision,path,context,snapshot,actor) VALUES(?,?,?,?,?,?,?)",
       [
         repository,

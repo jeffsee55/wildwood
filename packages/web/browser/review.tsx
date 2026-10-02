@@ -1,7 +1,9 @@
-import { memo, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Dialog } from "@base-ui/react/dialog";
-import { structuredPatch, diffWordsWithSpace } from "diff";
+import { Diff, type FileDiff } from "./diff";
+import { requestJson } from "./request";
+import { retryKey } from "./editor-model";
 import {
   Leaf,
   ArrowLeft,
@@ -21,6 +23,10 @@ import {
   X,
   Copy,
   AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  WrapText,
+  CheckCheck,
 } from "lucide-react";
 import { DraftUpdate } from "./draft-update";
 import { Button } from "./ui/button";
@@ -30,68 +36,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "./ui/dropdown-menu";
-import type { Revision, Change } from "../src/reviews";
-type Review = {
-  draft: string;
-  id: string;
-  authority: { kind: "native" | "external"; label: string; target: string };
-  handoffs: { grant: string; revision: string; expires: number }[];
-  grants: {
-    id: string;
-    scope: string;
-    subject: string | null;
-    name: string | null;
-    expires: number;
-  }[];
-  name: string;
-  title: string;
-  ref: string;
-  status: string;
-  revisions: Revision[];
-  revision: Revision;
-  published?: string;
-  actor: { id: string; name: string; role: string };
-  activity: {
-    id: string;
-    name: string;
-    actor: string;
-    revision: string;
-    type: string;
-    body: string;
-    path?: string;
-    created: number;
-  }[];
-  requirements: {
-    approved: boolean;
-    changesRequested: boolean;
-    targetAdvanced: boolean;
-    newerRevision: boolean;
-    unsubmittedChanges: boolean;
-  };
-  capabilities: {
-    updateDraft: boolean;
-    comment: boolean;
-    approve: boolean;
-    publish: boolean;
-    invite: boolean;
-  };
-};
-type FileDiff = Change & {
-  beforeContent: {
-    source: string | null;
-    size: number;
-    binary: boolean;
-    tooLarge?: boolean;
-    media?: { type: string; kind: "image" | "audio" | "video" | "file" };
-  };
-  afterContent: {
-    source: string | null;
-    size: number;
-    binary: boolean;
-    tooLarge?: boolean;
-    media?: { type: string; kind: "image" | "audio" | "video" | "file" };
-  };
-};
+import type { createReviews, Change } from "../src/reviews";
+type Review = Awaited<ReturnType<ReturnType<typeof createReviews>["get"]>>;
 const context = JSON.parse(document.querySelector("#context")!.textContent!);
 const when = (n: number) =>
   new Date(n).toLocaleString(undefined, {
@@ -100,24 +46,23 @@ const when = (n: number) =>
     hour: "numeric",
     minute: "2-digit",
   });
-async function request(path: string, body?: unknown) {
-  const r = await fetch(context.endpoint + path, {
-    method: body ? "POST" : "GET",
-    headers: body ? { "content-type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await r.json();
-  if (!r.ok || data.ok === false) throw new Error(data.error || "Request failed");
-  return data;
-}
+const request = (path: string, body?: unknown, signal?: AbortSignal) =>
+  requestJson(context.endpoint + path, body, signal);
 function App() {
   const [review, setReview] = useState<Review | null>(null),
     [revision, setRevision] = useState(""),
     [file, setFile] = useState(""),
-    [loaded, setLoaded] = useState<FileDiff | null>(null),
+    [fileResult, setLoaded] = useState<{ revision: string; value: FileDiff } | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
-    [loadingFile, setLoadingFile] = useState(false);
+    [loadingFile, setLoadingFile] = useState(false),
+    [refreshing, setRefreshing] = useState(false),
+    [wrap, setWrap] = useState(true),
+    [viewed, setViewed] = useState<Set<string>>(new Set()),
+    [onlyUnviewed, setOnlyUnviewed] = useState(false);
+  const refreshRequest = useRef<AbortController | null>(null);
+  const commandLock = useRef(false);
+  const decisionAttempt = useRef<{ payload: string; key: string } | null>(null);
   const [tab, setTab] = useState<"changes" | "activity">("changes"),
     [split, setSplit] = useState(true),
     [search, setSearch] = useState(""),
@@ -130,43 +75,66 @@ function App() {
   const [handoff, setHandoff] = useState(false),
     [credential, setCredential] = useState<{ token: string; endpoint: string } | null>(null);
   async function refresh(rid = revision) {
-    const r = await request(
-      `/review/data?id=${encodeURIComponent(context.id)}${rid ? "&revision=" + encodeURIComponent(rid) : ""}`,
-    );
-    setReview(r);
-    setRevision(r.revision.id);
-    setFile((f) =>
-      r.revision.changes.some((c: Change) => c.path === f) ? f : r.revision.changes[0]?.path || "",
-    );
+    refreshRequest.current?.abort();
+    const controller = new AbortController();
+    refreshRequest.current = controller;
+    setRefreshing(true);
+    try {
+      const r = await request(
+        `/review/data?id=${encodeURIComponent(context.id)}${rid ? "&revision=" + encodeURIComponent(rid) : ""}`,
+        undefined,
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      setReview(r);
+      setRevision(r.revision.id);
+      setFile((f) =>
+        r.revision.changes.some((c: Change) => c.path === f)
+          ? f
+          : r.revision.changes[0]?.path || "",
+      );
+      setError("");
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+    } finally {
+      if (!controller.signal.aborted) setRefreshing(false);
+    }
   }
   useEffect(() => {
     if (!context.invite) refresh().catch((e) => setError(e.message));
+    return () => refreshRequest.current?.abort();
   }, []);
   useEffect(() => {
     if (!review || !file) {
       setLoaded(null);
+      setLoadingFile(false);
       return;
     }
-    let active = true;
+    const controller = new AbortController();
     setLoaded(null);
     setLoadingFile(true);
+    setError("");
     request(
       `/review/file?id=${encodeURIComponent(review.id)}&revision=${encodeURIComponent(revision)}&path=${encodeURIComponent(file)}`,
+      undefined,
+      controller.signal,
     )
       .then((value) => {
-        if (active) setLoaded(value);
+        if (!controller.signal.aborted) setLoaded({ revision, value });
       })
       .catch((e) => {
-        if (active) setError(e.message);
+        if (!controller.signal.aborted) setError(e.message);
       })
       .finally(() => {
-        if (active) setLoadingFile(false);
+        if (!controller.signal.aborted) setLoadingFile(false);
       });
     return () => {
-      active = false;
+      controller.abort();
     };
   }, [file, revision, review?.id]);
   async function command(body: Record<string, unknown>) {
+    if (commandLock.current || refreshing) return null;
+    commandLock.current = true;
     setBusy(true);
     setError("");
     try {
@@ -177,9 +145,12 @@ function App() {
       setError((e as Error).message);
       return null;
     } finally {
+      commandLock.current = false;
       setBusy(false);
     }
   }
+  const loaded =
+    fileResult?.revision === revision && fileResult.value.path === file ? fileResult.value : null;
   if (context.invite && !review)
     return (
       <div className="gate">
@@ -222,6 +193,13 @@ function App() {
     );
   const rev = review.revision,
     req = review.requirements;
+  const visibleFiles = rev.changes.filter(
+    (c) =>
+      c.path.toLowerCase().includes(search.toLowerCase()) &&
+      (!onlyUnviewed || !viewed.has(`${revision}:${c.path}`)),
+  );
+  const viewedCount = rev.changes.filter((c) => viewed.has(`${revision}:${c.path}`)).length;
+  const fileIndex = visibleFiles.findIndex((c) => c.path === file);
   const current = !req.newerRevision;
   const published = review.status === "published";
   const blocked = req.targetAdvanced || req.changesRequested || !req.approved || !current;
@@ -250,13 +228,22 @@ function App() {
     ).values(),
   ];
   async function decision(type: string) {
-    const r = await command({
+    const body = {
       type: "review-decision",
       decision: type,
       body: comment,
       ...(tab === "changes" && file ? { path: file } : {}),
+    };
+    decisionAttempt.current = retryKey(decisionAttempt.current, {
+      id: context.id,
+      revision,
+      ...body,
     });
-    if (r) setComment("");
+    const r = await command({ ...body, command: decisionAttempt.current.key });
+    if (r) {
+      setComment("");
+      decisionAttempt.current = null;
+    }
   }
   return (
     <>
@@ -300,7 +287,7 @@ function App() {
           <span>proposes changes to</span>
           <code>
             <GitBranch size={12} />
-            main
+            {review.authority.target}
           </code>
           <span>·</span>
           <span>{when(rev.created)}</span>
@@ -347,6 +334,7 @@ function App() {
                 .map((r, i) => (
                   <DropdownMenuItem
                     key={r.id}
+                    disabled={busy || refreshing}
                     onClick={() => refresh(r.id).catch((e) => setError(e.message))}
                   >
                     Revision {review.revisions.length - i}
@@ -360,9 +348,10 @@ function App() {
             variant="ghost"
             size="icon"
             aria-label="Refresh review"
+            disabled={busy || refreshing}
             onClick={() => refresh().catch((e) => setError(e.message))}
           >
-            <RefreshCw />
+            <RefreshCw className={refreshing ? "spin" : ""} />
           </Button>
         </div>
       </nav>
@@ -392,27 +381,55 @@ function App() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <div className="file-list">
-            {rev.changes
-              .filter((c) => c.path.toLowerCase().includes(search.toLowerCase()))
-              .map((c) => (
-                <button
-                  key={c.path}
-                  className={file === c.path ? "selected" : ""}
-                  onClick={() => {
-                    setFile(c.path);
-                    setTab("changes");
-                  }}
+          {!!rev.changes.length && (
+            <div className="review-progress">
+              <div>
+                <span>
+                  {viewedCount} of {rev.changes.length} viewed
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Show only unviewed files"
+                  aria-pressed={onlyUnviewed}
+                  onClick={() => setOnlyUnviewed(!onlyUnviewed)}
                 >
-                  <span className={`file-state ${!c.before ? "added" : !c.after ? "deleted" : ""}`}>
-                    {!c.before ? "A" : !c.after ? "D" : "M"}
-                  </span>
-                  <span title={c.path}>
-                    {c.path.split("/").pop()}
-                    <small>{c.path.split("/").slice(0, -1).join("/") || "/"}</small>
-                  </span>
-                </button>
-              ))}
+                  <CheckCheck />
+                </Button>
+              </div>
+              <progress max={rev.changes.length} value={viewedCount} aria-label="Files viewed" />
+            </div>
+          )}
+          <div className="file-list">
+            {visibleFiles.map((c) => (
+              <button
+                key={c.path}
+                className={file === c.path ? "selected" : ""}
+                aria-current={file === c.path ? "true" : undefined}
+                onClick={() => {
+                  setFile(c.path);
+                  setTab("changes");
+                }}
+              >
+                <span className={`file-state ${!c.before ? "added" : !c.after ? "deleted" : ""}`}>
+                  {!c.before ? "A" : !c.after ? "D" : "M"}
+                </span>
+                <span title={c.path}>
+                  {c.path.split("/").pop()}
+                  <small>{c.path.split("/").slice(0, -1).join("/") || "/"}</small>
+                </span>
+                {viewed.has(`${revision}:${c.path}`) && (
+                  <Check size={12} className="viewed-check" aria-label="Viewed" />
+                )}
+              </button>
+            ))}
+            {!visibleFiles.length && !!rev.changes.length && (
+              <p className="filter-empty">
+                {onlyUnviewed && viewedCount === rev.changes.length
+                  ? "All files viewed."
+                  : "No files match your filter."}
+              </p>
+            )}
           </div>
           <div className="snapshot-info">
             <span>REVIEWED SNAPSHOT</span>
@@ -517,27 +534,79 @@ function App() {
                       <FileText size={14} />
                       <strong>{file}</strong>
                     </span>
-                    <div className="view-switch" aria-label="Diff layout">
+                    <div className="diff-actions">
                       <Button
-                        variant={!split ? "secondary" : "ghost"}
-                        aria-pressed={!split}
-                        aria-label="Unified diff"
-                        onClick={() => setSplit(false)}
+                        variant="ghost"
+                        size="icon"
+                        aria-label="Previous file"
+                        disabled={fileIndex <= 0}
+                        onClick={() => setFile(visibleFiles[fileIndex - 1].path)}
                       >
-                        <AlignLeft />
+                        <ChevronLeft />
                       </Button>
                       <Button
-                        variant={split ? "secondary" : "ghost"}
-                        aria-pressed={split}
-                        aria-label="Side-by-side diff"
-                        onClick={() => setSplit(true)}
+                        variant="ghost"
+                        size="icon"
+                        aria-label="Next file"
+                        disabled={fileIndex < 0 || fileIndex >= visibleFiles.length - 1}
+                        onClick={() => setFile(visibleFiles[fileIndex + 1].path)}
                       >
-                        <Columns2 />
+                        <ChevronRight />
                       </Button>
+                      <Button
+                        variant={viewed.has(`${revision}:${file}`) ? "secondary" : "outline"}
+                        aria-pressed={viewed.has(`${revision}:${file}`)}
+                        disabled={!loaded}
+                        onClick={() =>
+                          setViewed((previous) => {
+                            const next = new Set(previous);
+                            const key = `${revision}:${file}`;
+                            if (next.has(key)) next.delete(key);
+                            else next.add(key);
+                            return next;
+                          })
+                        }
+                      >
+                        <Check size={14} />
+                        Viewed
+                      </Button>
+                      <Button
+                        variant={wrap ? "secondary" : "ghost"}
+                        size="icon"
+                        aria-label="Wrap long lines"
+                        aria-pressed={wrap}
+                        onClick={() => setWrap(!wrap)}
+                      >
+                        <WrapText />
+                      </Button>
+                      <div className="view-switch" aria-label="Diff layout">
+                        <Button
+                          variant={!split ? "secondary" : "ghost"}
+                          aria-pressed={!split}
+                          aria-label="Unified diff"
+                          onClick={() => setSplit(false)}
+                        >
+                          <AlignLeft />
+                        </Button>
+                        <Button
+                          variant={split ? "secondary" : "ghost"}
+                          aria-pressed={split}
+                          aria-label="Side-by-side diff"
+                          onClick={() => setSplit(true)}
+                        >
+                          <Columns2 />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                   {loadingFile ? (
-                    <div className="empty-diff">Loading file…</div>
+                    <div className="diff-loading" role="status">
+                      <span />
+                      <span />
+                      <span />
+                      <span />
+                      <p>Loading file…</p>
+                    </div>
                   ) : loaded ? (
                     loaded.beforeContent.media || loaded.afterContent.media ? (
                       <div className="media-comparison">
@@ -582,7 +651,7 @@ function App() {
                         })}
                       </div>
                     ) : (
-                      <Diff value={loaded} split={split} />
+                      <Diff value={loaded} split={split} wrap={wrap} />
                     )
                   ) : null}
                 </div>
@@ -946,157 +1015,4 @@ function App() {
     </>
   );
 }
-const Diff = memo(function Diff({ value, split }: { value: FileDiff; split: boolean }) {
-  const a = value.beforeContent,
-    b = value.afterContent;
-  if (a.binary || b.binary || a.tooLarge || b.tooLarge)
-    return (
-      <div className="empty-diff">
-        <FileText />
-        <h3>
-          {a.binary || b.binary ? "Binary file changed" : "File exceeds the inline diff limit"}
-        </h3>
-        <p>
-          {a.size.toLocaleString()} → {b.size.toLocaleString()} bytes
-        </p>
-        <p>Both immutable blob identifiers remain in the review.</p>
-      </div>
-    );
-  const patch = structuredPatch(
-    value.path,
-    value.path,
-    a.source || "",
-    b.source || "",
-    "Before",
-    "After",
-    { context: 4, timeout: 150, maxEditLength: 10000 },
-  );
-  if (!patch)
-    return <div className="empty-diff">This diff is too large to compute interactively.</div>;
-  const word = (text: string, other: string, added: boolean) =>
-    text.length < 1200 && other.length < 1200
-      ? (diffWordsWithSpace(other, text, { timeout: 10 })
-          ?.filter((p) => !p.removed)
-          .map((p, i) => (
-            <span key={i} className={p.added ? (added ? "word-added" : "word-removed") : ""}>
-              {p.value}
-            </span>
-          )) ?? text)
-      : text;
-  return (
-    <>
-      <div className="diff-meta">
-        <span>
-          {value.beforeMode !== value.afterMode
-            ? `Mode ${value.beforeMode || "—"} → ${value.afterMode || "—"}`
-            : "Source diff"}
-        </span>
-        <span>
-          {a.size.toLocaleString()} → {b.size.toLocaleString()} bytes
-        </span>
-      </div>
-      {split && (
-        <div className="split-labels">
-          <span>Before</span>
-          <span>After</span>
-        </div>
-      )}
-      <div className="diff-scroll">
-        <table className={`diff-table ${split ? "split" : ""}`}>
-          <colgroup>
-            <col className="number-column" />
-            {split ? (
-              <>
-                <col />
-                <col className="number-column" />
-                <col />
-              </>
-            ) : (
-              <>
-                <col className="number-column" />
-                <col />
-              </>
-            )}
-          </colgroup>
-          <tbody>
-            {patch.hunks.flatMap((h, hi) => {
-              let left = h.oldStart,
-                right = h.newStart;
-              const rows: ReactNode[] = [
-                <tr className="hunk" key={`h${hi}`}>
-                  <td colSpan={split ? 4 : 3}>
-                    @@ −{h.oldStart},{h.oldLines} +{h.newStart},{h.newLines} @@
-                  </td>
-                </tr>,
-              ];
-              for (let i = 0; i < h.lines.length; i++) {
-                const line = h.lines[i],
-                  kind = line[0],
-                  text = line.slice(1);
-                if (kind === "\\") continue;
-                if (split && (kind === "-" || kind === "+")) {
-                  const removed: string[] = [],
-                    added: string[] = [];
-                  while (i < h.lines.length && h.lines[i][0] === "-")
-                    removed.push(h.lines[i++].slice(1));
-                  while (i < h.lines.length && h.lines[i][0] === "+")
-                    added.push(h.lines[i++].slice(1));
-                  i--;
-                  for (let n = 0; n < Math.max(removed.length, added.length); n++) {
-                    rows.push(
-                      <tr key={`${hi}-${i}-${n}`}>
-                        <td className={removed[n] !== undefined ? "minus gutter" : "gutter"}>
-                          {removed[n] !== undefined ? left++ : ""}
-                        </td>
-                        <td className={removed[n] !== undefined ? "minus code" : "code empty"}>
-                          {removed[n] !== undefined ? word(removed[n], added[n] ?? "", false) : ""}
-                        </td>
-                        <td className={added[n] !== undefined ? "plus gutter" : "gutter"}>
-                          {added[n] !== undefined ? right++ : ""}
-                        </td>
-                        <td className={added[n] !== undefined ? "plus code" : "code empty"}>
-                          {added[n] !== undefined ? word(added[n], removed[n] ?? "", true) : ""}
-                        </td>
-                      </tr>,
-                    );
-                  }
-                  continue;
-                }
-                rows.push(
-                  split ? (
-                    <tr key={`${hi}-${i}`}>
-                      <td className="gutter">{left++}</td>
-                      <td className="code">{text}</td>
-                      <td className="gutter">{right++}</td>
-                      <td className="code">{text}</td>
-                    </tr>
-                  ) : (
-                    <tr
-                      key={`${hi}-${i}`}
-                      className={kind === "+" ? "plus" : kind === "-" ? "minus" : ""}
-                    >
-                      <td className="gutter">{kind !== "+" ? left++ : ""}</td>
-                      <td className="gutter">{kind !== "-" ? right++ : ""}</td>
-                      <td className="code">
-                        <span className="line-sign">{kind}</span>
-                        {text}
-                      </td>
-                    </tr>
-                  ),
-                );
-              }
-              return rows;
-            })}
-          </tbody>
-        </table>
-        {!patch.hunks.length && (
-          <div className="empty-diff">
-            File contents are unchanged.
-            {value.beforeMode !== value.afterMode ? " File mode changed." : ""}
-          </div>
-        )}
-      </div>
-    </>
-  );
-});
 createRoot(document.querySelector("#review-root")!).render(<App />);

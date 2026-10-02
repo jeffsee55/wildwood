@@ -52,11 +52,11 @@ catalog:
   oxfmt: ^0.18.0
   turbo: ^2.9.4
   syncpack: ^13.0.0
-  react: 19.2.4
-  "react-dom": 19.2.4
+  react: 19.2.7
+  "react-dom": 19.2.7
   "@types/react": ^19.2.0
   "@types/react-dom": ^19.2.0
-  next: 16.2.1
+  next: 16.3.6
   "@babel/runtime": ^7.29.2
   tailwindcss: 4.2.2
   "@tailwindcss/postcss": 4.2.2

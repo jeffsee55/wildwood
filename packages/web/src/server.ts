@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ContentEngine, Collections, SqlDatabase, Ref } from "wildwood-core";
 import { createReconciliation, resolutionsSchema } from "./reconciliation";
 import { mediaResponse } from "./media";
+import { PayloadTooLarge, readBody } from "./http";
 import { draftName } from "./draft-name";
 import { pageLocation } from "./page-context";
 import { registerContentTools, toolResult, toolError } from "./content-tools";
@@ -67,6 +68,7 @@ const inputSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("publish"), id: text, revision: text }),
   z.object({
     type: z.literal("review-decision"),
+    command: z.string().min(1).max(200).optional(),
     id: text,
     revision: text,
     decision: z.enum(["comment", "approve", "request_changes"]),
@@ -377,6 +379,7 @@ export function createWeb<C extends Collections>(options: {
         input.decision,
         input.body,
         input.path,
+        input.command,
       );
     }
     const person = requireEditor(current.actor);
@@ -492,6 +495,30 @@ export function createWeb<C extends Collections>(options: {
       };
     }
     const ref = requireDraft(current);
+    // A receipt commits with the ref. Replays are checked before stale-map validation,
+    // so a lost response can be reconciled even after the draft advances.
+    const receiptId =
+      input.type === "save"
+        ? `editor-save:${digest(JSON.stringify([person.id, ref.name, input.command]))}`
+        : undefined;
+    const fingerprint = receiptId
+      ? digest(
+          JSON.stringify({
+            input,
+            view: current.viewId,
+            version: current.version,
+            variant: Object.entries(current.variant).sort(),
+          }),
+        )
+      : undefined;
+    if (receiptId) {
+      const receipt = await get(receiptId, "editor-save");
+      if (receipt) {
+        if (receipt.actor !== person.id || receipt.data.fingerprint !== fingerprint)
+          throw new Error("Save key already used with different content or view");
+        return receipt.data.result as RecordData;
+      }
+    }
     if ((await reviews.draftStatus(current.viewId!)).status !== "open")
       throw new Error("This draft is read-only. Create a new draft.");
     if (input.type === "document" || input.type === "save") {
@@ -499,9 +526,12 @@ export function createWeb<C extends Collections>(options: {
       cms.collectionFor(map.source);
       const file = (await cms.files(current.snapshot)).find((f) => f.path === map.source);
       if (!file || file.mode === "120000") throw new Error("Source file unavailable");
-      if (input.type === "document")
+      if (input.type === "document") {
+        const bytes = await cms.bytes(file.blob);
+        if (bytes.byteLength > 512 * 1024)
+          throw new Error("This file is too large for the in-page editor");
         return {
-          source: new TextDecoder().decode(await cms.bytes(file.blob)),
+          source: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
           revision: ref.revision,
           map: JSON.stringify(map),
           path: map.source,
@@ -512,6 +542,7 @@ export function createWeb<C extends Collections>(options: {
               ([k, v]) => v !== cms.config.variants?.[k]?.default,
             ),
         };
+      }
       let path = map.source;
       if (input.override) {
         path = map.canonical;
@@ -528,23 +559,40 @@ export function createWeb<C extends Collections>(options: {
           throw new Error("An override already exists; reload to select it");
       }
       const pageUrl = input.pageUrl ? pageLocation(input.pageUrl, options.origin) : undefined;
-      const saved = await cms.apply({
+      const result = { message: "Saved. The server is rendering the updated page.", refresh: true };
+      await cms.apply({
         ref: ref.name,
         expectedRevision: input.revision,
         idempotencyKey: `web:${person.id}:${input.command}`,
         changes: [{ path, content: input.source }],
         audit: { actor: person.id, source: "editor" },
+        intent: { fingerprint },
+        onCommit: async (tx, saved) => {
+          if (pageUrl)
+            await reviews.recordEdit(
+              {
+                ref: ref.name,
+                revision: saved.revision,
+                snapshot: saved.snapshot,
+                path,
+                actor: person.id,
+                page: { url: pageUrl, version: current.version, variant: current.variant },
+              },
+              tx,
+            );
+          await tx.execute(
+            "INSERT INTO ww_web_records(repository,id,kind,actor,data) VALUES(?,?,?,?,?)",
+            [
+              repository,
+              receiptId!,
+              "editor-save",
+              person.id,
+              JSON.stringify({ fingerprint, result }),
+            ],
+          );
+        },
       });
-      if (pageUrl)
-        await reviews.recordEdit({
-          ref: ref.name,
-          revision: saved.revision,
-          snapshot: saved.snapshot,
-          path,
-          actor: person.id,
-          page: { url: pageUrl, version: current.version, variant: current.variant },
-        });
-      return { message: "Saved. The server is rendering the updated page.", refresh: true };
+      return result;
     }
     if (input.type === "share") {
       const token = secret(),
@@ -817,7 +865,7 @@ export function createWeb<C extends Collections>(options: {
           bearer_methods_supported: ["header"],
           scopes_supported: ["content:read", "content:write", "drafts:create"],
         });
-      if (path === "/mcp") return mcpRequest(request);
+      if (path === "/mcp") return await mcpRequest(request);
       if (path === "/local-login" && request.method === "POST") {
         sameOrigin(request);
         if (!development) return json({ error: "Not found" }, 404);
@@ -954,25 +1002,12 @@ export function createWeb<C extends Collections>(options: {
           .parse(Object.fromEntries(url.searchParams));
         if (engine.matchCollection(input.path))
           throw new Error("Use content editing for schema-backed paths");
-        const chunks: Uint8Array[] = [];
-        let size = 0;
-        const reader = request.body?.getReader();
-        if (reader)
-          for (;;) {
-            const next = await reader.read();
-            if (next.done) break;
-            size += next.value.length;
-            if (size > 4 * 1024 * 1024) {
-              await reader.cancel();
-              return json({ error: "Upload exceeds 4 MiB" }, 413);
-            }
-            chunks.push(next.value);
-          }
+        const bytes = await readBody(request, 4 * 1024 * 1024);
         const saved = await engine.apply({
           ref: current.ref.name,
           expectedRevision: input.revision,
           idempotencyKey: `upload:${person.id}:${current.ref.name}:${input.command}`,
-          changes: [{ path: input.path, content: Buffer.concat(chunks) }],
+          changes: [{ path: input.path, content: bytes }],
           audit: { actor: person.id, source: "media-upload" },
         });
         return json({ ok: true, ...saved });
@@ -993,14 +1028,12 @@ export function createWeb<C extends Collections>(options: {
           .join("");
         return page(
           "Media library",
-          `<p>${current.mode === "draft" ? "Your draft" : "Current view"} · ${files.length} files</p>${current.mode === "draft" && current.ref ? `<form id="asset-upload" data-revision="${current.ref.revision}"><label>File<input type="file" id="asset-file" required></label><label>Repository path<input id="asset-path" placeholder="media/photo.png" required></label><button>Upload to draft</button><p>Up to 4 MiB. Uploads become public only after review and publication.</p></form>` : "<p>Select a draft from the site toolbar to upload files.</p>"}<div class="asset-grid">${cards || "<p>No media in this view yet.</p>"}</div>${offset + 48 < files.length ? `<a href="?offset=${offset + 48}">More files</a>` : ""}`,
+          `<p>${current.mode === "draft" ? "Your draft" : "Current view"} · ${files.length} ${files.length === 1 ? "file" : "files"}</p>${current.mode === "draft" && current.ref ? `<form id="asset-upload" data-revision="${current.ref.revision}"><label>File<input type="file" id="asset-file" required></label><label>Repository path<input id="asset-path" placeholder="media/photo.png" required></label><button>Upload to draft</button><p>Up to 4 MiB. Uploads become public only after review and publication.</p></form>` : "<p>Select a draft from the site toolbar to upload files.</p>"}<div class="asset-grid">${cards || "<p>No media in this view yet.</p>"}</div>${offset + 48 < files.length ? `<a href="?offset=${offset + 48}">More files</a>` : ""}`,
         );
       }
       if (path === "/command" && request.method === "POST") {
         sameOrigin(request);
-        const raw = await request.text();
-        if (raw.length > 256 * 1024) return json({ error: "Request too large" }, 413);
-        const input = JSON.parse(raw);
+        const input = JSON.parse(new TextDecoder().decode(await readBody(request, 1024 * 1024)));
         // Backend pages manage access/review only. In-page content writes must use the RSC action bridge.
         if (
           ![
@@ -1148,7 +1181,7 @@ export function createWeb<C extends Collections>(options: {
     } catch (error) {
       return json(
         { ok: false, error: error instanceof Error ? error.message : "Request failed" },
-        400,
+        error instanceof PayloadTooLarge ? 413 : 400,
       );
     }
   }
@@ -1169,25 +1202,10 @@ export function createWeb<C extends Collections>(options: {
     if (origin && origin !== options.origin)
       return json({ error: "Cross-origin MCP request rejected" }, 403);
     if (request.method === "POST") {
-      // Bound the stream as well as Content-Length; chunked bodies are not exempt.
-      const reader = request.body?.getReader();
-      const chunks: Uint8Array[] = [];
-      let length = 0;
-      if (reader)
-        for (;;) {
-          const next = await reader.read();
-          if (next.done) break;
-          length += next.value.byteLength;
-          if (length > 1024 * 1024) {
-            await reader.cancel();
-            return json({ error: "MCP request exceeds 1 MiB" }, 413);
-          }
-          chunks.push(next.value);
-        }
       request = new Request(request.url, {
         method: request.method,
         headers: request.headers,
-        body: Buffer.concat(chunks),
+        body: new Uint8Array(await readBody(request, 1024 * 1024)),
       });
     }
     const bearer = request.headers.get("authorization")?.replace(/^Bearer /i, "");

@@ -33,9 +33,11 @@
     "**/tr33.db",
     "**/.wildwood-cache/**",
     "**/.tr33-cache/**",
-    "packages/wildwood/src/tests/fixtures/**",
-    "packages/kit/src/vscode-web/dist/**",
-    "packages/wildwood/bundled-extension/**",
-    "pnpm-lock.yaml"
+    "pnpm-lock.yaml",
+    "**/.next-*/**",
+    "**/.git-runtime/**",
+    "**/next-env.d.ts",
+    "packages/web/src/assets.generated.ts",
+    "apps/docs/lib/content.generated.json"
   ]
 }

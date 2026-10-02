@@ -1,5 +1,7 @@
 import { useState, useRef } from "react";
 import { Dialog } from "@base-ui/react/dialog";
+import { requestJson } from "./request";
+import { retryKey } from "./editor-model";
 import { Button } from "./ui/button";
 type Plan = {
   plan: string;
@@ -31,16 +33,7 @@ export function DraftUpdate({
     [choices, setChoices] = useState<Record<string, Resolution>>({}),
     [confirmed, setConfirmed] = useState(false);
   const attempt = useRef<{ payload: string; key: string } | null>(null);
-  async function request(body: object) {
-    const r = await fetch(endpoint + "/command", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await r.json();
-    if (!r.ok || data.ok === false) throw new Error(data.error || "Request failed");
-    return data;
-  }
+  const request = (body: object) => requestJson(endpoint + "/command", body);
   async function start() {
     setOpen(true);
     setBusy(true);
@@ -78,9 +71,7 @@ export function DraftUpdate({
       resolutions: Object.values(choices),
       confirmConflicts: confirmed,
     };
-    const payload = JSON.stringify(body);
-    if (attempt.current?.payload !== payload)
-      attempt.current = { payload, key: crypto.randomUUID() };
+    attempt.current = retryKey(attempt.current, body);
     setBusy(true);
     setError("");
     try {

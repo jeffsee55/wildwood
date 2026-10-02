@@ -19,7 +19,9 @@ async function invoke(
     const inherited = Object.fromEntries(
       Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")),
     );
-    const child = spawn(process.env.WILDWOOD_GIT_EXECUTABLE || "git", ["-C", directory, ...args], {
+    // Hosts explicitly package their Git runtime; this path is resolved at execution time.
+    const executable = process.env.WILDWOOD_GIT_EXECUTABLE || "git";
+    const child = spawn(/* turbopackIgnore: true */ executable, ["-C", directory, ...args], {
       env: {
         ...inherited,
         GIT_CONFIG_NOSYSTEM: "1",
@@ -227,7 +229,9 @@ export async function exportGit<C extends Collections>(
   const files = await engine.files(args.snapshot);
   const temp = await mkdtemp(join(tmpdir(), "wildwood-git-"));
   try {
-    const exists = await stat(args.directory).then(
+    // The caller supplies a runtime repository, never an application build asset.
+    const directory = args.directory;
+    const exists = await stat(/* turbopackIgnore: true */ directory).then(
       () => true,
       (error) => {
         if (error.code === "ENOENT") return false;

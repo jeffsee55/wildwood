@@ -18,12 +18,14 @@ The docs app is the executable integration example.
 
 The toolbar never substitutes authored text, Markdown, or page HTML. It only
 renders its own controls. Raw source edits are parsed and validated on the server.
-A rejected save leaves the ref unchanged. No client Markdown parser is shipped.
+A rejected save leaves the ref unchanged. A Markdown parser loads only when the editor opens; its preview never replaces host-rendered content. Raw HTML is omitted, unsafe links are rejected, and media previews use the authorized snapshot endpoint.
 The map contains repository, physical file, canonical file, snapshot, schema
 version, variant context, and field path. It is a locator, not a credential.
 A stale map cannot silently save against a newer snapshot. A field path labels
 where the edit originated; this release edits the complete source document.
 Computed fields are not automatically writable; only annotate source-backed fields.
+
+The editor supports write, split, and preview layouts; Markdown formatting; a bounded undo/redo history; and Cmd/Ctrl+S to save. Closing with unsaved changes requires an explicit discard, and leaving the page triggers the browser’s unsaved-work prompt. Save retries preserve the operation key until their payload changes. If an editor chunk is unavailable across deployments, the plain source editor remains usable.
 
 For suffix variants the editor explicitly offers a new override when a selected
 variant falls back to the canonical file. Folder-variant creation and structured
@@ -37,7 +39,7 @@ The toolbar reuses the original shadcn Button and DropdownMenu components, backe
 by Base UI. Popovers and editor dialogs also use Base UI, with portals inside the
 Shadow DOM for styling and focus isolation. Its private React runtime is bundled.
 Build dependencies are not imported by the host application. The
-server serves those exact bytes from `/cms/assets/<hash>/<name>`, with ETags,
+server serves those exact bytes from content-addressed paths under `/cms/assets/`, with ETags,
 correct content types, `nosniff`, and `public, max-age=31536000, immutable`.
 There is no public-directory copying, stylesheet import into the host bundle,
 React peer runtime for the toolbar, or runtime search for asset directories.
@@ -96,7 +98,7 @@ revision history, file-scoped comments, approval and requested changes, pinned
 before/after previews, reviewer invitations, and publication handoffs. Binary,
 mode-only, oversized, added, and deleted files have explicit states. Files load on
 demand; text diffs are limited to 512 KiB per side and bounded computation time.
-Diff rendering is memoized so writing a comment does not recompute it.
+Diff rendering is memoized so writing a comment does not recompute it. File requests are cancelled on navigation and results are bound to the selected path and revision. Viewed markers belong to that exact revision and are local to the open review; they do not imply approval. Feedback retries reuse an operation key to avoid duplicate activity.
 
 New toolbar edits record their same-origin page URL, schema generation, and variant
 in `ww_web_edit_context`, separately from content. Review revisions freeze the
@@ -104,8 +106,7 @@ known pages for each changed file; the summary and file diff offer links to pinn
 before/after previews at those routes. Multiple pages are retained and deduplicated.
 Common credential query parameters are stripped. This is navigation context, not
 an exhaustive list of pages affected by a document. Historical edits and imports
-without page context have no links. Context is recorded after the content mutation;
-a process failure between those writes can leave an edit without navigation context.
+without page context have no links. In-page editor saves commit their navigation context and retry receipt in the same transaction as the content ref. Repeating the same save reconciles the original result even when the current view has advanced. Agent navigation context remains a separate, idempotent write.
 
 `createWeb` requires an explicit published ref, for example
 `createWeb({ ref: "production", ... })`. There is no default. Every new draft starts from that ref's current snapshot, even when
@@ -193,8 +194,7 @@ is needed. Configure `createIdentity` even locally (as the docs do).
 The integration test uses an actual local HTTP server and auth database to exercise
 discovery, dynamic client registration, local sign-in, signed consent, PKCE token
 exchange, refresh, scoped draft creation/writes, narrowed scopes, and revocation.
-GitHub login still requires provider credentials and has not been verified against
-GitHub in this run.
+GitHub login requires the host’s provider credentials; development login is disabled in production.
 
 The Next config wrapper is optional:
 
@@ -212,8 +212,8 @@ not claimed. The docs explicitly opt into these rewrites.
 
 The service currently uses the core's SQLite SQL adapter. Authorization records
 are repository-scoped but SQL dialect portability has not been implemented.
-Vercel deployment, remote database reads, and canonical OAuth discovery have been exercised. GitHub login still requires a configured client secret and an interactive verification.
-Generic cross-origin/deployment credential exchange, group policy, editor-access revocation UI, and three-way merging remain future work. Visible signed-in moving views poll for external changes every five seconds and refresh through RSC. Pinned views do not move. No authored HTML is patched optimistically.
+The docs deployment exercises Vercel, a remote database, GitHub sign-in, remote MCP, and private asset storage.
+Generic cross-origin/deployment credential exchange, group policy, and editor-access revocation UI remain future work. Visible signed-in moving views poll for external changes every five seconds and refresh through RSC. Pinned views do not move. No authored HTML is patched optimistically.
 
 Tests exercise source-map validation, draft isolation, rejected writes, pinned
 shares, expiry, revocation, account isolation, idempotent publication conflicts,
@@ -250,7 +250,7 @@ and [Floating UI's update strategy](https://floating-ui.com/docs/autoupdate).
 
 `content-tools.ts` owns discovery, schema resources, an editing prompt, document search, reference lookup, raw reads/writes, atomic batches, dry-run validation, snapshot validation across all locales, top-level field edits, change summaries, audit history, restoration, and pinned preview links. Results carry both `structuredContent` and compatible JSON text. Tool errors include stable codes and recovery guidance.
 
-MCP writes are restricted to declared collections and require an expected revision plus an idempotency key. The HTTP request body is bounded to 1 MiB, file input to 128 KiB of text, batches to 50 files, and authenticated connections to 120 requests per minute using durable database counters. Foreign browser origins are rejected. Use native remote-MCP clients rather than unauthenticated cross-origin browser calls.
+Schema-backed MCP writes validate against their collection; explicit file tools also support unmodeled assets. All writes require an expected revision plus an idempotency key. The HTTP request body is bounded to 1 MiB, file input to 128 KiB of text, batches to 50 files, and authenticated connections to 120 requests per minute using durable database counters. Foreign browser origins are rejected. Use native remote-MCP clients rather than unauthenticated cross-origin browser calls.
 
 `/cms/connect` provides the canonical MCP URL and setup instructions. `/cms/health` reports database and sign-in readiness without exposing secrets. `/cms/status` is authenticated and drives preview refresh. Optional `documentUrl(path)` maps agent edits to site routes for pinned before/after review links.
 

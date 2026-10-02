@@ -1,4 +1,3 @@
-import { FileText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Dialog } from "@base-ui/react/dialog";
@@ -18,7 +17,11 @@ import {
   FileCheck,
   LogOut,
   Shield,
+  Image,
+  Save,
 } from "lucide-react";
+import { Editor } from "./editor-loader";
+import { retryKey } from "./editor-model";
 import { RelativeTime } from "./relative-time";
 import { Wordmark } from "./wordmark";
 import { Button } from "./ui/button";
@@ -67,7 +70,10 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
   const [panel, setPanel] = useState<"editor" | "agent" | "review" | null>(null);
   const [doc, setDoc] = useState<Result | null>(null),
     [source, setSource] = useState(""),
-    [override, setOverride] = useState(false);
+    [override, setOverride] = useState(false),
+    [discard, setDiscard] = useState(false);
+  const saveAttempt = useRef<{ payload: string; key: string } | null>(null);
+  const dirty = panel === "editor" && !!doc && (source !== doc.source || override);
   const [moving, setMoving] = useState(false),
     [minutes, setMinutes] = useState("60"),
     [share, setShare] = useState("");
@@ -99,6 +105,11 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
     }
   }
   useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(""), 5000);
+    return () => clearTimeout(timer);
+  }, [message]);
+  useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(""), 2000);
     return () => clearTimeout(timer);
@@ -119,6 +130,8 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
       const pageUrl = window.location.href;
       const result = await call({ type: "document", map: el.getAttribute("data-ww-contentmap") });
       if (result.ok) {
+        saveAttempt.current = null;
+        setDiscard(false);
         setDoc({ ...result, pageUrl });
         setSource(result.source || "");
         setOverride(false);
@@ -145,8 +158,41 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
   const editor = s.actor && s.actor.role !== "reader";
   const mode =
     s.mode === "published" ? "Published" : s.mode === "draft" ? "Draft" : "Shared preview";
+  useEffect(() => {
+    if (!dirty) return;
+    const guard = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", guard);
+    return () => window.removeEventListener("beforeunload", guard);
+  }, [dirty]);
+  async function save() {
+    if (!doc || pending || !dirty) return;
+    const payload = {
+      type: "save",
+      pageUrl: doc.pageUrl,
+      map: doc.map,
+      source,
+      revision: doc.revision,
+      override,
+    };
+    saveAttempt.current = retryKey(saveAttempt.current, payload);
+    const result = await call({ ...payload, command: saveAttempt.current.key });
+    if (result.ok) {
+      setPanel(null);
+      setDoc(null);
+      setDiscard(false);
+      saveAttempt.current = null;
+      setMessage("Draft saved");
+    }
+  }
   const close = () => {
     if (pending) return;
+    if (dirty) {
+      setDiscard(true);
+      return;
+    }
     setPanel(null);
     setError("");
   };
@@ -163,6 +209,12 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
   return (
     <>
       <div className="dock-wrap">
+        {message && !menuOpen && !panel && (
+          <div className="save-toast" role="status">
+            <Check size={14} />
+            {message}
+          </div>
+        )}
         {selecting && s.canEdit && (
           <Button
             className="edit-intent"
@@ -332,7 +384,7 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
                       <div className="workspace-separator" />
                       {s.actor && (
                         <a className="workspace-link" href={`${s.endpoint}/media-library`}>
-                          <FileText />
+                          <Image />
                           Media library
                         </a>
                       )}
@@ -474,7 +526,7 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
             <div className="panel-heading">
               <Dialog.Title>
                 {panel === "editor"
-                  ? "Edit document"
+                  ? "Edit source"
                   : panel === "agent"
                     ? "Connect agent"
                     : "Ready for review"}
@@ -491,7 +543,7 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
             </div>
             <Dialog.Description className="description">
               {panel === "editor"
-                ? "Edit the source, then save to preview your changes."
+                ? "Shape your content here. Save when it’s ready to preview on the page."
                 : panel === "agent"
                   ? "Connect securely with your account."
                   : "Review this snapshot before publishing it."}
@@ -505,19 +557,21 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
                 </div>
                 {doc.map && JSON.parse(doc.map).snapshot !== s.snapshot && (
                   <p className="error" role="alert">
-                    This draft changed elsewhere. Copy any unsaved work, then close and reopen the
-                    document before saving.
+                    This draft changed while the editor was open. Saving checks your original
+                    revision and will never overwrite newer work.
                   </p>
                 )}
-                <label className="sr-only" htmlFor="ww-source">
-                  Document source
-                </label>
-                <textarea
-                  id="ww-source"
-                  value={source}
-                  onChange={(e) => setSource(e.target.value)}
-                  spellCheck={false}
+                <Editor
+                  source={source}
+                  onChange={(value) => {
+                    setSource(value);
+                    setDiscard(false);
+                  }}
+                  onSave={save}
                   disabled={pending}
+                  markdown={/\.mdx?$/i.test(doc.path ?? "")}
+                  endpoint={s.endpoint}
+                  snapshot={s.snapshot}
                 />
                 {doc.fallback && (
                   <label className="choice">
@@ -529,33 +583,40 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
                     Create an override for this variant
                   </label>
                 )}
-                <div className="footer">
-                  <span>Changes stay in your draft.</span>
-                  <Button variant="outline" onClick={close} disabled={pending}>
-                    Cancel
-                  </Button>
-                  <Button
-                    disabled={pending}
-                    onClick={async () => {
-                      const r = await call({
-                        type: "save",
-                        pageUrl: doc.pageUrl,
-                        map: doc.map,
-                        source,
-                        revision: doc.revision,
-                        command: crypto.randomUUID(),
-                        override,
-                      });
-                      if (r.ok) {
+                {discard ? (
+                  <div className="discard-bar" role="alert">
+                    <span>Your changes haven’t been saved.</span>
+                    <Button variant="ghost" onClick={() => setDiscard(false)}>
+                      Keep editing
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => {
                         setPanel(null);
                         setDoc(null);
-                        setMessage("Draft saved");
-                      }
-                    }}
-                  >
-                    {pending && <Loader2 className="spin" />}Save draft
-                  </Button>
-                </div>
+                        setDiscard(false);
+                        setError("");
+                      }}
+                    >
+                      Discard changes
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="footer editor-footer">
+                    <span className={dirty ? "unsaved" : ""}>
+                      <span className="status-dot" />
+                      {dirty ? "Unsaved changes" : "Saved in your draft"}
+                    </span>
+                    <Button variant="ghost" onClick={close} disabled={pending}>
+                      Close
+                    </Button>
+                    <Button onClick={save} disabled={pending || !dirty}>
+                      {pending ? <Loader2 className="spin" /> : <Save />}{" "}
+                      {pending ? "Saving…" : "Save draft"}
+                      <kbd>⌘ S</kbd>
+                    </Button>
+                  </div>
+                )}
               </>
             )}
             {panel === "agent" && (
