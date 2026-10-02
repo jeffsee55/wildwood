@@ -705,3 +705,27 @@ test("browser uploads require the selected editable draft, same origin and an ob
     ).text(),
   ).toContain("media/notes.txt");
 });
+
+test("storage maintenance is owner-only and unavailable to delegated MCP clients", async () => {
+  const { web, headers, view, rpc } = await fixture();
+  await expect(
+    web.command({ ...view, actor: { ...view.actor!, role: "editor" } }, { type: "compact-git" }),
+  ).rejects.toThrow("Owner access");
+  const h = new Headers(headers);
+  h.set("origin", "http://localhost:9999");
+  h.set("content-type", "application/json");
+  const response = await web.handler(
+    new Request("http://localhost:9999/cms/command", {
+      method: "POST",
+      headers: h,
+      body: JSON.stringify({ type: "compact-git" }),
+    }),
+  );
+  expect(response.status).toBe(200);
+  expect((await response.json()).message).toContain("History preserved");
+  expect(
+    (await rpc("tools/list")).body.result.tools.some((t: { name: string }) =>
+      /compact|optimize/.test(t.name),
+    ),
+  ).toBe(false);
+});

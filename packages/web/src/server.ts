@@ -34,6 +34,7 @@ const mapSchema = z.object({
   path: z.array(z.union([z.string(), z.number().int().nonnegative()])),
 });
 const inputSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("compact-git") }),
   z.object({ type: z.literal("draft-merge-plan"), id: text }),
   z.object({ type: z.literal("draft-merge-file"), plan: text, path: text }),
   z.object({
@@ -379,6 +380,14 @@ export function createWeb<C extends Collections>(options: {
       );
     }
     const person = requireEditor(current.actor);
+    if (input.type === "compact-git") {
+      if (person.role !== "owner") throw new Error("Owner access required for storage maintenance");
+      const result = await (await import("wildwood-core/git")).compactGitStorage(cms);
+      return {
+        ...result,
+        message: `Storage optimized: ${result.packsBefore} packs consolidated into ${result.packsAfter}; ${Math.max(0, result.reclaimedBytes).toLocaleString()} duplicate bytes reclaimed. History preserved.`,
+      };
+    }
     if (input.type === "draft-merge-plan") return reconciliation.plan(person, input.id);
     if (input.type === "draft-merge-file")
       return reconciliation.file(person, input.plan, input.path);
@@ -996,6 +1005,7 @@ export function createWeb<C extends Collections>(options: {
         if (
           ![
             "revoke",
+            "compact-git",
             "grant-editor",
             "access-request",
             "publish",
@@ -1037,7 +1047,7 @@ export function createWeb<C extends Collections>(options: {
         const requests = person.role === "owner" ? await list("access") : [];
         return page(
           "Access",
-          `<p>Signed in as ${htmlEscape(person.name)} · ${person.role}</p>${person.role === "reader" ? '<button data-command="access-request">Request editing access</button>' : ""}<h2>Shared previews and connected agents</h2>${records.length ? records.map((r) => `<section><p>${htmlEscape(String(r.kind))} · ${htmlEscape(String(r.data.name ?? r.data.ref ?? r.data.snapshot ?? "Agent connection"))}</p><p>${r.expires === null ? (r.data.createDrafts ? "No expiry · until revoked" : "No expiry · until revoked or draft completed") : `Expires ${new Date(Number(r.expires)).toISOString()}`}</p><button data-command="revoke" data-id="${htmlEscape(String(r.id))}">Revoke</button></section>`).join("") : "<p>No active shared access.</p>"}${requests.length ? "<h2>Access requests</h2>" + requests.map((r) => `<section><p>${htmlEscape(String(r.data.name))}</p><button data-command="grant-editor" data-id="${htmlEscape(String(r.id))}">Grant editing access</button></section>`).join("") : ""}<button id="logout">Sign out</button>`,
+          `<p>Signed in as ${htmlEscape(person.name)} · ${person.role}</p>${person.role === "reader" ? '<button data-command="access-request">Request editing access</button>' : ""}<h2>Shared previews and connected agents</h2>${records.length ? records.map((r) => `<section><p>${htmlEscape(String(r.kind))} · ${htmlEscape(String(r.data.name ?? r.data.ref ?? r.data.snapshot ?? "Agent connection"))}</p><p>${r.expires === null ? (r.data.createDrafts ? "No expiry · until revoked" : "No expiry · until revoked or draft completed") : `Expires ${new Date(Number(r.expires)).toISOString()}`}</p><button data-command="revoke" data-id="${htmlEscape(String(r.id))}">Revoke</button></section>`).join("") : "<p>No active shared access.</p>"}${requests.length ? "<h2>Access requests</h2>" + requests.map((r) => `<section><p>${htmlEscape(String(r.data.name))}</p><button data-command="grant-editor" data-id="${htmlEscape(String(r.id))}">Grant editing access</button></section>`).join("") : ""}${person.role === "owner" ? '<h2>Storage</h2><p>Reclaim duplicate Git pack bytes while preserving all commits, branches, and reviews.</p><button data-command="compact-git">Optimize storage</button>' : ""}<button id="logout">Sign out</button>`,
         );
       }
       if (path === "/review/preview" && request.method === "GET") {
