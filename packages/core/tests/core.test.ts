@@ -12,6 +12,14 @@ import {
 } from "../src";
 
 const clients: ReturnType<typeof createClient>[] = [];
+test("body-only Markdown edits preserve frontmatter bytes for Git merging", () => {
+  const codec = markdown(z.object({ title: z.string().optional(), body: z.string() }));
+  const prefix = '\uFEFF---\r\n# Keep formatting\r\ntitle: "Quoted title"\r\n---\r\n';
+  expect(codec.patch!(prefix + "Original body", { body: "New body" })).toBe(prefix + "New body");
+  expect(codec.patch!(prefix, { body: "New body" })).toBe(prefix + "New body");
+  expect(codec.patch!("Plain Markdown", { body: "New body" })).toBe("New body");
+  expect(codec.patch!(prefix + "Original body", {})).toBe(prefix + "Original body");
+});
 afterEach(() => {
   for (const c of clients.splice(0)) c.close();
 });

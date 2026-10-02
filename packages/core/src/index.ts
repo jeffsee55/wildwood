@@ -61,6 +61,11 @@ export function markdown<T>(schema: z.ZodType<T>): ContentCodec<T> {
       schema.parse(value);
       const { body, ...metadata } = value as Record<string, unknown>;
       if (typeof body !== "string") throw new Error("Markdown body must be text");
+      // Body edits must not create unrelated frontmatter conflicts between agent branches.
+      if (Object.keys(fields).every((key) => key === "body")) {
+        const original = markdownParts(source).body;
+        return source.slice(0, source.length - original.length) + body;
+      }
       return `---\n${dump(metadata, { lineWidth: -1, noRefs: true })}---\n${body}`;
     },
   });

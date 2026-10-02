@@ -1,9 +1,10 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { ContentEngine, Collections, SqlDatabase, Ref } from "wildwood-core";
+import { createReconciliation, resolutionsSchema } from "./reconciliation";
 import { draftName } from "./draft-name";
 import { pageLocation } from "./page-context";
-import { registerContentTools, toolResult } from "./content-tools";
+import { registerContentTools, toolResult, toolError } from "./content-tools";
 import { assets } from "./assets.generated";
 import { createReviews, type ReviewAuthority } from "./reviews";
 import type { ContentMap } from "./sourcemap";
@@ -32,6 +33,16 @@ const mapSchema = z.object({
   path: z.array(z.union([z.string(), z.number().int().nonnegative()])),
 });
 const inputSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("draft-merge-plan"), id: text }),
+  z.object({ type: z.literal("draft-merge-file"), plan: text, path: text }),
+  z.object({
+    type: z.literal("draft-merge-apply"),
+    id: text,
+    plan: text,
+    command: z.string().min(1).max(200),
+    resolutions: resolutionsSchema,
+    confirmConflicts: z.boolean().default(false),
+  }),
   z.object({ type: z.literal("draft") }),
   z.object({ type: z.literal("resume"), id: text }),
   z.object({ type: z.literal("document"), map: text }),
@@ -342,6 +353,7 @@ export function createWeb<C extends Collections>(options: {
     target: publishedRef,
     authority: options.reviewAuthority ?? { kind: "native" },
   });
+  const reconciliation = createReconciliation(cms, publishedRef, ready);
   async function command(current: View, raw: unknown): Promise<RecordData> {
     const input = inputSchema.parse(raw);
     if (input.type === "access-request") {
@@ -366,6 +378,34 @@ export function createWeb<C extends Collections>(options: {
       );
     }
     const person = requireEditor(current.actor);
+    if (input.type === "draft-merge-plan") return reconciliation.plan(person, input.id);
+    if (input.type === "draft-merge-file")
+      return reconciliation.file(person, input.plan, input.path);
+    if (input.type === "draft-merge-apply") {
+      const stored = await get(input.plan, "merge-plan");
+      if (!stored || stored.data.draft !== input.id)
+        throw new Error("Merge plan outside draft scope");
+      const result = await reconciliation.apply(person, input);
+      const draft = await get(input.id, "draft");
+      if (!draft || draft.data.ref !== result.name)
+        throw new Error("Draft does not match merge plan");
+      const submitted = await reviews.submit(person, {
+        draft: input.id,
+        ref: result.name,
+        refRevision: result.revision,
+        base: String((stored.data.target as Ref).snapshot),
+        baseRevision: Number((stored.data.target as Ref).revision),
+        snapshot: result.snapshot,
+        version: options.version,
+        variant: options.variant ?? {},
+      });
+      return {
+        ...result,
+        review: submitted.id,
+        reviewRevision: submitted.revision,
+        message: "Draft updated with Git. Review and approve the new revision.",
+      };
+    }
     if (input.type === "grant-editor") {
       if (person.role !== "owner") throw new Error("Owner access required");
       const request = await get(input.id, "access");
@@ -664,6 +704,7 @@ export function createWeb<C extends Collections>(options: {
         return json({
           status: signin ? "ready" : "configuration_required",
           database: "ready",
+          git: await (await import("wildwood-core/git")).gitVersion(),
           authentication: signin ? "configured" : "missing_provider",
           mcp: `${options.origin}${base}/mcp`,
         });
@@ -892,6 +933,9 @@ export function createWeb<C extends Collections>(options: {
             "review-revoke",
             "review-handoff",
             "review-handoff-revoke",
+            "draft-merge-plan",
+            "draft-merge-file",
+            "draft-merge-apply",
           ].includes(input.type)
         )
           return json({ error: "Use the site Server Action for content commands" }, 400);
@@ -1251,6 +1295,76 @@ export function createWeb<C extends Collections>(options: {
             return { content: [{ type: "text", text: JSON.stringify(drafts.filter(Boolean)) }] };
           },
         );
+      }
+      if (grant?.write && grant.read !== false && delegated) {
+        const merges = createReconciliation(engine, publishedRef, ready);
+        const mergeActor: Actor = { id: delegated.actor!, name: "Agent", role: "editor" };
+        const mergeDraft = async (selected?: string) => {
+          const active = await currentGrant();
+          if (!active?.data.write || active.data.read === false)
+            throw new Error("Credential revoked or missing permission");
+          const id = selected ?? String(grant.draft ?? "");
+          if (!id) throw new Error("Select an authorized draft first");
+          await authorizedRef(id);
+          return id;
+        };
+        for (const operation of ["plan", "file", "apply"] as const) {
+          server.registerTool(
+            operation === "plan"
+              ? "get_draft_update"
+              : operation === "file"
+                ? "read_merge_conflict"
+                : "update_draft",
+            {
+              description:
+                operation === "plan"
+                  ? "Use native Git to plan merging published content into your agent branch. Does not change the draft. Returns a pinned plan and Git conflicts."
+                  : operation === "file"
+                    ? "Read base, draft, published and Git conflict-marker source for a conflicted path in an authorized plan."
+                    : "Apply a pinned Git merge plan. Resolve every conflicted path using draft (ours), published (theirs), custom source or deletion. Confirm Git conflict messages. Requires a fresh review afterward; never publishes.",
+              inputSchema: {
+                ...draftInput,
+                ...(operation !== "plan" ? { plan: z.string().min(1) } : {}),
+                ...(operation === "file" ? { path: z.string().min(1) } : {}),
+                ...(operation === "apply"
+                  ? {
+                      command: z.string().min(1).max(200),
+                      resolutions: resolutionsSchema.default([]),
+                      confirmConflicts: z.boolean().default(false),
+                    }
+                  : {}),
+              },
+              annotations: {
+                readOnlyHint: operation !== "apply",
+                destructiveHint: operation === "apply",
+                idempotentHint: true,
+                openWorldHint: false,
+              },
+            },
+            async (input: any) => {
+              try {
+                const id = await mergeDraft(input.draft);
+                if (operation !== "plan") {
+                  const stored = await get(input.plan, "merge-plan");
+                  if (!stored || stored.data.draft !== id)
+                    throw new Error("Merge plan outside draft scope");
+                }
+                return toolResult(
+                  operation === "plan"
+                    ? await merges.plan(mergeActor, id)
+                    : operation === "file"
+                      ? await merges.file(mergeActor, input.plan, input.path)
+                      : {
+                          ...(await merges.apply(mergeActor, input)),
+                          next: "Validate content and submit_review; old approvals do not apply.",
+                        },
+                );
+              } catch (error) {
+                return toolError(error);
+              }
+            },
+          );
+        }
       }
       registerContentTools(server, {
         engine,

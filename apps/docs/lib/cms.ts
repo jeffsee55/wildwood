@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { createWeb } from "wildwood-web";
 import { client, database, engines, ready, previewOnly } from "./content";
 let instance:
@@ -5,6 +6,8 @@ let instance:
   | undefined;
 export function getWeb() {
   return (instance ??= (async () => {
+    if (process.env.VERCEL)
+      process.env.WILDWOOD_GIT_EXECUTABLE = join(process.cwd(), ".git-runtime", "git");
     await ready();
     const origin =
       process.env.WILDWOOD_DOCS_ORIGIN ??

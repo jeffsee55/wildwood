@@ -8,7 +8,14 @@ import { createServer } from "node:http";
 import { afterEach, expect, test } from "vitest";
 import { z } from "zod";
 import { collection, createContent, libsql, markdown } from "../src";
-import { createGitHandler, exportGit, importGit } from "../src/git";
+import {
+  createGitHandler,
+  exportGit,
+  importGit,
+  planGitMerge,
+  readGitConflict,
+  resolveGitMerge,
+} from "../src/git";
 const exec = promisify(execFile);
 const roots: string[] = [],
   clients: ReturnType<typeof createClient>[] = [];
@@ -138,4 +145,205 @@ test("Smart HTTP supports a real clone and denies unauthorized fetches and pushe
       server.close((error) => (error ? reject(error) : resolve())),
     );
   }
+});
+
+test("native Git merges separate edits in one file and retains both commit parents", async () => {
+  const { engine, source, root } = await setup();
+  const base = await importGit(engine, { directory: source, targetRef: "main" });
+  await engine.branch("agent/a", { snapshot: base.snapshot });
+  await engine.branch("agent/b", { snapshot: base.snapshot });
+  const a = await engine.apply({
+    ref: "agent/a",
+    expectedRevision: 0,
+    idempotencyKey: "a",
+    changes: [{ path: "docs/a.md", content: "---\ntitle: Agent title\n---\nBody" }],
+  });
+  const b = await engine.apply({
+    ref: "agent/b",
+    expectedRevision: 0,
+    idempotencyKey: "b",
+    changes: [{ path: "docs/a.md", content: "---\ntitle: Original\n---\nUpdated body" }],
+  });
+  const plan = await planGitMerge(engine, {
+    base: base.snapshot,
+    ours: a.snapshot,
+    theirs: b.snapshot,
+  });
+  expect(plan.clean).toBe(true);
+  expect(
+    await planGitMerge(engine, { base: base.snapshot, ours: a.snapshot, theirs: b.snapshot }),
+  ).toEqual(plan);
+  const resolved = await resolveGitMerge(engine, plan.id, []);
+  const change = resolved.changes.find((c) => c.path === "docs/a.md")!;
+  expect("content" in change && Buffer.from(change.content).toString()).toContain("Agent title");
+  expect("content" in change && Buffer.from(change.content).toString()).toContain("Updated body");
+  const bare = join(root, "merged.git");
+  await exec("git", ["init", "--bare", bare]);
+  const { spawn } = await import("node:child_process");
+  const bytes = await engine.bytes(resolved.archive);
+  await new Promise<void>((resolve, reject) => {
+    const c = spawn("git", ["-C", bare, "index-pack", "--stdin"]);
+    c.stdin.end(bytes);
+    c.on("close", (code) => (code === 0 ? resolve() : reject(new Error("index-pack failed"))));
+    c.on("error", reject);
+  });
+  expect(
+    (await exec("git", ["-C", bare, "show", "-s", "--format=%P", resolved.commit])).stdout.trim(),
+  ).toBe(`${plan.oursCommit} ${plan.theirsCommit}`);
+  await exec("git", ["-C", bare, "fsck", "--strict", "--no-reflogs", resolved.commit]);
+});
+
+test("Git conflict plans survive retries, require all resolutions, and preserve conflict-marker source", async () => {
+  const { engine, source } = await setup();
+  const base = await importGit(engine, { directory: source, targetRef: "main" });
+  await engine.branch("agent/a", { snapshot: base.snapshot });
+  await engine.branch("agent/b", { snapshot: base.snapshot });
+  const a = await engine.apply({
+    ref: "agent/a",
+    expectedRevision: 0,
+    idempotencyKey: "a",
+    changes: [{ path: "docs/a.md", content: "---\ntitle: Our title\n---\nBody" }],
+  });
+  const b = await engine.apply({
+    ref: "agent/b",
+    expectedRevision: 0,
+    idempotencyKey: "b",
+    changes: [{ path: "docs/a.md", content: "---\ntitle: Their title\n---\nBody" }],
+  });
+  const plan = await planGitMerge(engine, {
+    base: base.snapshot,
+    ours: a.snapshot,
+    theirs: b.snapshot,
+  });
+  expect(plan.clean).toBe(false);
+  expect(plan.messages.some((m) => m.type === "CONFLICT (contents)")).toBe(true);
+  const file = await readGitConflict(engine, plan.id, "docs/a.md");
+  expect(file.merged?.source).toContain("<<<<<<<");
+  expect(file.base?.source).toContain("Original");
+  await expect(resolveGitMerge(engine, plan.id, [], true)).rejects.toThrow("every conflicted path");
+  await expect(
+    resolveGitMerge(engine, plan.id, [{ path: "docs/a.md", source: file.merged!.source! }], true),
+  ).rejects.toThrow("conflict markers");
+  const result = await resolveGitMerge(
+    engine,
+    plan.id,
+    [{ path: "docs/a.md", side: "theirs" }],
+    true,
+  );
+  expect(result.changes).toHaveLength(1);
+  expect(Buffer.from((result.changes[0] as { content: Uint8Array }).content).toString()).toContain(
+    "Their title",
+  );
+  expect((await engine.ref("agent/a")).snapshot).toBe(a.snapshot);
+});
+
+test("Git detects a rename and combines it with the other branch's edit", async () => {
+  const { engine, source } = await setup();
+  const base = await importGit(engine, { directory: source, targetRef: "main" });
+  await engine.branch("agent", { snapshot: base.snapshot });
+  const ours = await engine.apply({
+    ref: "agent",
+    expectedRevision: 0,
+    idempotencyKey: "rename",
+    changes: [
+      { path: "docs/a.md", delete: true },
+      { path: "docs/renamed.md", content: "---\ntitle: Original\n---\nBody" },
+    ],
+  });
+  const theirs = await engine.apply({
+    ref: "main",
+    expectedRevision: base.revision,
+    idempotencyKey: "edit",
+    changes: [{ path: "docs/a.md", content: "---\ntitle: Updated\n---\nBody" }],
+  });
+  const plan = await planGitMerge(engine, {
+    base: base.snapshot,
+    ours: ours.snapshot,
+    theirs: theirs.snapshot,
+  });
+  expect(plan.clean).toBe(true);
+  const result = await resolveGitMerge(engine, plan.id, []);
+  expect(result.changes.map((c) => c.path)).toEqual(["docs/renamed.md"]);
+});
+
+test("Git handles modify/delete and binary conflicts with explicit whole-file resolutions", async () => {
+  const { engine, source } = await setup();
+  const base = await importGit(engine, { directory: source, targetRef: "main" });
+  await engine.branch("agent", { snapshot: base.snapshot });
+  const ours = await engine.apply({
+    ref: "agent",
+    expectedRevision: 0,
+    idempotencyKey: "ours",
+    changes: [
+      { path: "docs/a.md", delete: true },
+      { path: "image.bin", content: new Uint8Array([0, 1, 2]) },
+    ],
+  });
+  const theirs = await engine.apply({
+    ref: "main",
+    expectedRevision: base.revision,
+    idempotencyKey: "theirs",
+    changes: [
+      { path: "docs/a.md", content: "---\ntitle: Published\n---\nBody" },
+      { path: "image.bin", content: new Uint8Array([0, 3, 4]) },
+    ],
+  });
+  const plan = await planGitMerge(engine, {
+    base: base.snapshot,
+    ours: ours.snapshot,
+    theirs: theirs.snapshot,
+  });
+  expect(plan.clean).toBe(false);
+  expect(plan.messages.some((m) => m.type === "CONFLICT (modify/delete)")).toBe(true);
+  expect((await readGitConflict(engine, plan.id, "image.bin")).merged?.binary).toBe(true);
+  const result = await resolveGitMerge(
+    engine,
+    plan.id,
+    [
+      { path: "docs/a.md", side: "ours" },
+      { path: "image.bin", side: "theirs" },
+    ],
+    true,
+  );
+  expect(result.changes).toHaveLength(1);
+  expect((result.changes[0] as { content: Uint8Array }).content).toEqual(Buffer.from([0, 3, 4]));
+});
+
+test("Git rename/rename conflicts retain both destinations until an explicit resolution", async () => {
+  const { engine, source } = await setup();
+  const base = await importGit(engine, { directory: source, targetRef: "main" });
+  await engine.branch("agent", { snapshot: base.snapshot });
+  const sourceText = "---\ntitle: Original\n---\nBody";
+  const ours = await engine.apply({
+    ref: "agent",
+    expectedRevision: 0,
+    idempotencyKey: "ours",
+    changes: [
+      { path: "docs/a.md", delete: true },
+      { path: "docs/ours.md", content: sourceText },
+    ],
+  });
+  const theirs = await engine.apply({
+    ref: "main",
+    expectedRevision: base.revision,
+    idempotencyKey: "theirs",
+    changes: [
+      { path: "docs/a.md", delete: true },
+      { path: "docs/theirs.md", content: sourceText },
+    ],
+  });
+  const plan = await planGitMerge(engine, {
+    base: base.snapshot,
+    ours: ours.snapshot,
+    theirs: theirs.snapshot,
+  });
+  expect(plan.clean).toBe(false);
+  expect(plan.messages.some((m) => m.type === "CONFLICT (rename/rename)")).toBe(true);
+  const result = await resolveGitMerge(
+    engine,
+    plan.id,
+    [...new Set(plan.stages.map((s) => s.path))].map((path) => ({ path, side: "ours" as const })),
+    true,
+  );
+  expect(result.changes).toHaveLength(0);
 });

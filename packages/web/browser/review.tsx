@@ -22,6 +22,7 @@ import {
   Copy,
   AlertCircle,
 } from "lucide-react";
+import { DraftUpdate } from "./draft-update";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
@@ -31,6 +32,7 @@ import {
 } from "./ui/dropdown-menu";
 import type { Revision, Change } from "../src/reviews";
 type Review = {
+  draft: string;
   id: string;
   authority: { kind: "native" | "external"; label: string; target: string };
   handoffs: { grant: string; revision: string; expires: number }[];
@@ -66,7 +68,13 @@ type Review = {
     newerRevision: boolean;
     unsubmittedChanges: boolean;
   };
-  capabilities: { comment: boolean; approve: boolean; publish: boolean; invite: boolean };
+  capabilities: {
+    updateDraft: boolean;
+    comment: boolean;
+    approve: boolean;
+    publish: boolean;
+    invite: boolean;
+  };
 };
 type FileDiff = Change & {
   beforeContent: { source: string | null; size: number; binary: boolean; tooLarge?: boolean };
@@ -405,6 +413,19 @@ function App() {
             <div className="context-note">
               You’re viewing an earlier revision. Decisions here do not approve the latest changes.{" "}
               <button onClick={() => refresh(review.revisions.at(-1)!.id)}>View latest</button>
+            </div>
+          )}
+          {req.targetAdvanced && current && !published && review.capabilities.updateDraft && (
+            <div className="context-note">
+              <p>
+                Published content changed after this draft started. Git can combine compatible edits
+                and help you resolve conflicts.
+              </p>
+              <DraftUpdate
+                endpoint={context.endpoint}
+                draft={review.draft}
+                onUpdated={(id) => refresh(id)}
+              />
             </div>
           )}
           {req.unsubmittedChanges && current && !published && (

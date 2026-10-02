@@ -190,6 +190,16 @@ export function createReviews<C extends Collections>({
       if (r?.status === "landing") throw new Error("Publication is in progress");
       if (r?.status === "published")
         throw new Error("This review was published. Create a new draft.");
+      const head = (
+        await tx.execute("SELECT snapshot,revision FROM ww2_refs WHERE repository=? AND name=?", [
+          repository,
+          args.ref,
+        ])
+      ).rows[0];
+      if (head?.snapshot !== args.snapshot || Number(head?.revision) !== args.refRevision)
+        throw new ConflictError(
+          "Draft advanced while submitting review. Read its latest revision and submit again.",
+        );
       if (!r)
         r = {
           id,
@@ -285,6 +295,7 @@ export function createReviews<C extends Collections>({
         unsubmittedChanges: head?.snapshot !== latest(r).snapshot,
       },
       capabilities: {
+        updateDraft: r.status === "open" && actor.id === r.actor && actor.role !== "reader",
         comment: r.status === "open",
         approve: scope === "approve" && r.status === "open",
         publish: authority.kind === "native" && actor.role === "owner" && r.status !== "published",

@@ -48,3 +48,5 @@ The deployment check verifies public rendering, database health, canonical OAuth
 Local tests cover real HTTP OAuth registration, consent, PKCE, token refresh, narrowed scopes, and revocation; content tools cover atomic edits, conflicts, history, restoration, preview sharing, and publication. Browser verification covers source selection, Server Action save, RSC refresh, review, approval, and publication.
 
 Unconfigured Vercel PR previews render repository seed content in an in-memory, read-only workspace with sign-in disabled. They do not fall back to the production database. Configure a separate preview database and OAuth provider only when persistent preview editing is required. Production continues to require a durable remote database.
+
+Native Git is bundled during Linux Vercel builds by `scripts/git-runtime.mjs`. Next traces `.git-runtime` into the function. `/cms/health` checks the executable. Agent branch updates hydrate temporary repositories; Git packs and merge plans persist in the database/blob store.
