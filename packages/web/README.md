@@ -255,3 +255,11 @@ MCP writes are restricted to declared collections and require an expected revisi
 `/cms/connect` provides the canonical MCP URL and setup instructions. `/cms/health` reports database and sign-in readiness without exposing secrets. `/cms/status` is authenticated and drives preview refresh. Optional `documentUrl(path)` maps agent edits to site routes for pinned before/after review links.
 
 Publication rejects unresolved references and unsubmitted edits, then creates a membership checkpoint to bound ancestry traversal. The audit log is atomic with content mutations. Restoring a document appends a new revision; it does not erase the old one. Automatic GitHub synchronization and automatic content garbage collection are not provided.
+
+## Updating agent branches with Git
+
+Agents call `get_draft_update`, inspect conflicts with `read_merge_conflict`, then call `update_draft`. Each plan is bound to an authorized draft, its base, and the observed draft/published heads. Identical retries reuse the saved result; different resolutions require a new command key. Git handles content merges and renames. Conflicts support keeping the entire draft or published file, supplying resolved source, or deleting a file.
+
+The update transaction guards both heads and saves the new draft ref, base metadata, audit event, and Git commit mapping together. It never publishes. Previous review decisions remain attached to the old snapshot. The review UI offers the same Git update and resolution flow and submits the result for fresh approval.
+
+Native Git must be available to this runtime. The docs deployment bundles Git and its Linux loader/libraries from the build image, with traced assets verified through `/cms/health`. Durable Git packs and plans live in the same database/blob store as content. No GitHub content repository or persistent filesystem is required.

@@ -137,7 +137,7 @@ const handleGit = createGitHandler({
 
 Imported snapshots re-export with the original commit ID. Edited snapshots export as children of the nearest recorded Git ancestor. One snapshot gets one recorded Git commit; repeated exports reuse it. Exported ref updates use Git compare-and-swap. Export is a trusted administrative operation, not yet a durable workflow command.
 
-Current Git adapter limits: UTF-8 paths, SHA-1 repositories, regular/executable files and symlinks (collection documents cannot be symlinks), no submodule ingestion, buffered packs capped at 256 MiB, full ancestry packs rather than incremental pack storage. It is an interoperability reference implementation, not the eventual large-repository server. It requires local persistent storage and is not a Vercel serverless handler. A blob-native streaming pack transport can replace it without changing content snapshots.
+Current Git adapter limits: UTF-8 paths, SHA-1 repositories, regular/executable files and symlinks (collection documents cannot be symlinks), no submodule ingestion, buffered packs capped at 256 MiB, full ancestry packs rather than incremental pack storage. It is an interoperability reference implementation, not the eventual large-repository server. The clone/fetch HTTP handler requires persistent local storage and is not a Vercel serverless handler; merge computation uses disposable temporary storage. A blob-native streaming pack transport can replace it without changing content snapshots.
 
 Receive-pack will need quarantined objects, per-ref authorization, expected-head checks, validation/preparation, atomic multi-ref publication, and recovery after interrupted responses. It intentionally does not mutate Git refs independently of the content engine.
 
@@ -156,3 +156,11 @@ Built-in `markdown` and `json` codecs retain an input JSON Schema and a safe top
 `validateChanges` checks a proposed batch without writing snapshots or advancing refs. `apply` validates the complete staged snapshot before atomically publishing its draft ref. Every successful apply/ref move records an audit event in the same transaction as its command result. Web publication checks references and checkpoints the snapshot before moving the live ref.
 
 `audit: { actor, source }` is trusted server metadata, never accepted directly from an MCP caller. Failed schema validation can leave unreachable staged immutable data; automatic garbage collection is not implemented.
+
+## Native Git reconciliation
+
+`planGitMerge(engine, { base, ours, theirs })` checkpoints the three snapshots into Git and runs `git merge-tree --write-tree`. The plan, merged tree, conflict stages, messages, and full ancestry packs are durable in the configured database/blob store. No working directory is durable. This uses Git’s merge engine, not a custom file or line merger.
+
+`readGitConflict(engine, planId, path)` reads the original, draft, published, and Git-produced conflict-marker text (bounded to 128 KiB per version). `resolveGitMerge(engine, planId, resolutions, confirmConflicts)` requires a choice for every staged conflict and explicit confirmation of Git’s conflict messages, then returns content changes plus the two-parent commit and archive. It does not advance a branch. Hosts must authorize the plan and atomically save its commit mapping with the content ref and base metadata. The web package supplies this transaction, stale-plan checks, and retry handling.
+
+Native Git 2.38+ is required. `WILDWOOD_GIT_EXECUTABLE` can select a trusted executable; repository content cannot set it. SHA-1 and the existing Git adapter limits apply. Merge plans currently retain full packs; automatic pruning and incremental packs are not implemented.

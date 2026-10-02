@@ -375,3 +375,205 @@ test("simultaneous editors get one winner, and pagination detects a changed ref"
     (await call("read_documents", { collection: "pages", snapshot: before.snapshot })).error.code,
   ).toBe("CONFLICT");
 });
+
+test("Git updates an agent branch atomically, retries once, and requires a fresh approval", async () => {
+  const { call, engine, web, headers, view } = await fixture();
+  await call("update_document", {
+    path: "pages/start.md",
+    revision: 0,
+    command: "ours",
+    fields: { title: "Draft title" },
+  });
+  const old = await call("submit_review");
+  await web.command(await web.view(headers), {
+    type: "review-decision",
+    id: old.id,
+    revision: old.revision,
+    decision: "approve",
+  });
+  await engine.apply({
+    ref: "main",
+    expectedRevision: 1,
+    idempotencyKey: "other-published",
+    changes: [
+      {
+        path: "pages/start.fr.md",
+        content: "---\ntitle: Autre publication\nauthor: /authors/team.md\n---\nBonjour.",
+      },
+    ],
+  });
+  const plan = await call("get_draft_update");
+  expect(plan.clean).toBe(true);
+  const updated = await call("update_draft", { plan: plan.plan, command: "merge-once" });
+  expect(updated.failed).toBe(false);
+  expect(await call("update_draft", { plan: plan.plan, command: "merge-once" })).toEqual(updated);
+  expect(
+    (await call("update_draft", { plan: plan.plan, command: "merge-once", confirmConflicts: true }))
+      .error.code,
+  ).toBe("CONFLICT");
+  expect((await engine.ref(view.ref!.name)).revision).toBe(2);
+  const fresh = await call("submit_review");
+  expect(fresh.revision).not.toBe(old.revision);
+  await expect(
+    web.command(await web.view(headers), {
+      type: "publish",
+      id: fresh.id,
+      revision: fresh.revision,
+    }),
+  ).rejects.toThrow("Approval required");
+  await web.command(await web.view(headers), {
+    type: "review-decision",
+    id: fresh.id,
+    revision: fresh.revision,
+    decision: "approve",
+  });
+  await web.command(await web.view(headers), {
+    type: "publish",
+    id: fresh.id,
+    revision: fresh.revision,
+  });
+  expect((await engine.query("pages", { ref: "main" })).items[0].value.title).toBe("Draft title");
+  expect(
+    (await engine.query("pages", { ref: "main", variant: { locale: "fr" } })).items[0].value.title,
+  ).toBe("Autre publication");
+});
+
+test("Git conflicts are inspectable, scoped, explicit, and reject a changed published head", async () => {
+  const { call, engine, web, headers, view } = await fixture();
+  await call("update_document", {
+    path: "pages/start.md",
+    revision: 0,
+    command: "ours",
+    fields: { title: "Our title" },
+  });
+  await engine.apply({
+    ref: "main",
+    expectedRevision: 1,
+    idempotencyKey: "theirs",
+    changes: [
+      {
+        path: "pages/start.md",
+        content: "---\ntitle: Their title\nauthor: /authors/team.md\n---\nOriginal **body**.",
+      },
+    ],
+  });
+  const plan = await call("get_draft_update");
+  expect(plan.clean).toBe(false);
+  expect(plan.conflicts).toEqual(["pages/start.md"]);
+  const file = await call("read_merge_conflict", { plan: plan.plan, path: "pages/start.md" });
+  expect(file.merged.source).toContain("<<<<<<<");
+  expect(
+    (await call("update_draft", { plan: plan.plan, command: "missing", confirmConflicts: true }))
+      .failed,
+  ).toBe(true);
+  const another = await call("create_draft", { command: "unrelated-draft" });
+  expect(
+    (
+      await call("read_merge_conflict", {
+        draft: another.draft,
+        plan: plan.plan,
+        path: "pages/start.md",
+      })
+    ).error.code,
+  ).toBe("ACCESS_DENIED");
+  await engine.apply({
+    ref: "main",
+    expectedRevision: 2,
+    idempotencyKey: "advanced",
+    changes: [
+      {
+        path: "pages/start.fr.md",
+        content: "---\ntitle: New French\nauthor: /authors/team.md\n---\nBonjour.",
+      },
+    ],
+  });
+  expect(
+    (
+      await call("update_draft", {
+        plan: plan.plan,
+        command: "stale",
+        resolutions: [{ path: "pages/start.md", side: "ours" }],
+        confirmConflicts: true,
+      })
+    ).error.code,
+  ).toBe("CONFLICT");
+  expect((await engine.ref(view.ref!.name)).revision).toBe(1);
+  const browserCommand = async (body: object) => {
+    const requestHeaders = new Headers(headers);
+    requestHeaders.set("origin", "http://localhost:9999");
+    requestHeaders.set("content-type", "application/json");
+    const response = await web.handler(
+      new Request("http://localhost:9999/cms/command", {
+        method: "POST",
+        headers: requestHeaders,
+        body: JSON.stringify(body),
+      }),
+    );
+    expect(response.status).toBe(200);
+    return response.json();
+  };
+  const next = await browserCommand({ type: "draft-merge-plan", id: view.viewId });
+  expect(
+    (await browserCommand({ type: "draft-merge-file", plan: next.plan, path: "pages/start.md" }))
+      .merged.source,
+  ).toContain("<<<<<<<");
+  const result = await browserCommand({
+    type: "draft-merge-apply",
+    id: view.viewId,
+    plan: next.plan,
+    command: "ui-resolution",
+    resolutions: [{ path: "pages/start.md", side: "ours" }],
+    confirmConflicts: true,
+  });
+  expect(result.reviewRevision).toBeTruthy();
+  expect((await call("get_draft_update")).upToDate).toBe(true);
+  expect((await call("get_history")).events[0].source).toBe("git-merge");
+});
+
+test("a publication race rolls back the merged ref, base metadata, and audit event together", async () => {
+  const { call, engine, database, view } = await fixture();
+  await call("update_document", {
+    path: "pages/start.md",
+    revision: 0,
+    command: "ours",
+    fields: { title: "Draft" },
+  });
+  await engine.apply({
+    ref: "main",
+    expectedRevision: 1,
+    idempotencyKey: "published",
+    changes: [
+      {
+        path: "pages/start.fr.md",
+        content: "---\ntitle: French published\nauthor: /authors/team.md\n---\nBonjour.",
+      },
+    ],
+  });
+  const plan = await call("get_draft_update");
+  const oldHead = await engine.ref(view.ref!.name);
+  const before = (
+    await database.execute("SELECT data FROM ww_web_records WHERE id=?", [view.viewId!])
+  ).rows;
+  const original = engine.apply.bind(engine);
+  engine.apply = async (args) => {
+    if (args.audit?.source === "git-merge")
+      await original({
+        ref: "main",
+        expectedRevision: 2,
+        idempotencyKey: "race",
+        changes: [
+          { path: "authors/team.md", content: "---\nname: Published team\n---\nAbout us." },
+        ],
+      });
+    return original(args);
+  };
+  const result = await call("update_draft", { plan: plan.plan, command: "race-merge" });
+  expect(result.error.code).toBe("CONFLICT");
+  expect(await engine.ref(view.ref!.name)).toEqual(oldHead);
+  expect(
+    (await database.execute("SELECT data FROM ww_web_records WHERE id=?", [view.viewId!])).rows,
+  ).toEqual(before);
+  expect(
+    (await database.execute("SELECT id FROM ww2_events WHERE source='git-merge'")).rows,
+  ).toHaveLength(0);
+});

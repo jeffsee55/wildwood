@@ -965,3 +965,51 @@ select:focus {
   color: var(--brand);
   white-space: nowrap;
 }
+
+.merge-dialog {
+  width: min(900px, 95vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+.merge-dialog > * + * {
+  margin-top: 16px;
+}
+.merge-dialog [role="alert"] {
+  color: var(--destructive);
+}
+.merge-file {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.merge-file h3 {
+  overflow-wrap: anywhere;
+}
+.merge-file label {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.merge-file select {
+  padding: 8px;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+}
+.merge-file textarea {
+  width: 100%;
+  min-height: 240px;
+  font-family: monospace;
+  margin-top: 12px;
+}
+.merge-sources pre {
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  background: var(--muted);
+}
+.merge-sources details {
+  margin-top: 8px;
+}

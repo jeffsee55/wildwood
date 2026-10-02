@@ -282,6 +282,11 @@ export class ContentEngine<C extends Collections> {
     idempotencyKey: string;
     audit?: { actor: string; source: string };
     intent?: unknown;
+    /** Advance even when bytes are unchanged (for an atomic branch-base update). */
+    advanceRevision?: boolean;
+    /** Trusted host metadata participates in the same ref transaction. Include its intent above.
+     * Not called on an idempotent replay. Do not perform external side effects here. */
+    onCommit?: (tx: SqlExecutor, result: Ref) => Promise<void>;
   }): Promise<Ref> {
     await this.ready();
     if (
@@ -315,6 +320,7 @@ export class ContentEngine<C extends Collections> {
         version: this.config.version,
         changes: changes.map(({ bytes: _bytes, ...change }) => change),
         intent: args.intent,
+        advanceRevision: args.advanceRevision,
       }),
     );
     const prior = await this.command(args.idempotencyKey, fingerprint);
@@ -344,8 +350,8 @@ export class ContentEngine<C extends Collections> {
         if (existing.has(parts.slice(0, n).join("/")))
           throw new ValidationError([{ path, message: "A parent path is also a file" }]);
     }
-    const snapshot = actual.length ? randomUUID() : head.snapshot;
-    if (actual.length) {
+    const snapshot = actual.length || args.advanceRevision ? randomUUID() : head.snapshot;
+    if (actual.length || args.advanceRevision) {
       await this.database.transaction(async (tx) => {
         await tx.execute(
           "INSERT INTO ww2_snapshots(id,repository,parent,created_at) VALUES(?,?,?,?)",
@@ -378,13 +384,14 @@ export class ContentEngine<C extends Collections> {
       const result = {
         name: head.name,
         snapshot,
-        revision: head.revision + (actual.length ? 1 : 0),
+        revision: head.revision + (actual.length || args.advanceRevision ? 1 : 0),
       };
       const updated = await tx.execute(
         "UPDATE ww2_refs SET snapshot=?,revision=? WHERE repository=? AND name=? AND revision=? AND snapshot=?",
         [snapshot, result.revision, this.config.repository, args.ref, head.revision, head.snapshot],
       );
       if (!updated.changes) throw new ConflictError("Ref advanced while preparing this edit");
+      await args.onCommit?.(tx, result);
       await tx.execute(
         "INSERT INTO ww2_commands(repository,id,fingerprint,result) VALUES(?,?,?,?)",
         [this.config.repository, args.idempotencyKey, fingerprint, JSON.stringify(result)],

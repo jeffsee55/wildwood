@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "pnpm --filter wildwood-core build && pnpm --filter wildwood-web build && node scripts/content.mjs && next dev -p 3000",
     "next:dev": "node scripts/content.mjs && next dev -p 3000",
-    "build": "node scripts/content.mjs && node scripts/verify-remote.mjs && next build",
+    "build": "node scripts/git-runtime.mjs && node scripts/content.mjs && node scripts/verify-remote.mjs && next build",
     "start": "next start",
     "lint": "oxlint .",
     "format": "oxfmt .",

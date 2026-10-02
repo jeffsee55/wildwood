@@ -56,3 +56,6 @@ yarn-error.log*
 # Generated from source during package builds/tests
 packages/web/src/assets.generated.ts
 apps/docs/lib/content.generated.json
+
+# Bundled native Git generated in the Linux deployment build
+**/.git-runtime/
