@@ -43,6 +43,7 @@ export function getWeb() {
       variant: { locale: "en" },
       development: process.env.NODE_ENV === "development",
       identity,
+      agent: { apiKey: process.env.AI_GATEWAY_API_KEY, model: process.env.FX_MODEL },
       ownerEmail: process.env.WILDWOOD_DOCS_OWNER_EMAIL,
       documentUrl: (path) =>
         path.startsWith("content/pages/")

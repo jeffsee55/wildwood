@@ -5,6 +5,7 @@ import { createReconciliation, resolutionsSchema } from "./reconciliation";
 import { mediaResponse } from "./media";
 import { PayloadTooLarge, readBody } from "./http";
 import { draftName } from "./draft-name";
+import { gatewayResponse } from "./gateway";
 import { pageLocation } from "./page-context";
 import { registerContentTools, toolResult, toolError } from "./content-tools";
 import { assets } from "./assets.generated";
@@ -136,6 +137,8 @@ export function createWeb<C extends Collections>(options: {
     ) => (r: Request) => Promise<Response>;
   };
   ownerEmail?: string;
+  /** Optional server-owned AI Gateway key; never serialized to the browser. */
+  agent?: { apiKey?: string; model?: string };
   reviewAuthority?: ReviewAuthority;
   /** Maps physical content files to site routes for pinned review previews. */
   documentUrl?: (path: string) => string | undefined;
@@ -697,6 +700,7 @@ export function createWeb<C extends Collections>(options: {
       actor: current.actor,
       version: current.version,
       variant: current.variant,
+      draft: current.mode === "draft" ? current.viewId : undefined,
       canEdit: current.mode === "draft" && !!current.actor && current.actor.role !== "reader",
       drafts: drafts
         .filter((d) => d.status !== "published")
@@ -753,7 +757,172 @@ export function createWeb<C extends Collections>(options: {
         };
         if (request.headers.get("if-none-match") === etag)
           return new Response(null, { status: 304, headers });
-        return new Response(request.method === "HEAD" ? null : asset.body, { headers });
+        return new Response(
+          request.method === "HEAD"
+            ? null
+            : asset.encoding === "base64"
+              ? Buffer.from(asset.body, "base64")
+              : asset.body,
+          { headers },
+        );
+      }
+      if (path === "/agent/gateway") {
+        if (request.method === "GET") {
+          if (request.headers.get("sec-fetch-site") !== "same-origin")
+            return json({ error: "Cross-origin request rejected" }, 403);
+        } else sameOrigin(request);
+        const person = await actor(request.headers);
+        if (!person || person.role === "reader")
+          return json({ error: "Editor sign-in required" }, 403);
+        await ready();
+        const rate = await db.execute(
+          "INSERT INTO ww_web_rate_limits(repository,subject,window,count) VALUES(?,?,?,1) ON CONFLICT(repository,subject) DO UPDATE SET count=CASE WHEN window=excluded.window THEN count+1 ELSE 1 END, window=excluded.window RETURNING count",
+          [repository, `gateway:${person.id}`, Math.floor(Date.now() / 60000)],
+        );
+        if (Number(rate.rows[0].count) > 60)
+          return json({ error: "Too many model requests. Retry in a minute." }, 429);
+        return await gatewayResponse(request, options.agent?.apiKey);
+      }
+      if (path === "/agent/config" && request.method === "GET") {
+        const person = await actor(request.headers);
+        if (!person || person.role === "reader")
+          return json({ error: "Editor sign-in required" }, 403);
+        return json({
+          actor: person,
+          repository,
+          siteKey: !!options.agent?.apiKey,
+          model: options.agent?.model ?? "anthropic/claude-sonnet-4.5",
+          wasm: `${base}/assets/${assets["fx-core.wasm"].path}`,
+        });
+      }
+      if (path === "/agent/start" && request.method === "POST") {
+        sameOrigin(request);
+        const person = requireEditor(await actor(request.headers));
+        const input = z
+          .object({ session: z.string().uuid(), draft: z.string().max(200).optional() })
+          .parse(JSON.parse(new TextDecoder().decode(await readBody(request, 4096))));
+        const sessionId = `embedded:${person.id}:${input.session}`;
+        const previous = await get(sessionId, "embedded-session");
+        let draftId = previous ? String(previous.data.draft) : input.draft;
+        if (!draftId) {
+          // Stable identity makes a lost start response safe to retry across workers.
+          draftId = digest(sessionId);
+          await db.transaction(async (tx) => {
+            const exists = (
+              await tx.execute("SELECT id FROM ww_web_records WHERE repository=? AND id=?", [
+                repository,
+                draftId!,
+              ])
+            ).rows[0];
+            if (exists) return;
+            const main = (
+              await tx.execute(
+                "SELECT snapshot,revision FROM ww2_refs WHERE repository=? AND name=?",
+                [repository, publishedRef],
+              )
+            ).rows[0];
+            if (!main) throw new Error("Published content unavailable");
+            const ref = `draft/${draftId}`;
+            await tx.execute(
+              "INSERT INTO ww2_refs(repository,name,snapshot,revision) VALUES(?,?,?,0)",
+              [repository, ref, String(main.snapshot)],
+            );
+            await tx.execute(
+              "INSERT INTO ww_web_records(repository,id,kind,actor,data) VALUES(?,?,?,?,?)",
+              [
+                repository,
+                draftId!,
+                "draft",
+                person.id,
+                JSON.stringify({
+                  ref,
+                  name: draftName(ref),
+                  base: String(main.snapshot),
+                  baseRevision: Number(main.revision),
+                  created: Date.now(),
+                }),
+              ],
+            );
+          });
+        }
+        const draft = await get(draftId, "draft");
+        if (
+          !draft ||
+          draft.actor !== person.id ||
+          (await reviews.draftStatus(draftId)).status !== "open"
+        )
+          return json({ error: "Choose your own open draft for this session." }, 403);
+        if (previous && input.draft && input.draft !== draftId)
+          throw new Error("Session belongs to another draft");
+        if (!previous)
+          await db.execute(
+            "INSERT OR IGNORE INTO ww_web_records(repository,id,kind,actor,data) VALUES(?,?,?,?,?)",
+            [
+              repository,
+              sessionId,
+              "embedded-session",
+              person.id,
+              JSON.stringify({ draft: draftId }),
+            ],
+          );
+        const bound = await get(sessionId, "embedded-session");
+        if (bound?.data.draft !== draftId) throw new Error("Session belongs to another draft");
+        const token = secret();
+        await put(
+          "agent",
+          person.id,
+          {
+            ref: draft.data.ref,
+            draft: draftId,
+            version: options.version,
+            variant: options.variant ?? {},
+            read: true,
+            write: true,
+            createDrafts: false,
+            retryScope: sessionId,
+            name: "Embedded agent",
+            audience: `${options.origin}${base}/mcp`,
+          },
+          Date.now() + 8 * 3600_000,
+          digest(token),
+        );
+        return json({
+          token,
+          draft: draftId,
+          name: draft.data.name,
+          ref: draft.data.ref,
+          endpoint: `${options.origin}${base}/mcp`,
+          version: options.version,
+          variant: options.variant ?? {},
+          review: (await reviews.draftStatus(draftId)).review,
+        });
+      }
+      if (path === "/agent" && request.method === "GET") {
+        const person = await actor(request.headers);
+        if (!person)
+          return new Response(null, {
+            status: 303,
+            headers: {
+              Location: `${base}/sign-in?next=${encodeURIComponent(url.pathname + url.search)}`,
+            },
+          });
+        requireEditor(person);
+        const context = JSON.stringify({
+          endpoint: base,
+          draft: url.searchParams.get("draft"),
+        }).replaceAll("<", "\\u003c");
+        return new Response(
+          `<!doctype html><html lang="en" translate="no"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent — Wildwood</title><link rel="stylesheet" href="${base}/assets/${assets["agent.css"].path}"><body><div id="agent-root"></div><script id="context" type="application/json">${context}</script><script type="module" src="${base}/assets/${assets["agent.js"].path}"></script></body></html>`,
+          {
+            headers: {
+              "Content-Type": "text/html; charset=utf-8",
+              "Cache-Control": "private, no-store",
+              "Referrer-Policy": "no-referrer",
+              "Content-Security-Policy":
+                "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+            },
+          },
+        );
       }
       if (path === "/health" && request.method === "GET") {
         await ready();
@@ -1172,7 +1341,7 @@ export function createWeb<C extends Collections>(options: {
               "Cache-Control": "private, no-store",
               "Referrer-Policy": "no-referrer",
               "Content-Security-Policy":
-                "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+                "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
             },
           },
         );
@@ -1201,6 +1370,13 @@ export function createWeb<C extends Collections>(options: {
     const origin = request.headers.get("origin");
     if (origin && origin !== options.origin)
       return json({ error: "Cross-origin MCP request rejected" }, 403);
+    // This stateless server returns JSON per request and has no notification stream.
+    // An open, immediately-closed SSE response makes clients reconnect indefinitely.
+    if (request.method === "GET")
+      return new Response(null, {
+        status: 405,
+        headers: { Allow: "POST", "Cache-Control": "no-store" },
+      });
     if (request.method === "POST") {
       request = new Request(request.url, {
         method: request.method,
@@ -1484,7 +1660,7 @@ export function createWeb<C extends Collections>(options: {
         engine,
         read: !!grant && grant.read !== false,
         write: !!grant?.write,
-        credentialId,
+        credentialId: typeof grant?.retryScope === "string" ? grant.retryScope : credentialId,
         actor: delegated?.actor ?? "agent",
         variant: (grant?.variant as Record<string, string>) ?? options.variant,
         saved: async (ref, revision, snapshot, paths) => {

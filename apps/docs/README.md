@@ -12,14 +12,16 @@ Create a draft, select a mapped title or body, save source, and review the befor
 
 Root Directory: `apps/docs`, with source outside the root included. `vercel.json` builds the three workspace projects through Turbo. Set:
 
-| Variable                             | Purpose                                       |
-| ------------------------------------ | --------------------------------------------- |
-| `WILDWOOD_DOCS_DATABASE_URL`         | Persistent remote LibSQL/Turso database       |
-| `WILDWOOD_DOCS_DATABASE_TOKEN`       | Database credential                           |
-| `WILDWOOD_DOCS_ORIGIN`               | Stable HTTPS origin, without a trailing slash |
-| `WILDWOOD_DOCS_GITHUB_CLIENT_ID`     | GitHub OAuth application ID                   |
-| `WILDWOOD_DOCS_GITHUB_CLIENT_SECRET` | GitHub OAuth application secret               |
-| `WILDWOOD_DOCS_OWNER_EMAIL`          | Verified GitHub email of the initial owner    |
+| Variable                             | Purpose                                               |
+| ------------------------------------ | ----------------------------------------------------- |
+| `WILDWOOD_DOCS_DATABASE_URL`         | Persistent remote LibSQL/Turso database               |
+| `WILDWOOD_DOCS_DATABASE_TOKEN`       | Database credential                                   |
+| `WILDWOOD_DOCS_ORIGIN`               | Stable HTTPS origin, without a trailing slash         |
+| `WILDWOOD_DOCS_GITHUB_CLIENT_ID`     | GitHub OAuth application ID                           |
+| `WILDWOOD_DOCS_GITHUB_CLIENT_SECRET` | GitHub OAuth application secret                       |
+| `WILDWOOD_DOCS_OWNER_EMAIL`          | Verified GitHub email of the initial owner            |
+| `AI_GATEWAY_API_KEY`                 | Optional site-wide key for the embedded content agent |
+| `FX_MODEL`                           | Optional Gateway model ID for new embedded sessions   |
 
 GitHub callback: `<origin>/cms/auth/callback/github`. MCP URL: `<origin>/cms/mcp`. GitHub's repository connection to Vercel is separate from CMS user sign-in.
 
@@ -62,3 +64,9 @@ Locale changes refresh the current view without invalidating immutable content c
 Production builds prepare both supported schema generations against the current published snapshot before deployment. Preparation never moves refs or overwrites documents. For an explicitly configured remote environment, `WILDWOOD_PREPARE_CONTENT=1 node scripts/prepare-content.mjs` runs the same step. Active drafts under a newly introduced generation are still prepared on first access.
 
 Signed-in content views opt out of automatic browser translation so displayed variants and source-mapped selections remain faithful to the stored content. Anonymous visitors retain normal browser translation.
+
+## Embedded content agent
+
+Open **Work with agent** in the toolbar or visit `/cms/agent`. Both a server-owned AI Gateway key and personal keys are supported. Personal keys live only in the open panel's memory; a page reload requires re-entry. The agent uses the same authorized MCP endpoint as external clients and can submit a review, but cannot approve or publish it.
+
+A review can dock the same conversation beside its diff. Select lines and choose **Ask agent** to attach pinned context to the next message. Conversations/checkpoints remain in this browser; content and reviews remain in the database. Embedded sessions need current Chrome or Edge with WebAssembly JSPI. See the web package README for the local scripted model fixture and detailed behavior.

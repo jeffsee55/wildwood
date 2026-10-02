@@ -1,6 +1,7 @@
-import { memo, type ReactNode } from "react";
-import { structuredPatch, diffWordsWithSpace } from "diff";
-import { FileText } from "lucide-react";
+import { Fragment, memo, useMemo, useState } from "react";
+import { FileText, Bot, MessageSquare, UnfoldVertical, X } from "lucide-react";
+import { diffWordsWithSpace } from "diff";
+import { computeDiff, segments, splitRows, type Row } from "./diff-model";
 import type { Change } from "../src/reviews";
 export type FileDiff = Change & {
   beforeContent: {
@@ -19,17 +20,33 @@ export type FileDiff = Change & {
   };
 };
 
+export type LineSelection = { side: "before" | "after"; start: number; end: number; text: string };
 export const Diff = memo(function Diff({
   value,
   split,
   wrap,
+  onAskAgent,
+  onComment,
 }: {
   value: FileDiff;
   split: boolean;
   wrap: boolean;
+  onAskAgent?: (selection: LineSelection) => void;
+  onComment?: (selection: LineSelection) => void;
 }) {
   const a = value.beforeContent,
     b = value.afterContent;
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [selection, setSelection] = useState<{
+    side: "before" | "after";
+    anchor: number;
+    end: number;
+  } | null>(null);
+  const model = useMemo(
+    () =>
+      a.binary || b.binary || a.tooLarge || b.tooLarge ? null : computeDiff(a.source, b.source),
+    [a.source, b.source, a.binary, b.binary, a.tooLarge, b.tooLarge],
+  );
   if (a.binary || b.binary || a.tooLarge || b.tooLarge)
     return (
       <div className="empty-diff">
@@ -40,42 +57,109 @@ export const Diff = memo(function Diff({
         <p>
           {a.size.toLocaleString()} → {b.size.toLocaleString()} bytes
         </p>
-        <p>Both immutable blob identifiers remain in the review.</p>
       </div>
     );
-  const patch = structuredPatch(
-    value.path,
-    value.path,
-    a.source || "",
-    b.source || "",
-    "Before",
-    "After",
-    { context: 4, timeout: 150, maxEditLength: 10000 },
-  );
-  if (!patch)
+  if (!model)
     return <div className="empty-diff">This diff is too large to compute interactively.</div>;
-  const word = (text: string, other: string, added: boolean) =>
-    text.length < 1200 && other.length < 1200
-      ? (diffWordsWithSpace(other, text, { timeout: 10 })
-          ?.filter((p) => !p.removed)
-          .map((p, i) => (
-            <span key={i} className={p.added ? (added ? "word-added" : "word-removed") : ""}>
-              {p.value}
-            </span>
-          )) ?? text)
-      : text;
+  const selected: LineSelection | null = selection
+    ? {
+        side: selection.side,
+        start: Math.min(selection.anchor, selection.end),
+        end: Math.max(selection.anchor, selection.end),
+        text:
+          (selection.side === "before" ? a.source : b.source)
+            ?.split("\n")
+            .slice(
+              Math.min(selection.anchor, selection.end) - 1,
+              Math.max(selection.anchor, selection.end),
+            )
+            .join("\n")
+            .slice(0, 12000) ?? "",
+      }
+    : null;
+  const gutter = (side: "before" | "after", line?: number) => (
+    <td
+      className={`gutter ${selected?.side === side && line !== undefined && line >= selected.start && line <= selected.end ? "line-selected" : ""}`}
+    >
+      {line !== undefined && (
+        <button
+          aria-label={`Select ${side} line ${line}`}
+          aria-pressed={selected?.side === side && line >= selected.start && line <= selected.end}
+          onClick={(e) =>
+            setSelection({
+              side,
+              anchor: e.shiftKey && selection?.side === side ? selection.anchor : line,
+              end: line,
+            })
+          }
+        >
+          {line}
+        </button>
+      )}
+    </td>
+  );
+  const words = (row: Row, other?: Row) => {
+    if (!other || row.type === "ctx" || row.text.length > 1200 || other.text.length > 1200)
+      return row.text || " ";
+    return (
+      diffWordsWithSpace(other.text, row.text, { timeout: 10 })
+        ?.filter((p) => !p.removed)
+        .map((p, i) => (
+          <span
+            key={i}
+            className={p.added ? (row.type === "add" ? "word-added" : "word-removed") : undefined}
+          >
+            {p.value}
+          </span>
+        )) ?? row.text
+    );
+  };
+  const cells = (row: Row | undefined, side: "before" | "after", other?: Row) => (
+    <>
+      {gutter(side, side === "before" ? row?.old : row?.new)}
+      <td
+        className={`code ${row?.type === "add" ? "plus" : row?.type === "del" ? "minus" : row ? "" : "empty"}`}
+      >
+        {row ? words(row, other) : " "}
+      </td>
+    </>
+  );
+  const newline = (a.source ?? "").endsWith("\n") !== (b.source ?? "").endsWith("\n");
   return (
     <>
       <div className="diff-meta">
         <span>
           {value.beforeMode !== value.afterMode
             ? `Mode ${value.beforeMode || "—"} → ${value.afterMode || "—"}`
-            : "Source diff"}
+            : "Click line numbers to select · Shift-click for a range"}
         </span>
         <span>
-          {a.size.toLocaleString()} → {b.size.toLocaleString()} bytes
+          <b className="diff-added">+{model.additions}</b>{" "}
+          <b className="diff-removed">−{model.deletions}</b>
         </span>
       </div>
+      {selected && (
+        <div className="diff-selection" role="region" aria-label="Selected lines">
+          <span>
+            {selected.side} · lines {selected.start}–{selected.end}
+          </span>
+          {onAskAgent && (
+            <button onClick={() => onAskAgent(selected)}>
+              <Bot size={13} />
+              Ask agent
+            </button>
+          )}
+          {onComment && (
+            <button onClick={() => onComment(selected)}>
+              <MessageSquare size={13} />
+              Comment
+            </button>
+          )}
+          <button aria-label="Clear line selection" onClick={() => setSelection(null)}>
+            <X size={13} />
+          </button>
+        </div>
+      )}
       {split && (
         <div className="split-labels">
           <span>Before</span>
@@ -100,81 +184,64 @@ export const Diff = memo(function Diff({
             )}
           </colgroup>
           <tbody>
-            {patch.hunks.flatMap((h, hi) => {
-              let left = h.oldStart,
-                right = h.newStart;
-              const rows: ReactNode[] = [
-                <tr className="hunk" key={`h${hi}`}>
+            {segments(model, expanded).map((s) =>
+              s.kind === "gap" ? (
+                <tr key={`gap-${s.start}`} className="diff-gap">
                   <td colSpan={split ? 4 : 3}>
-                    @@ −{h.oldStart},{h.oldLines} +{h.newStart},{h.newLines} @@
+                    <button onClick={() => setExpanded((e) => new Set(e).add(s.start))}>
+                      <UnfoldVertical size={13} />
+                      Show {s.end - s.start + 1} unchanged lines
+                    </button>
                   </td>
-                </tr>,
-              ];
-              for (let i = 0; i < h.lines.length; i++) {
-                const line = h.lines[i],
-                  kind = line[0],
-                  text = line.slice(1);
-                if (kind === "\\") continue;
-                if (split && (kind === "-" || kind === "+")) {
-                  const removed: string[] = [],
-                    added: string[] = [];
-                  while (i < h.lines.length && h.lines[i][0] === "-")
-                    removed.push(h.lines[i++].slice(1));
-                  while (i < h.lines.length && h.lines[i][0] === "+")
-                    added.push(h.lines[i++].slice(1));
-                  i--;
-                  for (let n = 0; n < Math.max(removed.length, added.length); n++) {
-                    rows.push(
-                      <tr key={`${hi}-${i}-${n}`}>
-                        <td className={removed[n] !== undefined ? "minus gutter" : "gutter"}>
-                          {removed[n] !== undefined ? left++ : ""}
-                        </td>
-                        <td className={removed[n] !== undefined ? "minus code" : "code empty"}>
-                          {removed[n] !== undefined ? word(removed[n], added[n] ?? "", false) : ""}
-                        </td>
-                        <td className={added[n] !== undefined ? "plus gutter" : "gutter"}>
-                          {added[n] !== undefined ? right++ : ""}
-                        </td>
-                        <td className={added[n] !== undefined ? "plus code" : "code empty"}>
-                          {added[n] !== undefined ? word(added[n], removed[n] ?? "", true) : ""}
-                        </td>
-                      </tr>,
-                    );
-                  }
-                  continue;
-                }
-                rows.push(
-                  split ? (
-                    <tr key={`${hi}-${i}`}>
-                      <td className="gutter">{left++}</td>
-                      <td className="code">{text}</td>
-                      <td className="gutter">{right++}</td>
-                      <td className="code">{text}</td>
-                    </tr>
-                  ) : (
-                    <tr
-                      key={`${hi}-${i}`}
-                      className={kind === "+" ? "plus" : kind === "-" ? "minus" : ""}
-                    >
-                      <td className="gutter">{kind !== "+" ? left++ : ""}</td>
-                      <td className="gutter">{kind !== "-" ? right++ : ""}</td>
-                      <td className="code">
-                        <span className="line-sign">{kind}</span>
-                        {text}
+                </tr>
+              ) : (
+                <Fragment key={`rows-${s.start}`}>
+                  {s.hunk !== undefined && (
+                    <tr className="hunk" data-hunk={s.hunk}>
+                      <td colSpan={split ? 4 : 3}>
+                        @@ −{model.rows[s.start].old ?? ""} +{model.rows[s.start].new ?? ""} @@
                       </td>
                     </tr>
-                  ),
-                );
-              }
-              return rows;
-            })}
+                  )}
+                  {split
+                    ? splitRows(model.rows, s.start, s.end).map((row) => (
+                        <tr key={row.index}>
+                          {cells(row.left, "before", row.right)}
+                          {cells(row.right, "after", row.left)}
+                        </tr>
+                      ))
+                    : model.rows.slice(s.start, s.end + 1).map((row, i) => (
+                        <tr
+                          key={s.start + i}
+                          className={
+                            row.type === "add" ? "plus" : row.type === "del" ? "minus" : ""
+                          }
+                        >
+                          {gutter("before", row.old)}
+                          {gutter("after", row.new)}
+                          <td className="code">
+                            <span className="line-sign">
+                              {row.type === "add" ? "+" : row.type === "del" ? "−" : " "}
+                            </span>
+                            {row.text || " "}
+                          </td>
+                        </tr>
+                      ))}
+                </Fragment>
+              ),
+            )}
           </tbody>
         </table>
-        {!patch.hunks.length && (
+        {!model.hunks.length && (
           <div className="empty-diff">
             File contents are unchanged.
             {value.beforeMode !== value.afterMode ? " File mode changed." : ""}
           </div>
+        )}
+        {newline && (
+          <p className="diff-newline">
+            {b.source?.endsWith("\n") ? "Final newline added" : "No newline at end of new file"}
+          </p>
         )}
       </div>
     </>

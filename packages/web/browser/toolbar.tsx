@@ -35,6 +35,7 @@ type State = {
   mode: string;
   snapshot: string;
   canEdit: boolean;
+  draft?: string;
   actor: { name: string; role: string } | null;
   completed: { updatedAt: number; id: string; review: string; data: { name: string } }[];
   drafts: {
@@ -321,6 +322,14 @@ function App({ state: s, host, portal }: { state: State; host: HTMLElement; port
                             Review changes
                           </Button>
                         </>
+                      )}
+                      {editor && (
+                        <a
+                          className="workspace-action"
+                          href={`${s.endpoint}/agent${s.draft ? `?draft=${encodeURIComponent(s.draft)}` : ""}`}
+                        >
+                          <Bot /> Work with agent <ArrowUpRight size={12} />
+                        </a>
                       )}
                       <Button
                         className="workspace-action"

@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @source "./**/*.{ts,tsx}";
 @import "./theme.css";
+@import "./agent/panel.css";
 
 :root {
   font-family: ui-sans-serif, system-ui, sans-serif;
@@ -1036,5 +1037,157 @@ select:focus {
   }
   .diff-actions > :first-child {
     margin-right: auto;
+  }
+}
+
+/* The compact workspace and docked conversation follow fx-proj's review layout. */
+.review-workspace {
+  min-height: 100dvh;
+}
+.review-workspace.agent-open {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 390px;
+  height: 100dvh;
+  overflow: hidden;
+}
+.review-surface {
+  min-width: 0;
+}
+.agent-open .review-surface {
+  overflow: auto;
+}
+.review-agent-dock {
+  height: 100dvh;
+  border-left: 1px solid var(--border);
+  min-width: 0;
+}
+.agent-open .review-layout {
+  grid-template-columns: 185px minmax(0, 1fr);
+}
+.agent-open .decision-sidebar {
+  grid-column: 1/-1;
+  border-top: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 25px;
+}
+.review-heading {
+  padding-top: 24px;
+  padding-bottom: 24px;
+}
+.review-heading h1 {
+  font-size: 25px;
+  font-weight: 550;
+}
+.diff-table .gutter {
+  padding: 0;
+}
+.gutter button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  width: 100%;
+  text-align: right;
+  padding: 0 7px;
+  line-height: inherit;
+}
+.gutter button:hover,
+.gutter.line-selected {
+  background: light-dark(#dce8f8, #263952);
+  color: light-dark(#244269, #c4daff);
+}
+.gutter button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.diff-selection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--muted);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.diff-selection > span {
+  margin-right: auto;
+}
+.diff-selection button,
+.diff-gap button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  color: inherit;
+  padding: 5px;
+}
+.diff-gap {
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.diff-gap button {
+  width: 100%;
+  padding: 8px 12px;
+}
+.diff-gap button:hover {
+  color: var(--foreground);
+}
+.diff-added {
+  color: var(--brand);
+}
+.diff-removed {
+  color: var(--error);
+}
+.diff-newline {
+  padding: 8px 12px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+@media (max-width: 1000px) {
+  .review-workspace.agent-open {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+  .agent-open .review-layout {
+    display: flex;
+    flex-direction: column;
+  }
+  .agent-open .file-list {
+    max-height: 150px;
+  }
+  .agent-open .decision-sidebar {
+    display: block;
+  }
+  .agent-open .review-meta {
+    flex-wrap: wrap;
+  }
+  .agent-open .authority {
+    display: none;
+  }
+}
+@media (max-width: 700px) {
+  .review-workspace.agent-open {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+  .agent-open .review-surface {
+    overflow: visible;
+  }
+  .review-agent-dock {
+    height: 75dvh;
+    border: 1px solid var(--border);
+    position: sticky;
+    bottom: 0;
+    box-shadow: 0 -10px 30px #0002;
+    z-index: 20;
+  }
+  .review-header {
+    position: sticky;
+    top: 0;
+    z-index: 21;
+    background: var(--background);
   }
 }
