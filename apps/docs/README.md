@@ -12,14 +12,14 @@ Create a draft, select a mapped title or body, save source, and review the befor
 
 Root Directory: `apps/docs`, with source outside the root included. `vercel.json` builds the three workspace projects through Turbo. Set:
 
-| Variable | Purpose |
-| --- | --- |
-| `WILDWOOD_DOCS_DATABASE_URL` | Persistent remote LibSQL/Turso database |
-| `WILDWOOD_DOCS_DATABASE_TOKEN` | Database credential |
-| `WILDWOOD_DOCS_ORIGIN` | Stable HTTPS origin, without a trailing slash |
-| `WILDWOOD_DOCS_GITHUB_CLIENT_ID` | GitHub OAuth application ID |
-| `WILDWOOD_DOCS_GITHUB_CLIENT_SECRET` | GitHub OAuth application secret |
-| `WILDWOOD_DOCS_OWNER_EMAIL` | Verified GitHub email of the initial owner |
+| Variable                             | Purpose                                       |
+| ------------------------------------ | --------------------------------------------- |
+| `WILDWOOD_DOCS_DATABASE_URL`         | Persistent remote LibSQL/Turso database       |
+| `WILDWOOD_DOCS_DATABASE_TOKEN`       | Database credential                           |
+| `WILDWOOD_DOCS_ORIGIN`               | Stable HTTPS origin, without a trailing slash |
+| `WILDWOOD_DOCS_GITHUB_CLIENT_ID`     | GitHub OAuth application ID                   |
+| `WILDWOOD_DOCS_GITHUB_CLIENT_SECRET` | GitHub OAuth application secret               |
+| `WILDWOOD_DOCS_OWNER_EMAIL`          | Verified GitHub email of the initial owner    |
 
 GitHub callback: `<origin>/cms/auth/callback/github`. MCP URL: `<origin>/cms/mcp`. GitHub's repository connection to Vercel is separate from CMS user sign-in.
 
@@ -43,7 +43,7 @@ pnpm build
 pnpm check:deployment https://your-stable-origin.example
 ```
 
-The deployment check verifies public rendering, database health, canonical OAuth discovery, PKCE and refresh metadata, unauthorized MCP rejection, and disabled production development-login. It exits nonzero if sign-in is unconfigured. It does not claim a GitHub sign-in or authenticated write succeeded; those require the actual interactive OAuth flow.
+The deployment check verifies public rendering, database health, canonical OAuth discovery, PKCE and refresh metadata, unauthorized MCP rejection, and disabled production development-login. It exits nonzero if sign-in is unconfigured. The health response reports authentication as `configured`, which confirms presence of credentials, not a successful provider exchange. It does not claim a GitHub sign-in or authenticated write succeeded; those require the actual interactive OAuth flow.
 
 Local tests cover real HTTP OAuth registration, consent, PKCE, token refresh, narrowed scopes, and revocation; content tools cover atomic edits, conflicts, history, restoration, preview sharing, and publication. Browser verification covers source selection, Server Action save, RSC refresh, review, approval, and publication.
 

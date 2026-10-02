@@ -300,6 +300,7 @@ test("a delegated MCP credential reads only its draft and stops working after re
   expect(response.status).toBe(200);
   const body = await response.json();
   expect(body.result.tools.map((t: { name: string }) => t.name)).toEqual([
+    "validate_content",
     "discover_content",
     "read_documents",
     "read_source",

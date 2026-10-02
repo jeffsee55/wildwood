@@ -15,7 +15,7 @@ The agent starts with `discover_content`. It learns collection names, required f
 
 ## Editing safely
 
-`create_draft` starts from the published site. Give the draft a readable name. `update_document` changes top-level fields while preserving body text unless the body is included. `apply_changes` saves a batch of writes and deletions atomically; use it for related edits or renames. `validate_changes` checks schemas without saving.
+`create_draft` starts from the published site. Give the draft a readable name. `update_document` changes top-level fields while preserving body text unless the body is included. `apply_changes` saves a batch of writes and deletions atomically; use it for related edits or renames. `validate_changes` checks schemas without saving. After editing, run `validate_content` to check the saved snapshot, including references across every language. Fix its file-specific diagnostics before requesting review.
 
 Every save uses the revision last observed and a unique command key. If the connection drops, retry the identical operation with that same key. If another editor has advanced the draft, read the new version and reconcile before sending a new command.
 

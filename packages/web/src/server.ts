@@ -664,7 +664,7 @@ export function createWeb<C extends Collections>(options: {
         return json({
           status: signin ? "ready" : "configuration_required",
           database: "ready",
-          authentication: signin ? "ready" : "missing_provider",
+          authentication: signin ? "configured" : "missing_provider",
           mcp: `${options.origin}${base}/mcp`,
         });
       }
@@ -674,7 +674,7 @@ export function createWeb<C extends Collections>(options: {
         const config = JSON.stringify({ mcpServers: { wildwood: { url: endpoint } } }, null, 2);
         return page(
           "Connect your agent",
-          `<p>Give your agent a content workspace with drafts, validation, previews and human review.</p><h2>Connection</h2><p><code>${htmlEscape(endpoint)}</code></p><p>${configured ? "Sign-in provider is configured. Add this URL to an OAuth-capable MCP client, then sign in and choose its permissions." : "Sign-in is not configured. Set the GitHub client ID and secret before connecting."}</p><pre>${htmlEscape(config)}</pre><h2>First task</h2><p>Ask your agent: “Discover the content model, create a draft, improve a page, validate it, and give me a preview and review link.”</p><p>Agents can edit authorized drafts. Publishing requires approval of the exact revision.</p><p><a href="${base}/sign-in">Sign in</a> · <a href="${base}/access">Manage access</a> · <a href="${base}/health">Connection health</a></p>`,
+          `<p>Give your agent a content workspace with drafts, validation, previews and human review.</p><h2>Connection</h2><p><code>${htmlEscape(endpoint)}</code></p><p>${configured ? "Sign-in credentials are configured. Complete sign-in to verify that they work. Add this URL to an OAuth-capable MCP client, then sign in and choose its permissions." : "Sign-in is not configured. Set the GitHub client ID and secret before connecting."}</p><pre>${htmlEscape(config)}</pre><h2>First task</h2><p>Ask your agent: “Discover the content model, create a draft, improve a page, validate it, and give me a preview and review link.”</p><p>Agents can edit authorized drafts. Publishing requires approval of the exact revision.</p><p><a href="${base}/sign-in">Sign in</a> · <a href="${base}/access">Manage access</a> · <a href="${base}/health">Connection health</a></p>`,
         );
       }
       if (path === "/status" && request.method === "GET") {
@@ -826,11 +826,18 @@ export function createWeb<C extends Collections>(options: {
           },
         });
       }
-      if (path === "/sign-in")
+      if (path === "/sign-in") {
+        const error = url.searchParams.get("error");
+        const message = !error
+          ? ""
+          : error === "access_denied"
+            ? "Sign-in was canceled. You can try again when you’re ready."
+            : "Sign-in could not be completed. Try again. If it keeps failing, ask the site owner to check the GitHub sign-in configuration. If you started from an agent, reconnect there to begin a fresh request.";
         return page(
           "Sign in",
-          `${development ? (options.identity?.providers?.local ? '<p>Development only: sign in as the local owner.</p><button id="local-oauth">Continue as local developer</button>' : `<form method="post" action="${base}/local-login"><button>Continue as local developer</button></form>`) : ""}${options.identity?.providers?.github ? '<button id="github">Continue with GitHub</button>' : ""}${!development && !options.identity?.providers?.github ? "<p>No sign-in provider configured.</p>" : ""}`,
+          `${message ? `<p role="alert">${message}</p>` : ""}${development ? (options.identity?.providers?.local ? '<p>Development only: sign in as the local owner.</p><button id="local-oauth">Continue as local developer</button>' : `<form method="post" action="${base}/local-login"><button>Continue as local developer</button></form>`) : ""}${options.identity?.providers?.github ? '<button id="github">Continue with GitHub</button>' : ""}${!development && !options.identity?.providers?.github ? "<p>No sign-in provider configured.</p>" : ""}`,
         );
+      }
       if (path === "/consent") {
         const user = await options.identity?.user(request.headers);
         if (!user)

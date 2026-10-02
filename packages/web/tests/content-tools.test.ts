@@ -320,6 +320,41 @@ test("publication rejects dangling references and unsubmitted edits without lock
   expect((await engine.query("pages", { ref: "main" })).items[0].value.title).toBe("Welcome");
 });
 
+test("content validation checks all locales without advancing the draft and rejects stale snapshots", async () => {
+  const { call, engine, view, database } = await fixture();
+  const initial = await call("validate_content");
+  expect(initial.valid).toBe(true);
+  const removed = await call("apply_changes", {
+    revision: 0,
+    command: "validation-remove-author",
+    changes: [{ path: "authors/team.md", delete: true }],
+  });
+  const before = await engine.ref(view.ref!.name);
+  const events = await database.execute("SELECT COUNT(*) AS count FROM ww2_events");
+  const broken = await call("validate_content", { snapshot: removed.snapshot });
+  expect(broken.valid).toBe(false);
+  expect(broken.failed).toBe(false);
+  expect(broken.diagnostics.map((d: { path: string }) => d.path).sort()).toEqual([
+    "pages/start.fr.md",
+    "pages/start.md",
+  ]);
+  expect(
+    broken.diagnostics.every((d: { message: string }) => d.message.includes("Unresolved author")),
+  ).toBe(true);
+  expect(await engine.ref(view.ref!.name)).toEqual(before);
+  expect(await database.execute("SELECT COUNT(*) AS count FROM ww2_events")).toEqual(events);
+  expect((await call("validate_content", { snapshot: initial.snapshot })).error.code).toBe(
+    "CONFLICT",
+  );
+  await call("restore_document", {
+    path: "authors/team.md",
+    snapshot: initial.snapshot,
+    revision: 1,
+    command: "validation-repair-author",
+  });
+  expect((await call("validate_content")).valid).toBe(true);
+});
+
 test("simultaneous editors get one winner, and pagination detects a changed ref", async () => {
   const { call, engine, view } = await fixture();
   const before = await call("read_documents", { collection: "pages" });

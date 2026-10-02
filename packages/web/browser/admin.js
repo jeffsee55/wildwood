@@ -44,6 +44,12 @@ document.querySelector("#github")?.addEventListener("click", () =>
   run(async () => {
     const response = await request("/auth/sign-in/social", {
       provider: "github",
+      errorCallbackURL: (() => {
+        const retry = new URL(location.href);
+        retry.searchParams.delete("error");
+        retry.searchParams.delete("error_description");
+        return retry.href;
+      })(),
       callbackURL: (() => {
         const next = new URLSearchParams(location.search).get("next");
         if (!next) return location.origin + ctx.endpoint + "/access";

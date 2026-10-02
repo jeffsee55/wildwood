@@ -54,7 +54,7 @@ console.log(
     2,
   ),
 );
-if (health.authentication !== "ready") {
+if (health.authentication !== "configured") {
   console.error(
     "Hosted sign-in is not configured. Add the GitHub client ID and secret, then redeploy.",
   );

@@ -248,7 +248,7 @@ and [Floating UI's update strategy](https://floating-ui.com/docs/autoupdate).
 
 ## Content tools and operations
 
-`content-tools.ts` owns discovery, schema resources, an editing prompt, document search, reference lookup, raw reads/writes, atomic batches, dry-run validation, top-level field edits, change summaries, audit history, restoration, and pinned preview links. Results carry both `structuredContent` and compatible JSON text. Tool errors include stable codes and recovery guidance.
+`content-tools.ts` owns discovery, schema resources, an editing prompt, document search, reference lookup, raw reads/writes, atomic batches, dry-run validation, snapshot validation across all locales, top-level field edits, change summaries, audit history, restoration, and pinned preview links. Results carry both `structuredContent` and compatible JSON text. Tool errors include stable codes and recovery guidance.
 
 MCP writes are restricted to declared collections and require an expected revision plus an idempotency key. The HTTP request body is bounded to 1 MiB, file input to 128 KiB of text, batches to 50 files, and authenticated connections to 120 requests per minute using durable database counters. Foreign browser origins are rejected. Use native remote-MCP clients rather than unauthenticated cross-origin browser calls.
 
