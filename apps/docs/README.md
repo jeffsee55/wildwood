@@ -1,164 +1,48 @@
-# docs app — production setup
+# Wildwood docs — customer zero
 
-Reference deployment for **Turso + GitHub App + Vercel, preview via branches, no separate preview infra.** Zero env fallbacks inside wildwood — host maps env → explicit options.
+This Next.js site uses the immutable core and the prebuilt Wildwood web integration in production. It has no dependency on the removed legacy CMS or VS Code editor.
 
-## How it runs
+## Development
 
-- **Build**: `.git` checkout → `NativeRemote` pre-indexes `content/` into LibSQL during `findMany`.
-- **Prefetch**: `TURSO_DATABASE_URL=libsql://…` → build writes straight to Turso. `file:…` stays local.
-- **Runtime**: No checkout, GitHub remote or DB-only. Reads Turso. Cold miss fails fast.
-- **Preview**: Branch switch/create sets `x-wildwood-branch` cookie + `draftMode()`. Mutations call `revalidateTag(WILDWOOD_CACHE_TAG)`.
+Run `pnpm dev` from the root, then open http://localhost:3000. The development identity is explicitly selected from `/cms/sign-in`; it is unavailable on production builds. SQLite persists between restarts. Initial content comes from `content/`, bundled by `scripts/content.mjs`.
 
-## Env — explicit host mapping, no fallbacks in lib
+Create a draft, select a mapped title or body, save source, and review the before/after result. `/cms/connect` explains MCP setup. `/cms/health` reports database and provider readiness.
 
-Copy `.env.example` → `.env.local` for dev. Wildwood auth has no environment-variable configuration; the host still maps deployment credentials into the Git and database clients explicitly. Vercel System Envs may supply org/repo identity, while Better Auth derives its origin from each `Request`.
+## Production on Vercel
 
-### Identity — zero-config on Vercel
+Root Directory: `apps/docs`, with source outside the root included. `vercel.json` builds the three workspace projects through Turbo. Set:
 
-`wildwood({ collections })` alone works when System Envs enabled:
+| Variable | Purpose |
+| --- | --- |
+| `WILDWOOD_DOCS_DATABASE_URL` | Persistent remote LibSQL/Turso database |
+| `WILDWOOD_DOCS_DATABASE_TOKEN` | Database credential |
+| `WILDWOOD_DOCS_ORIGIN` | Stable HTTPS origin, without a trailing slash |
+| `WILDWOOD_DOCS_GITHUB_CLIENT_ID` | GitHub OAuth application ID |
+| `WILDWOOD_DOCS_GITHUB_CLIENT_SECRET` | GitHub OAuth application secret |
+| `WILDWOOD_DOCS_OWNER_EMAIL` | Verified GitHub email of the initial owner |
 
-- `org` → `VERCEL_GIT_REPO_OWNER` → git remote (dev)
-- `repo` → `VERCEL_GIT_REPO_SLUG` → git remote (dev)
-- `ref` → `VERCEL_GIT_COMMIT_REF` / `SHA` → `main`
-- `origin` → `VERCEL_PROJECT_PRODUCTION_URL` / `BRANCH_URL` / `URL`
+GitHub callback: `<origin>/cms/auth/callback/github`. MCP URL: `<origin>/cms/mcp`. GitHub's repository connection to Vercel is separate from CMS user sign-in.
 
-### Database — Turso integration canonical
+The existing `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` and `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` aliases are accepted. File-backed databases are rejected on Vercel. Use separate databases for preview and production. Canonical origin, issuer, and OAuth client configuration must agree; preview hostnames should not become permanent MCP connections.
 
-```
-TURSO_DATABASE_URL=libsql://…          # auto-injected by Vercel integration
-TURSO_AUTH_TOKEN=…
-# dev only: file:./wildwood-docs.db when TURSO_ missing
-```
+Vercel deployment protection must permit intended MCP clients to reach the endpoint and discovery metadata. Wildwood enforces its own OAuth access. Do not enable local development authentication in production.
 
-### GitHub App — git writes + OAuth (single app)
+## Publication and persistence
 
-```
-GITHUB_APP_ID=<numeric>
-GITHUB_PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----…
-GITHUB_APP_INSTALLATION_ID=<numeric>   # optional
-GITHUB_APP_SLUG=wildwood               # public, install-link UI only
-GITHUB_APP_NAME=Wildwood
-GITHUB_CLIENT_ID=<same App>
-GITHUB_CLIENT_SECRET=<same App>        # App doubles as OAuth — no second app
-```
+Published page reads resolve `main` on each server request. Document caching is keyed by snapshot, generation, and locale, so content publication does not require redeployment. Signed-in moving views poll for external edits while visible. Pinned and shared previews remain pinned.
 
-Store `GITHUB_PRIVATE_KEY` via Vercel env UI — wildwood normalizes `\n` or literal newlines.
+The database and blob store are authoritative. Redeploys do not overwrite existing documents. The initial seed runs only for an empty repository; the explicit agent-guide migration adds two missing manual pages once. It does not replace existing paths. Auth signing material is generated once and persisted in the database.
 
-### Auth — persisted, project-scoped authority
-
-Better Auth's secret is created once and persisted in the same database. No auth
-environment variables are required. An optional `authenticate` callback can add
-a sign-in restriction when the product needs one.
-
-Client (`lib/wildwood.ts`) — one flat `wildwood({...})` call. Bring your own DB
-driver and pass the constructed client in via `database:`. Live handles (the DB
-client, Octokit) are only touched on first query, so this module-scope value is
-safe to reference directly inside `"use cache"` (no separate read-only client):
-
-```ts
-import { createClient as createLibsql } from "@libsql/client";
-
-const db = createLibsql({
-  url: process.env.TURSO_DATABASE_URL!,
-  authToken: process.env.TURSO_AUTH_TOKEN,
-});
-
-export const wildwood = createWildwood({
-  collections: { authors, docs, nav },
-  database: db,
-  github: {
-    type: "app",
-    appId: process.env.GITHUB_APP_ID,
-    privateKey: process.env.GITHUB_PRIVATE_KEY,
-    installationId: process.env.GITHUB_APP_INSTALLATION_ID,
-    clientId: process.env.GITHUB_CLIENT_ID,        // OAuth sign-in — same App
-    clientSecret: process.env.GITHUB_CLIENT_SECRET,
-  },
-});
-```
-
-Route (`app/api/[...path]/route.ts`) — `createCMS` layers managed, ref-scoped
-authority on the client. Better Auth owns identity and automatically reuses the
-client's GitHub credentials; its secret is persisted in the same database:
-
-```ts
-export const { GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE } = createCMS(wildwood, {
-  dangerouslyAllowDatabaseReset: true,
-  auth: {
-    bootstrap: { owner: "jeffsee.55@gmail.com" },
-  },
-});
-```
-
-- Contributors receive read access to `config.ref`, permission to create from
-  it, and an exact grant for every server-named branch they create. Public refs
-  are memorable two-word names; user ids remain private authorization data.
-  Users, agents, approvals, and anonymous preview links are represented as
-  revocable grants rather than callbacks in app configuration.
-- Multiple repositories can share the same identity realm and database. Each is
-  a stable `wildwood_project`; grants, credentials, approvals, and audit events
-  carry its `project_id`. GitHub's immutable repository id preserves authority
-  when an owner or repository slug changes.
-- `authenticate` and `authorize` remain optional additional restrictions, not
-  the source of managed authority.
-
-### Prototype database reset
-
-This reference deployment explicitly enables the destructive reset action.
-While signed in as `jeffsee.55@gmail.com`, open **Database** in the toolbar to
-inspect auth, access, and indexed Git row counts or reset the shared database.
-The menu is discovered through a protected capability request and is absent for
-every user except the configured bootstrap owner. It navigates to the
-Wildwood-served `/api/wildwood/cms/database` page, which streams table-level
-progress and stays rendered after the site data and current session are gone.
-
-The corresponding API remains available for automation or troubleshooting:
-
-```js
-await fetch("/api/wildwood/access/reset", {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({ confirm: "wipe all wildwood data" }),
-}).then((response) => response.json());
-```
-
-It removes indexed Git data, Better Auth users and sessions, and all managed
-access data. It preserves only the generated signing secret so a warm Vercel
-instance and the database stay consistent. You will be signed out; signing in
-with GitHub again recreates the owner grant. Remove
-`dangerouslyAllowDatabaseReset` once the deployment stops being disposable.
-
-### Optional / dev-only
-
-```
-WILDWOOD_DOCS_SOURCE=local|github
-WILDWOOD_DOCS_REPO_PATH=/abs/to/repo
-WILDWOOD_PLAYGROUND_LOCAL_ROOT=/abs/to/…
-
-WILDWOOD_VSCODE_WEB_COMMIT=<sha>
-WILDWOOD_VSCODE_WEB_VERSION=<semver>
-WILDWOOD_GIT_API_LOG=0
-```
-
-## Local dev
+## Verification
 
 ```sh
-pnpm run dev:docs        # turbo watch:deps + next:dev + studio:play
-pnpm --filter docs run dev
+pnpm test
+pnpm typecheck
+pnpm lint
+pnpm build
+pnpm check:deployment https://your-stable-origin.example
 ```
 
-No env needed for local read path — defaults to `file:./wildwood-docs.db` + `.git` auto-detect. Add `.env.local` only for Turso / GitHub App testing.
+The deployment check verifies public rendering, database health, canonical OAuth discovery, PKCE and refresh metadata, unauthorized MCP rejection, and disabled production development-login. It exits nonzero if sign-in is unconfigured. It does not claim a GitHub sign-in or authenticated write succeeded; those require the actual interactive OAuth flow.
 
-## Production checklist (Vercel)
-
-1. Turso: `vercel integration add tursocloud/database` (injects `TURSO_*`) or manual `turso db create` + tokens.
-2. Enable System Environment Variables in project settings.
-3. GitHub App: create App (Contents Read & write, PRs Read & write, Metadata Read), install on repo, save 5 vars (`GITHUB_APP_ID`, `PRIVATE_KEY`, `CLIENT_ID`, `CLIENT_SECRET`, `APP_SLUG`), redeploy.
-4. Auth: configure `bootstrap.owner`; Better Auth persists its own secret and reuses the GitHub App credentials already passed to the client.
-5. Deploy — `baseURL`/`trustedOrigins` autodetect, preview branches work via cookie + `draftMode()`.
-
-No `WILDWOOD_GITHUB_ORG/REPO`, `NEXT_PUBLIC_ORIGIN`, `BETTER_AUTH_TRUSTED_ORIGINS`, or `WILDWOOD_*` fallback cascade needed.
-
-## Legacy
-
-`TR33_*` env and `x-tr33-branch`/`tr33-active-ref` cookies still read as fallback, cleared on exit. New writes always use `x-wildwood-branch`. `allowedEmails` / `isAllowed` still accepted as deprecated for one minor — use `authenticate` callback instead.
+Local tests cover real HTTP OAuth registration, consent, PKCE, token refresh, narrowed scopes, and revocation; content tools cover atomic edits, conflicts, history, restoration, preview sharing, and publication. Browser verification covers source selection, Server Action save, RSC refresh, review, approval, and publication.

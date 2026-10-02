@@ -2,3 +2,10 @@
 wildwood-docs.db
 tr33-docs.db
 .env.local
+
+# Isolated Next.js verification builds
+.next-build/
+
+.next-toolbar/
+
+.next-hosted/

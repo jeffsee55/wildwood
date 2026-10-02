@@ -1,0 +1,29 @@
+{
+  "name": "wildwood-core",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./filesystem": "./dist/filesystem.mjs",
+    "./git": "./dist/git.mjs"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@libsql/client": "catalog:",
+    "js-yaml": "^4.1.0",
+    "minimatch": "^10.0.1",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

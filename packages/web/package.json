@@ -1,0 +1,61 @@
+{
+  "name": "wildwood-web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./dist/server.mjs",
+    "./sourcemap": "./dist/sourcemap.mjs",
+    "./auth": "./dist/auth.mjs",
+    "./next": "./dist/bridge.mjs",
+    "./next/config": "./dist/next/config.mjs"
+  },
+  "scripts": {
+    "build": "node scripts/assets.mjs && tsdown",
+    "typecheck": "node scripts/assets.mjs && tsc --noEmit",
+    "test": "node scripts/assets.mjs && vitest run",
+    "assets": "node scripts/assets.mjs"
+  },
+  "dependencies": {
+    "wildwood-core": "workspace:*",
+    "zod": "catalog:",
+    "better-auth": "catalog:",
+    "@libsql/kysely-libsql": "catalog:",
+    "@better-auth/mcp": "1.7.0-rc.1",
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  },
+  "peerDependencies": {
+    "next": "^16.0.0",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@libsql/client": "catalog:",
+    "@types/react": "catalog:",
+    "@types/node": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "next": "catalog:",
+    "react": "catalog:",
+    "@base-ui/react": "^1.3.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.3.1",
+    "lucide-react": "^0.544.0",
+    "@tailwindcss/cli": "catalog:",
+    "tailwindcss": "catalog:",
+    "tw-animate-css": "^1.3.4",
+    "react-dom": "catalog:",
+    "@types/react-dom": "catalog:",
+    "esbuild": "^0.27.3",
+    "diff": "^8.0.2"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  }
+}

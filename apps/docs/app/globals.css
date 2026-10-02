@@ -118,3 +118,175 @@ hr {
 a {
   text-underline-offset: 0.2em;
 }
+:root {
+  --font-geist-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.manual {
+  max-width: 112ch;
+  margin: auto;
+  padding: 0 2rem;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.brand {
+  font-size: 19px;
+  font-weight: 700;
+}
+.brand span {
+  font-weight: 400;
+  color: var(--muted);
+}
+.controls,
+.controls form {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.controls {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+button,
+select {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.65rem;
+  background: var(--card);
+  color: var(--foreground);
+}
+button {
+  cursor: pointer;
+}
+button:hover {
+  border-color: var(--muted);
+}
+button:disabled {
+  opacity: 0.5;
+}
+.columns {
+  display: grid;
+  grid-template-columns: 23ch minmax(0, 1fr);
+  gap: 3rem;
+  padding: 3rem 0 5rem;
+}
+nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+nav a:hover,
+.controls a:hover {
+  text-decoration: underline;
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  margin-bottom: 1.4rem;
+}
+.snapshot {
+  margin-top: 3rem;
+  font-size: 11px;
+}
+.muted {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 1rem;
+}
+h1 {
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1.25;
+  letter-spacing: -0.05em;
+  margin-bottom: 1.5rem;
+  font-weight: 600;
+}
+.lede {
+  font-size: 16px;
+  color: var(--muted);
+  margin-bottom: 1.6rem;
+}
+.byline {
+  font-size: 11px;
+  padding-bottom: 1.5rem;
+  margin-bottom: 2rem;
+  border-bottom: 1px solid var(--border);
+}
+.cards {
+  margin-top: 2rem;
+}
+.cards a {
+  display: block;
+  padding: 1.4rem 0;
+  border-top: 1px solid var(--border);
+}
+.cards h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
+.cards p {
+  color: var(--muted);
+  margin-top: 0.5rem;
+}
+.cards a:hover h2 {
+  text-decoration: underline;
+}
+footer {
+  border-top: 1px solid var(--border);
+  padding: 1.5rem 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.editor {
+  margin-top: 3rem;
+  border: 1px solid var(--border);
+  padding: 1rem;
+}
+.editor summary {
+  cursor: pointer;
+}
+.editor label {
+  display: block;
+  margin: 1rem 0;
+  font-size: 10px;
+}
+.editor textarea {
+  width: 100%;
+  background: var(--card);
+  padding: 1rem;
+  border: 1px solid var(--border);
+  font: inherit;
+  line-height: 1.5;
+}
+.editor button {
+  margin-top: 1rem;
+}
+@media (max-width: 700px) {
+  .manual {
+    padding: 0 1rem;
+  }
+  .columns {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+    padding-top: 2rem;
+  }
+  aside nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    font-size: 11px;
+  }
+  aside .snapshot,
+  aside .muted,
+  aside .eyebrow {
+    display: none;
+  }
+  .controls {
+    gap: 0.6rem;
+  }
+}

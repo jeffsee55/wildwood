@@ -47,12 +47,7 @@ catalog:
   typescript: ^7.0.2
   "@types/node": ^22.18.0
   tsdown: ^0.22.7
-  "@tsdown/css": ^0.22.7
-  vite: ^7.1.1
-  "@vitejs/plugin-react": ^5.0.1
   vitest: ^4.1.10
-  "@vitest/browser": ^4.1.10
-  "@vitest/browser-playwright": ^4.1.10
   oxlint: ^1.26.0
   oxfmt: ^0.18.0
   turbo: ^2.9.4
@@ -65,23 +60,9 @@ catalog:
   "@babel/runtime": ^7.29.2
   tailwindcss: 4.2.2
   "@tailwindcss/postcss": 4.2.2
-  "@tailwindcss/vite": 4.2.1
   "@tailwindcss/cli": 4.2.2
   postcss: 8.5.8
   "@libsql/client": ^0.14.0
   "@libsql/kysely-libsql": ^0.4.1
-  kysely: ^0.28.17
-  drizzle-kit: 1.0.0-beta.20
-  drizzle-orm: 1.0.0-beta.20
   better-auth: 1.7.0-rc.1
-  "@octokit/auth-app": ^8.2.0
-  "@octokit/graphql": ^9.0.3
-  "@octokit/rest": 21.0.2
-  neverthrow: 8.1.1
   zod: ^4.4.3
-  "@types/diff3": ^0.0.2
-  node-diff3: ^3.2.0
-
-catalogs:
-  legacy:
-    typescript: ^5.5.4

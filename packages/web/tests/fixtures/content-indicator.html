@@ -1,0 +1,30 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Content indicator checks</title>
+<style>
+body{font:16px system-ui;margin:32px;color:#222;background:#fff}button{padding:10px;margin:5px}#scroller{height:240px;width:420px;overflow:auto;border:1px solid #bbb;padding:12px}#parent{padding:16px;background:#eee}#sticky{position:sticky;top:0;background:#fff}#transformed{transform:rotate(3deg);margin:24px}.space{height:200px}#result{white-space:pre-wrap} .bottom{height:700px}
+</style>
+<h1>Native content indicator</h1>
+<p>Click each target to verify its outline, unchanged geometry, and innermost selection.</p>
+<div id="scroller"><div id="parent" data-ww-contentmap="parent"><button id="sticky" data-ww-contentmap="sticky">Sticky target</button><div class="space"></div><button id="nested" data-ww-contentmap="nested">Nested target</button><div class="space"></div></div></div>
+<button id="transformed" data-ww-contentmap="transformed">Transformed target</button>
+<p style="width:250px">A <span id="inline" data-ww-contentmap="inline">multiline inline target that wraps across several lines of text</span>.</p>
+<button id="scroll">Scroll nested container</button><button id="replace">Replace nested DOM</button><button id="resize">Resize container</button><button id="cleanup">Disable indicator</button>
+<pre id="result" role="status">Ready</pre><div class="bottom"></div>
+<script type="module">
+import {installContentIndicator} from './content-indicator.js';
+let remove=installContentIndicator();
+const output=document.querySelector('#result');
+const bounds=()=>[...document.querySelectorAll('[data-ww-contentmap]')].map(el=>[el.id,...['x','y','width','height'].map(k=>el.getBoundingClientRect()[k])]);
+const check=target=>{
+ const styled=getComputedStyle(target).outlineStyle==='solid'&&getComputedStyle(target).outlineWidth==='2px';
+ const parent=target.parentElement.closest('[data-ww-contentmap]');
+ const innermost=!parent||getComputedStyle(parent).outlineStyle==='none';
+ const before=bounds();remove();const after=bounds();remove=installContentIndicator();
+ const unchanged=JSON.stringify(before)===JSON.stringify(after);
+ output.textContent=`${styled&&innermost&&unchanged?'PASS':'FAIL'} ${target.id}: native outline=${styled}; innermost only=${innermost}; unchanged bounds=${unchanged}`;
+};
+document.addEventListener('click',event=>{const target=event.target.closest('[data-ww-contentmap]');if(target)check(target);});
+document.querySelector('#scroll').onclick=()=>{document.querySelector('#scroller').scrollTop+=170;output.textContent='Nested container scrolled. Check sticky and nested targets.';};
+document.querySelector('#replace').onclick=()=>{document.querySelector('#nested').outerHTML='<button id="nested" data-ww-contentmap="replacement">Replacement target</button>';output.textContent='DOM replaced without registering the new element.';};
+document.querySelector('#resize').onclick=()=>{document.querySelector('#scroller').style.width='280px';output.textContent='Container resized without notifying the indicator.';};
+document.querySelector('#cleanup').onclick=()=>{remove();output.textContent=document.adoptedStyleSheets.length===0?'PASS cleanup: stylesheet removed':'FAIL cleanup';};
+</script></html>

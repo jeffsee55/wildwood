@@ -3,23 +3,16 @@
   "private": true,
   "scripts": {
     "build": "turbo build",
-    "start": "turbo start",
-    "dev": "turbo dev",
-    "lint": "oxlint .",
-    "lint:fix": "oxlint --fix .",
+    "start": "pnpm --filter docs start",
+    "dev": "pnpm --filter docs dev",
+    "dev:docs": "pnpm --filter docs dev",
+    "test": "pnpm --filter wildwood-core build && pnpm --filter wildwood-core --filter wildwood-web test",
+    "typecheck": "turbo typecheck",
+    "lint": "oxlint packages/core/src packages/core/tests packages/web/src packages/web/tests packages/web/browser apps/docs --ignore-pattern assets.generated.ts",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "typecheck": "turbo typecheck",
-    "dev:web": "turbo run watch:deps next:dev studio:play --filter=wildwood --filter=wildwood-kit --filter=wildwood-vscode --filter=play",
-    "dev:web-play": "pnpm run dev:web",
-    "dev:docs": "turbo run watch:deps next:dev studio:docs --filter=wildwood --filter=wildwood-kit --filter=wildwood-vscode --filter=docs",
-    "playground": "pnpm run dev:web",
-    "dev:vscode-playground": "turbo run playground studio --filter=wildwood",
-    "studio:wildwood": "turbo run studio --filter=wildwood",
-    "studio:web-db": "turbo run studio:play --filter=wildwood",
-    "studio:docs": "turbo run studio:docs --filter=wildwood",
-    "test:wildwood": "turbo run test --filter=wildwood",
-    "test:wildwood:watch": "turbo run test:watch --filter=wildwood"
+    "check": "pnpm test && pnpm typecheck && pnpm build",
+    "check:deployment": "node apps/docs/scripts/check-deployment.mjs"
   },
   "devDependencies": {
     "oxfmt": "catalog:",
@@ -31,14 +24,7 @@
   "packageManager": "pnpm@10.33.0",
   "pnpm": {
     "onlyBuiltDependencies": [
-      "@clerk/shared",
-      "@parcel/watcher",
-      "@swc/core",
-      "better-sqlite3",
-      "core-js-pure",
       "esbuild",
-      "lmdb",
-      "msgpackr-extract",
       "sharp"
     ]
   }
