@@ -39,10 +39,7 @@ drizzle
 .wildwood-cache/
 .tr33-cache/
 coverage
-
-# Vendor / heavy generated
-packages/wildwood/vendor/
-packages/kit/src/vscode-web/dist/
+.artifacts/
 
 # OS / misc
 .DS_Store
@@ -52,3 +49,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 .env*
+
+# Immutable docs demo database
+**/wildwood-docs-v2.db*
+
+# Generated from source during package builds/tests
+packages/web/src/assets.generated.ts
+apps/docs/lib/content.generated.json

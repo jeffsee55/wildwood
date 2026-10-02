@@ -45,8 +45,14 @@
   ],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": [".next/**", "!.next/cache/**", "dist/**", "bundled-extension/**"],
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "dist/**"
+      ],
       "env": [
         "GITHUB_APP_ID",
         "GITHUB_APP_NAME",
@@ -89,35 +95,28 @@
         "NEXT_PHASE"
       ]
     },
-    "wildwood#build": {
-      "dependsOn": [
-        "wildwood-store#build",
-        "wildwood-kit#build",
-        "wildwood-ui#build",
-        "wildwood-vscode#build"
-      ],
-      "outputs": ["dist/**", "bundled-extension/**"]
-    },
     "typecheck": {
-      "dependsOn": ["^build"],
+      "dependsOn": [
+        "^build"
+      ],
       "outputs": []
     },
     "lint": {
       "outputs": []
     },
     "next:dev": {
-      "dependsOn": ["^build"],
+      "dependsOn": [
+        "^build"
+      ],
       "cache": false,
       "persistent": true
     },
     "dev": {
-      "dependsOn": ["^build"],
+      "dependsOn": [
+        "^build"
+      ],
       "cache": false,
       "persistent": true
-    },
-    "studio:play": {
-      "dependsOn": ["^build"],
-      "cache": false
     }
   }
 }
