@@ -1,5 +1,5 @@
 import { createWeb } from "wildwood-web";
-import { client, database, engines, ready } from "./content";
+import { client, database, engines, ready, previewOnly } from "./content";
 let instance:
   | Promise<ReturnType<typeof createWeb<(typeof engines)["2"]["config"]["collections"]>>>
   | undefined;
@@ -18,7 +18,7 @@ export function getWeb() {
       process.env.WILDWOOD_DOCS_GITHUB_CLIENT_SECRET || process.env.GITHUB_CLIENT_SECRET;
     const github = clientId && clientSecret ? { clientId, clientSecret } : undefined;
     let identity;
-    {
+    if (!previewOnly) {
       const { createIdentity } = await import("wildwood-web/auth");
       const result = await database.execute(
         "SELECT value FROM ww2_docs_settings WHERE key='secret'",

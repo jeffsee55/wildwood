@@ -7,6 +7,7 @@ import "./globals.css";
 import { Toolbar } from "wildwood-web/next";
 import { sourcemap } from "wildwood-web/sourcemap";
 import { getWeb } from "@/lib/cms";
+import { previewOnly } from "@/lib/content";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: { default: "Wildwood — immutable content", template: "%s — Wildwood" },
@@ -26,7 +27,13 @@ export default async function Layout({ children }: { children: React.ReactNode }
               wildwood<span> / manual</span>
             </Link>
             <span data-testid="content-mode">
-              {ctx.pinned ? "PINNED" : ctx.preview ? "DRAFT" : "PUBLISHED"}
+              {previewOnly
+                ? "READ-ONLY PREVIEW"
+                : ctx.pinned
+                  ? "PINNED"
+                  : ctx.preview
+                    ? "DRAFT"
+                    : "PUBLISHED"}
             </span>
           </header>
           <div className="controls">

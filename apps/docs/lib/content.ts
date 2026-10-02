@@ -4,11 +4,18 @@ import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import seed from "./content.generated.json";
 
-const databaseUrl =
+const configuredDatabase =
   process.env.WILDWOOD_DOCS_DATABASE_URL ||
-  (process.env.VERCEL ? process.env.TURSO_DATABASE_URL : undefined) ||
-  "file:./wildwood-docs-v2.db";
-if (process.env.VERCEL && databaseUrl.startsWith("file:"))
+  (process.env.VERCEL ? process.env.TURSO_DATABASE_URL : undefined);
+// Unconfigured PR previews use only repository seed content. They cannot sign in,
+// persist edits, or reach the production database. Production always needs durability.
+export const previewOnly = process.env.VERCEL_ENV === "preview" && !configuredDatabase;
+const databaseUrl = configuredDatabase || (previewOnly ? ":memory:" : "file:./wildwood-docs-v2.db");
+if (
+  process.env.VERCEL &&
+  !previewOnly &&
+  (databaseUrl.startsWith("file:") || databaseUrl === ":memory:")
+)
   throw new Error(
     "Vercel requires WILDWOOD_DOCS_DATABASE_URL (or TURSO_DATABASE_URL) pointing to a persistent remote database",
   );

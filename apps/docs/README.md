@@ -46,3 +46,5 @@ pnpm check:deployment https://your-stable-origin.example
 The deployment check verifies public rendering, database health, canonical OAuth discovery, PKCE and refresh metadata, unauthorized MCP rejection, and disabled production development-login. It exits nonzero if sign-in is unconfigured. It does not claim a GitHub sign-in or authenticated write succeeded; those require the actual interactive OAuth flow.
 
 Local tests cover real HTTP OAuth registration, consent, PKCE, token refresh, narrowed scopes, and revocation; content tools cover atomic edits, conflicts, history, restoration, preview sharing, and publication. Browser verification covers source selection, Server Action save, RSC refresh, review, approval, and publication.
+
+Unconfigured Vercel PR previews render repository seed content in an in-memory, read-only workspace with sign-in disabled. They do not fall back to the production database. Configure a separate preview database and OAuth provider only when persistent preview editing is required. Production continues to require a durable remote database.
