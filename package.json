@@ -17,7 +17,6 @@
   "devDependencies": {
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
-    "syncpack": "catalog:",
     "turbo": "catalog:",
     "typescript": "catalog:"
   },
