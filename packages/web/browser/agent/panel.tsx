@@ -149,14 +149,13 @@ function SessionPanel({
     if (!prompt.trim()) return;
     setError("");
     try {
-      if (!state.running) await runtime.configure(model.trim(), personalKey.trim());
       const text = reference
         ? `${prompt}\n\nQuoted review context (${reference.revision}), ${reference.path}, ${reference.side} lines ${reference.start}-${reference.end}:\n\n${reference.text}`
         : prompt;
       setPrompt("");
       onReferenceUsed?.();
       setSettings(false);
-      await runtime.send(text);
+      await runtime.send(text, { model: model.trim(), personalKey: personalKey.trim() });
     } catch (e) {
       setError((e as Error).message);
     }

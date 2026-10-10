@@ -97,6 +97,112 @@ test("Gateway retains experimental transcripts and drafts without restoring inco
   expect(session.checkpoint).toBeUndefined();
   expect(session.interrupted).toBe(true);
 });
+test("saved site defaults follow the server model while explicit model choices survive", async () => {
+  const saved = {
+    id: crypto.randomUUID(),
+    draft: "draft-a",
+    model: "anthropic/claude-sonnet-4.5",
+    checkpoint: new Uint8Array([1]),
+    items: [{ kind: "user", id: "message", text: "Earlier task", at: 1 }],
+    updated: 1,
+  };
+  mocks.records.set("site:alice:new", saved);
+  expect(await loadSession(config)).toMatchObject({
+    model: config.model,
+    modelPreference: "site",
+    interrupted: true,
+    items: saved.items,
+  });
+  expect((await loadSession(config)).checkpoint).toBeUndefined();
+  mocks.records.set("site:alice:new", { ...saved, modelPreference: "custom" });
+  expect((await loadSession(config)).model).toBe(saved.model);
+});
+test("a submitted message appears before slow connection setup and preserves newer tab history", async () => {
+  let finishStart!: (response: Response) => void;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finishStart = resolve;
+        }),
+    ),
+  );
+  mocks.create.mockResolvedValue({
+    prompt: completed,
+    checkpoint: async () => new Uint8Array([1]),
+    close: async () => {},
+  });
+  const session = await loadSession(config, "draft-a");
+  mocks.records.set("site:alice:draft-a", {
+    ...session,
+    updated: session.updated + 100,
+    items: [{ kind: "assistant", id: "other-tab", text: "Newer tab history" }],
+  });
+  const runtime = new AgentRuntime("/cms", { ...config, siteKey: true }, session);
+  const sent = runtime.send("Edit immediately", { model: "test/model", personalKey: "" });
+  expect(runtime.state.session.items).toEqual([
+    expect.objectContaining({ kind: "user", text: "Edit immediately" }),
+  ]);
+  expect(runtime.state.running).toBe(true);
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+  expect(mocks.create).not.toHaveBeenCalled();
+  expect(runtime.state.session.items.map((item) => ("text" in item ? item.text : ""))).toEqual([
+    "Newer tab history",
+    "Edit immediately",
+  ]);
+  finishStart(
+    Response.json({
+      token: "private-mcp-token",
+      draft: "draft-a",
+      ref: "draft/a",
+      name: "Draft A",
+      endpoint: "https://site.test/cms/mcp",
+      version: "1",
+      variant: {},
+    }),
+  );
+  await sent;
+  expect(runtime.state.session.items.filter((item) => item.kind === "user")).toHaveLength(1);
+  await runtime.close();
+});
+test("a wrapped FX stream failure shows the sanitized Gateway error", async () => {
+  const start = fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input, init) =>
+      String(input).includes("/agent/gateway")
+        ? Promise.resolve(
+            Response.json(
+              {
+                error: "AI Gateway denied this request. Check model access and available credits.",
+              },
+              { status: 403 },
+            ),
+          )
+        : start(input, init),
+    ),
+  );
+  mocks.create.mockImplementation(async (options) => ({
+    prompt: () => ({
+      ...completed(),
+      async *[Symbol.asyncIterator]() {
+        yield { type: "text_delta", delta: "Starting" };
+        await options
+          .fetch("https://ai-gateway.vercel.sh/v4/ai/language-model", { method: "POST" })
+          .catch(() => {});
+        throw new Error("HostStreamFailed");
+      },
+    }),
+    checkpoint: async () => new Uint8Array([1]),
+    close: async () => {},
+  }));
+  const runtime = new AgentRuntime("/cms", { ...config, siteKey: true }, await loadSession(config));
+  await runtime.send("Edit");
+  expect(runtime.state.error).toMatch(/model access and available credits/);
+  expect(runtime.state.error).not.toContain("HostStreamFailed");
+  await runtime.close();
+});
 test("libfx resumes its checkpoint without persisting Gateway keys or MCP credentials", async () => {
   const checkpoint = new Uint8Array([1, 2, 3]);
   mocks.create.mockImplementation(async () => ({

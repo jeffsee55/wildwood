@@ -19,6 +19,7 @@ export type Session = {
   draft?: string;
   name?: string;
   model: string;
+  modelPreference?: "site" | "custom";
   items: ThreadItem[];
   checkpoint?: Uint8Array;
   running?: boolean;
@@ -47,14 +48,13 @@ const key = (config: AgentConfig, draft?: string) =>
 export const freshSession = (config: AgentConfig): Session => ({
   id: crypto.randomUUID(),
   model: config.model,
+  modelPreference: "site",
   items: [],
   updated: Date.now(),
 });
 export async function loadSession(config: AgentConfig, draft?: string): Promise<Session> {
   const value = normalizeSession(await get<Session>(key(config, draft), storage()), config);
-  return (
-    value ?? { id: crypto.randomUUID(), draft, model: config.model, items: [], updated: Date.now() }
-  );
+  return value ?? { ...freshSession(config), draft };
 }
 
 // The short-lived companion experiment used an incompatible checkpoint format.
@@ -62,7 +62,22 @@ export async function loadSession(config: AgentConfig, draft?: string): Promise<
 function normalizeSession(value: Session | undefined, config: AgentConfig) {
   if (value && (value as Session & { provider?: string }).provider === "chatgpt") {
     const { checkpoint: _checkpoint, ...rest } = value;
-    return { ...rest, model: config.model, provider: "gateway", interrupted: true };
+    return {
+      ...rest,
+      model: config.model,
+      modelPreference: "site" as const,
+      provider: "gateway",
+      interrupted: true,
+    };
+  }
+  if (
+    value &&
+    (value.modelPreference === "site" ||
+      (!value.modelPreference && value.model === "anthropic/claude-sonnet-4.5")) &&
+    value.model !== config.model
+  ) {
+    const { checkpoint: _checkpoint, ...rest } = value;
+    return { ...rest, model: config.model, modelPreference: "site" as const, interrupted: true };
   }
   return value;
 }
@@ -78,6 +93,7 @@ export class AgentRuntime {
   private disposed = false;
   private personalKey = "";
   private model: string;
+  private transportError?: string;
   private log = new ToolLog();
   private saveChain: Promise<void> = Promise.resolve();
   private persistTimer?: ReturnType<typeof setTimeout>;
@@ -144,13 +160,22 @@ export class AgentRuntime {
   }
   async configure(model: string, personalKey: string) {
     if (this.state.running) throw new Error("Stop the current turn before changing settings.");
+    await this.applyConfiguration(model, personalKey);
+  }
+  private async applyConfiguration(model: string, personalKey: string) {
     if (this.model !== model || this.personalKey !== personalKey) {
       if (this.agent) this.state.session.checkpoint = await this.agent.checkpoint();
       await this.disconnect();
     }
     this.model = model;
     this.personalKey = personalKey;
-    this.update({ session: { ...this.state.session, model } });
+    this.update({
+      session: {
+        ...this.state.session,
+        model,
+        modelPreference: model === this.config.model ? "site" : "custom",
+      },
+    });
   }
   private async connect() {
     if (this.agent) return;
@@ -218,13 +243,15 @@ ${adapter.instructions}`,
         );
         if (!result.ok) {
           const data = await result.json().catch(() => ({}));
-          throw new Error(data.error ?? `Model request failed (${result.status})`);
+          this.transportError = data.error ?? `Model request failed (${result.status})`;
+          throw new Error(this.transportError);
         }
+        this.transportError = undefined;
         return result;
       },
     });
   }
-  async send(text: string) {
+  async send(text: string, settings?: { model: string; personalKey: string }) {
     if (this.disposed || !text.trim()) return;
     if (this.state.running) {
       if (!this.turn)
@@ -232,7 +259,13 @@ ${adapter.instructions}`,
       await this.turn.steer(text);
       return;
     }
+    const previous = this.state.session;
+    const message: ThreadItem = { kind: "user", id: uid(), text, at: Date.now() };
+    this.transportError = undefined;
+    // Render synchronously; no network, WASM initialization, or storage blocks the echo.
+    // Persist only after taking the locks and reconciling any newer tab's conversation.
     this.update({
+      session: { ...previous, items: [...previous.items, message] },
       running: true,
       error: undefined,
       activity: { phase: "starting", since: Date.now() },
@@ -253,11 +286,19 @@ ${adapter.instructions}`,
             await get<Session>(key(this.config, this.state.session.draft), storage()),
             this.config,
           );
-          if (latest?.id === this.state.session.id && latest.updated > this.state.session.updated) {
+          if (latest?.id === this.state.session.id && latest.updated > previous.updated) {
             await this.disconnect();
             this.interrupted = !!(latest.running || latest.interrupted);
-            this.update({ session: { ...latest, model: this.model, running: false } });
+            this.update({
+              session: {
+                ...latest,
+                items: [...latest.items, message],
+                model: this.model,
+                running: false,
+              },
+            });
           }
+          if (settings) await this.applyConfiguration(settings.model, settings.personalKey);
           await this.connect();
           this.abort!.signal.throwIfAborted();
           await navigator.locks.request(
@@ -277,9 +318,13 @@ ${adapter.instructions}`,
                   "Another conversation is attached to this draft. Reload to resume it.",
                 );
               began = true;
-              this.items((items) => [...items, { kind: "user", id: uid(), text, at: Date.now() }]);
               this.update({
-                session: { ...this.state.session, running: true, interrupted: false },
+                session: {
+                  ...this.state.session,
+                  updated: Date.now(),
+                  running: true,
+                  interrupted: false,
+                },
               });
               await this.save();
               this.turn = this.agent!.prompt(
@@ -334,7 +379,9 @@ ${adapter.instructions}`,
         error: this.abort.signal.aborted
           ? "Stopped. Completed edits remain in your draft."
           : error instanceof Error
-            ? error.message
+            ? error.message.includes("HostStreamFailed")
+              ? (this.transportError ?? "The model connection failed. Try again in a moment.")
+              : error.message
             : "Agent failed",
       });
       await this.disconnect();
