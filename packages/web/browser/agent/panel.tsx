@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { AgentRuntime, freshSession, loadSession, type AgentConfig } from "./runtime";
 import type { ThreadItem } from "./types";
+import type { ComposerContext } from "../content-context";
 import { requestJson } from "../request";
 
 export type AgentReference = {
@@ -35,12 +36,16 @@ export function AgentPanel({
   endpoint,
   draft,
   reference,
+  context,
+  onContextUsed,
   onReferenceUsed,
   onChanged,
 }: {
   endpoint: string;
   draft?: string;
   reference?: AgentReference;
+  context?: ComposerContext;
+  onContextUsed?: () => void;
   onReferenceUsed?: () => void;
   onChanged?: () => void;
 }) {
@@ -96,6 +101,8 @@ export function AgentPanel({
         key={runtime.state.session.id}
         runtime={runtime}
         reference={reference}
+        context={context}
+        onContextUsed={onContextUsed}
         onReferenceUsed={onReferenceUsed}
         onChanged={onChanged}
         onNew={
@@ -116,12 +123,16 @@ export function AgentPanel({
 function SessionPanel({
   runtime,
   reference,
+  context,
+  onContextUsed,
   onReferenceUsed,
   onChanged,
   onNew,
 }: {
   runtime: AgentRuntime;
   reference?: AgentReference;
+  context?: ComposerContext;
+  onContextUsed?: () => void;
   onReferenceUsed?: () => void;
   onChanged?: () => void;
   onNew?: () => void;
@@ -134,6 +145,19 @@ function SessionPanel({
   const [error, setError] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const consumedContext = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!context || consumedContext.current === context.id) return;
+    consumedContext.current = context.id;
+    setPrompt((current) => `${current}${current ? "\n\n" : ""}${context.text}`);
+    setSettings(false);
+    onContextUsed?.();
+    requestAnimationFrame(() => {
+      composer.current?.focus();
+      const length = composer.current?.value.length ?? 0;
+      composer.current?.setSelectionRange(length, length);
+    });
+  }, [context, onContextUsed]);
   const nearBottom = useRef(true);
   const wasRunning = useRef(false);
   useEffect(() => {

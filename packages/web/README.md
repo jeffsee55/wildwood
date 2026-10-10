@@ -256,6 +256,8 @@ schema/discovery initialization. Browser checks exercise the docs' real RSC brid
 
 ## Content selection indicator
 
+The pointer button beside **Options** selects page content for the current agent conversation. It is available to signed-in editors on published pages and drafts. Click a source-mapped element, then press **⌘L** (macOS) or **Ctrl+L** to append its file, nested field path, schema, variant, snapshot, and displayed text to the existing chat textarea. The conversation opens and focuses the composer; nothing is sent automatically. Preview tokens and query parameters are excluded. **Escape** cancels selection, and a view change clears it. Outside an active selection, the browser's address-bar shortcut is unchanged. **Options → Edit content** remains the direct source editor picker for your own draft.
+
 Edit mode stays enabled across opening, closing, and saving documents. A visible
 control beside the leaf turns it off directly; Escape turns it off when no dialog
 or popover is open. Opening a surface suspends picking without clearing intent.

@@ -41,6 +41,7 @@ import { RelativeTime } from "./relative-time";
 import { Wordmark } from "./wordmark";
 import { Button } from "./ui/button";
 import { installContentIndicator } from "./content-indicator";
+import { contentContext, isContentShortcut, type ComposerContext } from "./content-context";
 
 const AgentPanel = lazy(() => import("./agent/panel").then((m) => ({ default: m.AgentPanel })));
 
@@ -85,6 +86,9 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
   const [selecting, setSelecting] = useState(false),
     [menuOpen, setMenuOpen] = useState(false);
   const [section, setSection] = useState<"agent" | "home" | "share" | "drafts">("agent");
+  const [picking, setPicking] = useState(false);
+  const [selectedContent, setSelectedContent] = useState<Element | null>(null);
+  const [context, setContext] = useState<ComposerContext>();
   const [agentStarted, setAgentStarted] = useState(false);
   const [panel, setPanel] = useState<"editor" | "agent" | "review" | null>(null);
   const [doc, setDoc] = useState<Result | null>(null),
@@ -175,6 +179,68 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
     if (!s.canEdit) setSelecting(false);
   }, [s.canEdit]);
   const editor = s.actor && s.actor.role !== "reader";
+  useEffect(() => {
+    setSelectedContent(null);
+    setPicking(false);
+  }, [s.snapshot, s.draft, editor]);
+  useEffect(() => {
+    if (!picking || !editor || panel) return;
+    const removeIndicator = installContentIndicator();
+    const click = (event: MouseEvent) => {
+      if (!(event.target instanceof Element) || event.composedPath().includes(host)) return;
+      const element = event.target.closest("[data-ww-contentmap]");
+      if (!element) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setSelectedContent(element);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPicking(false);
+        setSelectedContent(null);
+      }
+      if (!selectedContent?.isConnected || !isContentShortcut(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        setContext({
+          id: crypto.randomUUID(),
+          text: contentContext(
+            selectedContent.getAttribute("data-ww-contentmap"),
+            (selectedContent instanceof HTMLElement
+              ? selectedContent.innerText
+              : selectedContent.textContent) ||
+              selectedContent.getAttribute("alt") ||
+              "",
+            window.location.href,
+          ),
+        });
+        setPicking(false);
+        setSelectedContent(null);
+        setAgentStarted(true);
+        setSection("agent");
+        setMenuOpen(true);
+      } catch (error) {
+        setError((error as Error).message);
+        setMenuOpen(true);
+      }
+    };
+    document.addEventListener("click", click, true);
+    document.addEventListener("keydown", key, true);
+    return () => {
+      removeIndicator();
+      document.removeEventListener("click", click, true);
+      document.removeEventListener("keydown", key, true);
+    };
+  }, [picking, editor, panel, host, selectedContent]);
+  useEffect(() => {
+    if (!selectedContent) return;
+    // Match source identity without changing authored DOM or its geometry.
+    return installContentIndicator(
+      document,
+      selectedContent.getAttribute("data-ww-contentmap") || "",
+    );
+  }, [selectedContent]);
   const mode =
     s.mode === "published" ? "Published" : s.mode === "draft" ? "Draft" : "Shared preview";
   useEffect(() => {
@@ -234,6 +300,22 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
             {message}
           </div>
         )}
+        {picking && editor && (
+          <Button
+            className="edit-intent"
+            variant="outline"
+            onClick={() => {
+              setPicking(false);
+              setSelectedContent(null);
+            }}
+          >
+            <MousePointer2 />{" "}
+            {selectedContent
+              ? "Selected · ⌘L / Ctrl+L to add to chat"
+              : "Select page content · Esc to cancel"}{" "}
+            <X />
+          </Button>
+        )}
         {selecting && s.canEdit && (
           <Button
             className="edit-intent"
@@ -265,6 +347,13 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
           </PopoverTrigger>
           <PopoverContent
             keepMounted
+            initialFocus={() =>
+              section === "agent"
+                ? (host.shadowRoot?.querySelector<HTMLTextAreaElement>(
+                    'textarea[aria-label="Message the content agent"]',
+                  ) ?? true)
+                : true
+            }
             side="top"
             align="end"
             sideOffset={12}
@@ -291,6 +380,23 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
                       ? "Options"
                       : "Wildwood"}
               </PopoverTitle>
+              {editor && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Select page content for chat"
+                  title="Select page content, then ⌘L / Ctrl+L to add it to chat"
+                  aria-pressed={picking}
+                  onClick={() => {
+                    setSelecting(false);
+                    setPicking(!picking);
+                    setSelectedContent(null);
+                    setMenuOpen(false);
+                  }}
+                >
+                  <MousePointer2 />
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -310,7 +416,12 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
               {agentStarted &&
                 (editor ? (
                   <Suspense fallback={<div className="agent-empty">Opening agent…</div>}>
-                    <AgentPanel endpoint={s.endpoint} draft={s.draft} />
+                    <AgentPanel
+                      endpoint={s.endpoint}
+                      draft={s.draft}
+                      context={context}
+                      onContextUsed={() => setContext(undefined)}
+                    />
                   </Suspense>
                 ) : (
                   <div className="agent-empty">
@@ -348,6 +459,8 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
                           variant="ghost"
                           disabled={pending}
                           onClick={() => {
+                            setPicking(false);
+                            setSelectedContent(null);
                             setSelecting(!selecting);
                             setMenuOpen(false);
                             setError("");
