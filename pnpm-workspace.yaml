@@ -12,7 +12,7 @@ catalog:
   "@types/react": ^19.2.0
   "@types/react-dom": ^19.2.0
   better-auth: 1.7.0-rc.1
-  next: 16.3.6
+  next: 16.3.8
   oxfmt: ^0.18.0
   oxlint: ^1.26.0
   postcss: 8.5.23
@@ -27,6 +27,13 @@ catalog:
 
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
+  # Security patches must not wait for the normal release-age window.
+  - "next"
+  - "sharp"
+  - "source-map-js"
+  - "proxy-addr"
+  - "tinypool"
+  - "@modelcontextprotocol/sdk"
   # ── toolchain — these publish frequently and we own the risk ──────
   - "typescript"
   - "@typescript/*"
@@ -68,6 +75,10 @@ minimumReleaseAgeExclude:
 # Security floors for transitive dependencies pinned by upstream packages.
 # Keep these within their existing major versions and review when upstream catches up.
 overrides:
+  "source-map-js@<1.2.2": ^1.2.2
+  "proxy-addr@<2.0.8": ^2.0.8
+  "tinypool@<2.1.2": ^2.1.2
+  "sharp@<0.35.5": ^0.35.5
   "hono@<4.13.7": ^4.13.7
   "@hono/node-server@<1.19.15": ^1.19.15
   "ws@>=8 <8.21.0": ^8.21.0

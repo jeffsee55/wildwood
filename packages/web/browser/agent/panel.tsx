@@ -329,6 +329,8 @@ function SessionPanel({
                           signal: abort.signal,
                         })
                       ).json();
+                      if (new URL(login.url).origin !== "https://auth.openai.com")
+                        throw new Error("The companion returned an invalid sign-in address.");
                       popup.location.href = login.url;
                       const until = Date.now() + 10 * 60_000;
                       while (!status.connected && Date.now() < until) {
