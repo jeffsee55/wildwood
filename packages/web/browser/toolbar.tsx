@@ -196,8 +196,11 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
     };
     const key = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
         setPicking(false);
         setSelectedContent(null);
+        return;
       }
       if (!selectedContent?.isConnected || !isContentShortcut(event)) return;
       event.preventDefault();
@@ -329,8 +332,20 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
         )}
         <Popover
           open={menuOpen}
-          onOpenChange={(open) => {
+          onOpenChange={(open, details) => {
+            if (
+              !open &&
+              picking &&
+              (details.reason === "outside-press" || details.reason === "focus-out")
+            ) {
+              details.cancel();
+              return;
+            }
             setMenuOpen(open);
+            if (!open) {
+              setPicking(false);
+              setSelectedContent(null);
+            }
             if (open) {
               setSection("agent");
               setAgentStarted(true);
@@ -391,7 +406,8 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
                     setSelecting(false);
                     setPicking(!picking);
                     setSelectedContent(null);
-                    setMenuOpen(false);
+                    setSection("agent");
+                    setAgentStarted(true);
                   }}
                 >
                   <MousePointer2 />
