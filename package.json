@@ -2,6 +2,7 @@
   "name": "wildwood-mono",
   "private": true,
   "scripts": {
+    "chatgpt:companion": "node packages/web/scripts/chatgpt-companion.mjs",
     "build": "turbo build",
     "start": "pnpm --filter docs start",
     "dev": "pnpm --filter docs dev",

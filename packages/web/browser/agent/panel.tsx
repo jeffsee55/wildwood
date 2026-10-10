@@ -1,5 +1,7 @@
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../ui/tooltip";
 import { Input } from "../ui/input";
+import { SelectField } from "../ui/select-field";
+import { companionRequest } from "./chatgpt";
 import { Textarea } from "../ui/textarea";
 import { Label } from "../ui/label";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "../ui/collapsible";
@@ -18,7 +20,13 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { AgentRuntime, freshSession, loadSession, type AgentConfig } from "./runtime";
+import {
+  AgentRuntime,
+  freshSession,
+  loadSession,
+  type AgentConfig,
+  type AgentProvider,
+} from "./runtime";
 import type { ThreadItem } from "./types";
 import { requestJson } from "../request";
 
@@ -120,8 +128,16 @@ function SessionPanel({
 }) {
   const state = useSyncExternalStore(runtime.subscribe, runtime.snapshot);
   const [prompt, setPrompt] = useState("");
-  const [settings, setSettings] = useState(!runtime.config.siteKey);
+  const [settings, setSettings] = useState(
+    state.session.provider !== "gateway" || !runtime.config.siteKey,
+  );
   const [personalKey, setPersonalKey] = useState("");
+  const [provider, setProvider] = useState<AgentProvider>(state.session.provider ?? "chatgpt");
+  const [account, setAccount] = useState("");
+  const [models, setModels] = useState<{ value: string; label: string }[]>([]);
+  const [connecting, setConnecting] = useState(false);
+  const connectionAttempt = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => connectionAttempt.current?.abort(), []);
   const [model, setModel] = useState(state.session.model);
   const [error, setError] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
@@ -149,7 +165,7 @@ function SessionPanel({
     if (!prompt.trim()) return;
     setError("");
     try {
-      if (!state.running) await runtime.configure(model.trim(), personalKey.trim());
+      if (!state.running) await runtime.configure(model.trim(), personalKey.trim(), provider);
       const text = reference
         ? `${prompt}\n\nQuoted review context (${reference.revision}), ${reference.path}, ${reference.side} lines ${reference.start}-${reference.end}:\n\n${reference.text}`
         : prompt;
@@ -196,7 +212,13 @@ function SessionPanel({
       <div className="agent-draft">
         <GitBranch size={13} />
         <span>{state.session.name ?? "A new draft for this session"}</span>
-        <small>{state.tools ? `${state.tools} MCP tools` : "Powered by libfx"}</small>
+        <small>
+          {state.tools
+            ? `${state.tools} MCP tools`
+            : provider === "chatgpt"
+              ? "Your ChatGPT plan"
+              : "Powered by libfx"}
+        </small>
       </div>
       {settings && (
         <form
@@ -207,37 +229,209 @@ function SessionPanel({
           }}
         >
           <Label>
-            Model
-            <Input
-              aria-label="Gateway model"
-              value={model}
-              disabled={state.running}
-              maxLength={200}
-              placeholder="provider/model"
-              onChange={(e) => setModel(e.target.value)}
+            Connection
+            <SelectField
+              label="Agent provider"
+              value={provider}
+              disabled={state.running || connecting}
+              options={[
+                { value: "chatgpt", label: "ChatGPT subscription · local companion" },
+                { value: "gateway", label: "AI Gateway" },
+              ]}
+              onValueChange={(value) => {
+                connectionAttempt.current?.abort();
+                setProvider(value as AgentProvider);
+                setPersonalKey("");
+                setAccount("");
+                setModels([]);
+                setModel(value === "gateway" ? runtime.config.model : "");
+              }}
             />
           </Label>
           <Label>
-            Personal AI Gateway key
+            Model
+            {provider === "chatgpt" ? (
+              <SelectField
+                label="ChatGPT model"
+                value={model}
+                onValueChange={setModel}
+                options={models}
+                disabled={state.running || !models.length}
+              />
+            ) : (
+              <Input
+                aria-label="Gateway model"
+                value={model}
+                disabled={state.running}
+                maxLength={200}
+                placeholder="provider/model"
+                onChange={(e) => setModel(e.target.value)}
+              />
+            )}
+          </Label>
+          <Label>
+            {provider === "chatgpt" ? "Local companion pairing code" : "Personal AI Gateway key"}
             <Input
               type="password"
               autoComplete="off"
-              aria-label="Personal AI Gateway key"
+              aria-label={
+                provider === "chatgpt" ? "Local companion pairing code" : "Personal AI Gateway key"
+              }
               value={personalKey}
-              disabled={state.running}
+              disabled={state.running || connecting}
               maxLength={4096}
               placeholder={
-                runtime.config.siteKey ? "Leave empty to use the site key" : "Enter your key"
+                provider === "chatgpt"
+                  ? "Code printed by the local companion"
+                  : runtime.config.siteKey
+                    ? "Leave empty to use the site key"
+                    : "Enter your key"
               }
-              onChange={(e) => setPersonalKey(e.target.value)}
+              onChange={(e) => {
+                setPersonalKey(e.target.value);
+                setAccount("");
+                setModels([]);
+              }}
             />
           </Label>
           <p>
-            {runtime.config.siteKey
-              ? "The site key is available. A personal key overrides it."
-              : "Your key is required to run the agent."}{" "}
-            Personal keys stay in memory for this page and are cleared when you leave or reload.
+            {provider === "chatgpt"
+              ? "Start pnpm chatgpt:companion on your computer, then enter its pairing code. ChatGPT tokens remain in that process and never reach Wildwood's server. Restarting the companion signs you out."
+              : runtime.config.siteKey
+                ? "The site key is available. A personal key overrides it."
+                : "Your key is required to run the agent."}{" "}
+            {provider === "gateway" &&
+              "Personal keys stay in memory for this page and are cleared when you leave or reload."}
           </p>
+          {provider === "chatgpt" && (
+            <>
+              <Button
+                type="button"
+                disabled={!personalKey.trim() || connecting || state.running}
+                onClick={async () => {
+                  const abort = new AbortController();
+                  connectionAttempt.current = abort;
+                  setConnecting(true);
+                  setError("");
+                  // Open synchronously to avoid popup blockers; no tokens appear in this URL.
+                  const popup = window.open("about:blank", "_blank");
+                  if (popup) popup.opener = null;
+                  try {
+                    const key = personalKey.trim();
+                    let status = await (
+                      await companionRequest("/status", key, { signal: abort.signal })
+                    ).json();
+                    if (!status.connected) {
+                      if (!popup) throw new Error("Allow popups to continue with ChatGPT.");
+                      const login = await (
+                        await companionRequest("/login", key, {
+                          method: "POST",
+                          signal: abort.signal,
+                        })
+                      ).json();
+                      popup.location.href = login.url;
+                      const until = Date.now() + 10 * 60_000;
+                      while (!status.connected && Date.now() < until) {
+                        await new Promise<void>((resolve, reject) => {
+                          const cancelled = () => {
+                            clearTimeout(timer);
+                            reject(new Error("Sign-in cancelled."));
+                          };
+                          const timer = setTimeout(() => {
+                            abort.signal.removeEventListener("abort", cancelled);
+                            resolve();
+                          }, 1500);
+                          abort.signal.addEventListener("abort", cancelled, { once: true });
+                        });
+                        abort.signal.throwIfAborted();
+                        status = await (
+                          await companionRequest("/status", key, { signal: abort.signal })
+                        ).json();
+                        if (status.error) throw new Error(status.error);
+                      }
+                      if (!status.connected)
+                        throw new Error("ChatGPT sign-in timed out. Try again.");
+                    } else popup?.close();
+                    const catalog = await (
+                      await companionRequest("/models", key, { signal: abort.signal })
+                    ).json();
+                    const choices = catalog.models.map((m: { id: string; name: string }) => ({
+                      value: m.id,
+                      label: m.name,
+                    }));
+                    if (!choices.length)
+                      throw new Error("No models available for this ChatGPT account.");
+                    setModels(choices);
+                    setModel(
+                      choices.some((m: { value: string }) => m.value === model)
+                        ? model
+                        : choices[0].value,
+                    );
+                    setAccount(status.email);
+                  } catch (e) {
+                    popup?.close();
+                    void companionRequest("/cancel-login", personalKey.trim(), {
+                      method: "POST",
+                    }).catch(() => {});
+                    if (!abort.signal.aborted) setError((e as Error).message);
+                  } finally {
+                    setConnecting(false);
+                  }
+                }}
+              >
+                {connecting
+                  ? "Waiting for sign-in…"
+                  : account
+                    ? "Refresh connection"
+                    : "Continue with ChatGPT"}
+              </Button>
+              {connecting && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => connectionAttempt.current?.abort()}
+                >
+                  Cancel
+                </Button>
+              )}
+              {account && (
+                <>
+                  <p>
+                    Connected as {account}.{" "}
+                    <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer">
+                      Manage usage
+                    </a>
+                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={state.running}
+                    onClick={async () => {
+                      try {
+                        const result = await (
+                          await companionRequest("/disconnect", personalKey.trim(), {
+                            method: "POST",
+                          })
+                        ).json();
+                        setAccount("");
+                        setModels([]);
+                        setModel("");
+                        await runtime.configure("", "", "chatgpt");
+                        if (!result.revoked)
+                          setError(
+                            "Signed out locally. Remote revocation was not confirmed; disconnect Wildwood in ChatGPT Settings.",
+                          );
+                      } catch (e) {
+                        setError((e as Error).message);
+                      }
+                    }}
+                  >
+                    Disconnect ChatGPT
+                  </Button>
+                </>
+              )}
+            </>
+          )}
           <Button type="submit">Done</Button>
         </form>
       )}
@@ -360,7 +554,9 @@ function SessionPanel({
               className="agent-send"
               aria-label={state.running ? "Send guidance" : "Send message"}
               disabled={
-                !prompt.trim() || !model.trim() || (!runtime.config.siteKey && !personalKey.trim())
+                !prompt.trim() ||
+                !model.trim() ||
+                (provider === "chatgpt" ? !account : !runtime.config.siteKey && !personalKey.trim())
               }
             >
               <ArrowUp size={17} />

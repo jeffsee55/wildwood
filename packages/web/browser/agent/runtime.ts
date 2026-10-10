@@ -6,6 +6,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { get, set, createStore } from "idb-keyval";
 import { pumpTurn, ToolLog, transportActivity, uid } from "./turn";
 import type { Activity, ThreadItem } from "./types";
+import { createChatGPTAgent } from "./chatgpt";
+export type AgentProvider = "gateway" | "chatgpt";
 
 export type AgentConfig = {
   actor: { id: string; name: string };
@@ -15,6 +17,7 @@ export type AgentConfig = {
   wasm: string;
 };
 export type Session = {
+  provider?: AgentProvider;
   id: string;
   draft?: string;
   name?: string;
@@ -132,24 +135,35 @@ export class AgentRuntime {
       });
     await this.saveChain;
   }
-  async configure(model: string, personalKey: string) {
+  async configure(model: string, personalKey: string, provider: AgentProvider = "gateway") {
     if (this.state.running) throw new Error("Stop the current turn before changing settings.");
-    if (this.model !== model || this.personalKey !== personalKey) {
+    if (
+      this.model !== model ||
+      this.personalKey !== personalKey ||
+      (this.state.session.provider ?? "gateway") !== provider
+    ) {
       if (this.agent) this.state.session.checkpoint = await this.agent.checkpoint();
       await this.disconnect();
     }
+    if ((this.state.session.provider ?? "gateway") !== provider)
+      this.state.session.checkpoint = undefined;
     this.model = model;
     this.personalKey = personalKey;
-    this.update({ session: { ...this.state.session, model } });
+    this.update({ session: { ...this.state.session, model, provider } });
   }
   private async connect() {
     if (this.agent) return;
-    if (!supportsJspi())
+    const chatgpt = this.state.session.provider === "chatgpt";
+    if (!chatgpt && !supportsJspi())
       throw new Error(
         "This browser cannot run libfx yet. Open this page in current Chrome or Edge, or connect an external agent through MCP.",
       );
-    if (!this.personalKey && !this.config.siteKey)
-      throw new Error("Add your AI Gateway key in settings first.");
+    if (!this.personalKey && (chatgpt || !this.config.siteKey))
+      throw new Error(
+        chatgpt
+          ? "Connect your local ChatGPT companion in settings first."
+          : "Add your AI Gateway key in settings first.",
+      );
     const response = await fetch(`${this.endpoint}/agent/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -176,8 +190,9 @@ export class AgentRuntime {
       items: this.items,
       activity: (activity?: Activity) => this.update({ activity }),
     };
-    this.agent = await createFxAgent({
-      apiKey: "proxied-by-wildwood",
+    const create = chatgpt ? createChatGPTAgent : createFxAgent;
+    this.agent = await create({
+      apiKey: chatgpt ? this.personalKey : "proxied-by-wildwood",
       model: this.model,
       wasm: this.config.wasm,
       checkpoint: this.state.session.checkpoint,
@@ -276,12 +291,16 @@ ${adapter.instructions}`,
               );
               this.interrupted = false;
               try {
-                await pumpTurn(
+                const result = await pumpTurn(
                   this.turn,
                   { items: this.items, activity: (activity) => this.update({ activity }) },
                   this.log,
                   Date.now(),
                 );
+                if (result.stopReason === "cancelled") {
+                  this.interrupted = true;
+                  this.update({ session: { ...this.state.session, interrupted: true } });
+                }
               } finally {
                 // Checkpoints preserve completed tool calls even when the model connection fails.
                 const checkpoint = await this.agent!.checkpoint();
