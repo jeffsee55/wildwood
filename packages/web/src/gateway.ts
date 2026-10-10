@@ -50,9 +50,11 @@ export async function gatewayResponse(request: Request, siteKey?: string): Promi
     return Response.json(
       {
         error:
-          upstream.status === 401 || upstream.status === 403
+          upstream.status === 401
             ? "AI Gateway rejected this key. Check its access and try again."
-            : `AI Gateway request failed (${upstream.status}).`,
+            : upstream.status === 403
+              ? "AI Gateway denied this request. Check model access and available credits."
+              : `AI Gateway request failed (${upstream.status}).`,
       },
       { status: upstream.status, headers: { "Cache-Control": "private, no-store" } },
     );

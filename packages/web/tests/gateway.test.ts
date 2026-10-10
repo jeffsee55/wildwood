@@ -75,3 +75,14 @@ test("Gateway bounds streamed requests and hides provider error bodies", async (
   ).rejects.toThrow("exceeds");
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+test("Gateway distinguishes model or credit restrictions from invalid credentials", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response("sensitive billing diagnostics", { status: 403 })),
+  );
+  const result = await gatewayResponse(request(), "site-key");
+  expect(result.status).toBe(403);
+  expect(await result.json()).toEqual({
+    error: "AI Gateway denied this request. Check model access and available credits.",
+  });
+});
