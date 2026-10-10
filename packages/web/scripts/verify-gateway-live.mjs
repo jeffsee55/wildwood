@@ -83,7 +83,10 @@ try {
     apiKey: "proxied-by-wildwood",
     model: process.env.FX_MODEL ?? "anthropic/claude-sonnet-4.5",
     backend: "native",
-    instructions: `You are testing an isolated content draft. Use only the supplied MCP tools. Discover schemas and read files/revisions before editing. Use unique command keys for writes. You cannot publish. ${adapter.instructions}`,
+    instructions: `You are testing an isolated content draft. Use only the supplied MCP tools.
+You have one draft: ${JSON.stringify({ draft: connection.draft, ref: connection.ref, version: connection.version, variant: connection.variant })}.
+The draft parameter is the draft ID, never its Git ref. Omit it to use your authorized draft.
+Discover schemas and read files/revisions before editing. Use unique command keys for writes. You cannot publish. ${adapter.instructions}`,
     tools: adapter.tools.map((tool) => ({
       ...tool,
       execute: async (input, context) => {
