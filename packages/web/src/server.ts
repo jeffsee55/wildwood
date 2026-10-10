@@ -919,7 +919,7 @@ export function createWeb<C extends Collections>(options: {
               "Cache-Control": "private, no-store",
               "Referrer-Policy": "no-referrer",
               "Content-Security-Policy":
-                "default-src 'self'; connect-src 'self' http://127.0.0.1:1455; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+                "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
             },
           },
         );
@@ -1341,7 +1341,7 @@ export function createWeb<C extends Collections>(options: {
               "Cache-Control": "private, no-store",
               "Referrer-Policy": "no-referrer",
               "Content-Security-Policy":
-                "default-src 'self'; connect-src 'self' http://127.0.0.1:1455; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+                "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
             },
           },
         );

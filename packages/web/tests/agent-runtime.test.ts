@@ -80,6 +80,23 @@ const completed = () => ({
     yield { type: "text_delta", delta: "Finished" };
   },
 });
+test("Gateway retains experimental transcripts and drafts without restoring incompatible checkpoints", async () => {
+  mocks.records.set("site:alice:new", {
+    id: crypto.randomUUID(),
+    draft: "draft-a",
+    model: "subscription-model",
+    provider: "chatgpt",
+    checkpoint: new Uint8Array([1, 2, 3]),
+    items: [{ kind: "user", id: "message", text: "Earlier task", at: 1 }],
+    updated: 1,
+  });
+  const session = await loadSession(config);
+  expect(session.draft).toBe("draft-a");
+  expect(session.items[0]).toMatchObject({ text: "Earlier task" });
+  expect(session.model).toBe(config.model);
+  expect(session.checkpoint).toBeUndefined();
+  expect(session.interrupted).toBe(true);
+});
 test("libfx resumes its checkpoint without persisting Gateway keys or MCP credentials", async () => {
   const checkpoint = new Uint8Array([1, 2, 3]);
   mocks.create.mockImplementation(async () => ({

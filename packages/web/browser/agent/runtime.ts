@@ -6,8 +6,6 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { get, set, createStore } from "idb-keyval";
 import { pumpTurn, ToolLog, transportActivity, uid } from "./turn";
 import type { Activity, ThreadItem } from "./types";
-import { createChatGPTAgent } from "./chatgpt";
-export type AgentProvider = "gateway" | "chatgpt";
 
 export type AgentConfig = {
   actor: { id: string; name: string };
@@ -17,7 +15,6 @@ export type AgentConfig = {
   wasm: string;
 };
 export type Session = {
-  provider?: AgentProvider;
   id: string;
   draft?: string;
   name?: string;
@@ -54,10 +51,20 @@ export const freshSession = (config: AgentConfig): Session => ({
   updated: Date.now(),
 });
 export async function loadSession(config: AgentConfig, draft?: string): Promise<Session> {
-  const value = await get<Session>(key(config, draft), storage());
+  const value = normalizeSession(await get<Session>(key(config, draft), storage()), config);
   return (
     value ?? { id: crypto.randomUUID(), draft, model: config.model, items: [], updated: Date.now() }
   );
+}
+
+// The short-lived companion experiment used an incompatible checkpoint format.
+// Keep its transcript/draft, but restart model context with the configured Gateway model.
+function normalizeSession(value: Session | undefined, config: AgentConfig) {
+  if (value && (value as Session & { provider?: string }).provider === "chatgpt") {
+    const { checkpoint: _checkpoint, ...rest } = value;
+    return { ...rest, model: config.model, provider: "gateway", interrupted: true };
+  }
+  return value;
 }
 
 /** One browser agent, one authorized draft, and the same MCP transport as external clients. */
@@ -135,35 +142,24 @@ export class AgentRuntime {
       });
     await this.saveChain;
   }
-  async configure(model: string, personalKey: string, provider: AgentProvider = "gateway") {
+  async configure(model: string, personalKey: string) {
     if (this.state.running) throw new Error("Stop the current turn before changing settings.");
-    if (
-      this.model !== model ||
-      this.personalKey !== personalKey ||
-      (this.state.session.provider ?? "gateway") !== provider
-    ) {
+    if (this.model !== model || this.personalKey !== personalKey) {
       if (this.agent) this.state.session.checkpoint = await this.agent.checkpoint();
       await this.disconnect();
     }
-    if ((this.state.session.provider ?? "gateway") !== provider)
-      this.state.session.checkpoint = undefined;
     this.model = model;
     this.personalKey = personalKey;
-    this.update({ session: { ...this.state.session, model, provider } });
+    this.update({ session: { ...this.state.session, model } });
   }
   private async connect() {
     if (this.agent) return;
-    const chatgpt = this.state.session.provider === "chatgpt";
-    if (!chatgpt && !supportsJspi())
+    if (!supportsJspi())
       throw new Error(
         "This browser cannot run libfx yet. Open this page in current Chrome or Edge, or connect an external agent through MCP.",
       );
-    if (!this.personalKey && (chatgpt || !this.config.siteKey))
-      throw new Error(
-        chatgpt
-          ? "Connect your local ChatGPT companion in settings first."
-          : "Add your AI Gateway key in settings first.",
-      );
+    if (!this.personalKey && !this.config.siteKey)
+      throw new Error("Add your AI Gateway key in settings first.");
     const response = await fetch(`${this.endpoint}/agent/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -190,9 +186,8 @@ export class AgentRuntime {
       items: this.items,
       activity: (activity?: Activity) => this.update({ activity }),
     };
-    const create = chatgpt ? createChatGPTAgent : createFxAgent;
-    this.agent = await create({
-      apiKey: chatgpt ? this.personalKey : "proxied-by-wildwood",
+    this.agent = await createFxAgent({
+      apiKey: "proxied-by-wildwood",
       model: this.model,
       wasm: this.config.wasm,
       checkpoint: this.state.session.checkpoint,
@@ -253,7 +248,10 @@ ${adapter.instructions}`,
           if (!lock)
             throw new Error("This draft is already running in another tab. Stop it there first.");
           // A second tab may have advanced this conversation while we were idle.
-          const latest = await get<Session>(key(this.config, this.state.session.draft), storage());
+          const latest = normalizeSession(
+            await get<Session>(key(this.config, this.state.session.draft), storage()),
+            this.config,
+          );
           if (latest?.id === this.state.session.id && latest.updated > this.state.session.updated) {
             await this.disconnect();
             this.interrupted = !!(latest.running || latest.interrupted);

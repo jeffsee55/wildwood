@@ -21,7 +21,6 @@
     "@libsql/kysely-libsql": "catalog:",
     "@modelcontextprotocol/sdk": "^1.31.0",
     "better-auth": "catalog:",
-    "jose": "^6.2.3",
     "wildwood-core": "workspace:*",
     "zod": "catalog:"
   },
