@@ -46,6 +46,9 @@ export function AgentPanel({
 }) {
   const [runtime, setRuntime] = useState<AgentRuntime>();
   const [error, setError] = useState("");
+  const selectedDraft = useRef(draft);
+  const observedDraft = useRef(draft);
+  selectedDraft.current = draft;
   useEffect(
     () => () => {
       void runtime?.close();
@@ -57,7 +60,7 @@ export function AgentPanel({
     let instance: AgentRuntime | undefined;
     (async () => {
       const config: AgentConfig = await requestJson(`${endpoint}/agent/config`);
-      const session = await loadSession(config, draft);
+      const session = await loadSession(config, selectedDraft.current);
       if (!live) return;
       instance = new AgentRuntime(endpoint, config, session);
       setRuntime(instance);
@@ -66,7 +69,12 @@ export function AgentPanel({
       live = false;
       void instance?.close();
     };
-  }, [endpoint, draft]);
+  }, [endpoint]);
+  useEffect(() => {
+    if (!runtime || observedDraft.current === draft) return;
+    observedDraft.current = draft;
+    void runtime.switchDraft(draft).catch((e) => setError(e.message));
+  }, [runtime, draft]);
   if (error)
     return (
       <div className="agent-empty" role="alert">
@@ -95,7 +103,7 @@ export function AgentPanel({
             ? () => {
                 void runtime.close();
                 setRuntime(
-                  new AgentRuntime(endpoint, runtime.config, freshSession(runtime.config)),
+                  new AgentRuntime(endpoint, runtime.config, freshSession(runtime.config, true)),
                 );
               }
             : undefined
@@ -166,7 +174,9 @@ function SessionPanel({
         <div>
           <Bot size={17} />
           <strong>Content agent</strong>
-          <span className="agent-status">{state.running ? "Working" : "Ready"}</span>
+          <span className="agent-status">
+            {state.switching ? "Switching draft" : state.running ? "Working" : "Ready"}
+          </span>
         </div>
         <div>
           {onNew && (
@@ -194,7 +204,10 @@ function SessionPanel({
       </header>
       <div className="agent-draft">
         <GitBranch size={13} />
-        <span>{state.session.name ?? "A new draft for this session"}</span>
+        <span>
+          {state.session.name ??
+            (state.session.draft ? "Selected draft" : "A new draft for this session")}
+        </span>
         <small>{state.tools ? `${state.tools} MCP tools` : "Powered by libfx"}</small>
       </div>
       {settings && (
@@ -359,7 +372,10 @@ function SessionPanel({
               className="agent-send"
               aria-label={state.running ? "Send guidance" : "Send message"}
               disabled={
-                !prompt.trim() || !model.trim() || (!runtime.config.siteKey && !personalKey.trim())
+                state.switching ||
+                !prompt.trim() ||
+                !model.trim() ||
+                (!runtime.config.siteKey && !personalKey.trim())
               }
             >
               <ArrowUp size={17} />

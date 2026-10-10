@@ -799,11 +799,22 @@ export function createWeb<C extends Collections>(options: {
         sameOrigin(request);
         const person = requireEditor(await actor(request.headers));
         const input = z
-          .object({ session: z.string().uuid(), draft: z.string().max(200).optional() })
+          .object({
+            session: z.string().uuid(),
+            draft: z.string().max(200).optional(),
+            bindingRevision: z.number().int().nonnegative().optional(),
+            newDraft: z.boolean().optional(),
+          })
           .parse(JSON.parse(new TextDecoder().decode(await readBody(request, 4096))));
         const sessionId = `embedded:${person.id}:${input.session}`;
         const previous = await get(sessionId, "embedded-session");
-        let draftId = previous ? String(previous.data.draft) : input.draft;
+        const browserView =
+          !input.draft && !previous && !input.newDraft ? await view(request.headers) : null;
+        let draftId = input.newDraft
+          ? previous && String(previous.data.draft)
+          : (input.draft ??
+            (previous && String(previous.data.draft)) ??
+            (browserView?.mode === "draft" ? browserView.viewId : undefined));
         if (!draftId) {
           // Stable identity makes a lost start response safe to retry across workers.
           draftId = digest(sessionId);
@@ -852,9 +863,33 @@ export function createWeb<C extends Collections>(options: {
           (await reviews.draftStatus(draftId)).status !== "open"
         )
           return json({ error: "Choose your own open draft for this session." }, 403);
-        if (previous && input.draft && input.draft !== draftId)
-          throw new Error("Session belongs to another draft");
-        if (!previous)
+        const revision = Number(previous?.data.revision ?? 0);
+        if (previous && previous.data.draft !== draftId) {
+          if (input.bindingRevision !== revision)
+            return json(
+              { error: "Conversation changed in another tab. Reload before switching drafts." },
+              409,
+            );
+          const rebound = await db.execute(
+            "UPDATE ww_web_records SET data=? WHERE repository=? AND id=? AND data=? RETURNING id",
+            [
+              JSON.stringify({ draft: draftId, revision: revision + 1 }),
+              repository,
+              sessionId,
+              JSON.stringify(previous.data),
+            ],
+          );
+          if (!rebound.rows.length)
+            return json(
+              { error: "Conversation changed in another tab. Reload before switching drafts." },
+              409,
+            );
+          // Retire credentials issued before binding generations were introduced, too.
+          await db.execute(
+            "UPDATE ww_web_records SET revoked=1 WHERE repository=? AND kind='agent' AND json_extract(data,'$.retryScope')=?",
+            [repository, sessionId],
+          );
+        } else if (!previous)
           await db.execute(
             "INSERT OR IGNORE INTO ww_web_records(repository,id,kind,actor,data) VALUES(?,?,?,?,?)",
             [
@@ -862,7 +897,7 @@ export function createWeb<C extends Collections>(options: {
               sessionId,
               "embedded-session",
               person.id,
-              JSON.stringify({ draft: draftId }),
+              JSON.stringify({ draft: draftId, revision: 0 }),
             ],
           );
         const bound = await get(sessionId, "embedded-session");
@@ -880,14 +915,25 @@ export function createWeb<C extends Collections>(options: {
             write: true,
             createDrafts: false,
             retryScope: sessionId,
+            embeddedSession: sessionId,
+            bindingRevision: Number(bound.data.revision ?? 0),
             name: "Embedded agent",
             audience: `${options.origin}${base}/mcp`,
           },
           Date.now() + 8 * 3600_000,
           digest(token),
         );
-        return json({
+        const viewToken = secret();
+        await put(
+          "draft-view",
+          person.id,
+          { draft: draftId },
+          Date.now() + 86400_000,
+          digest(viewToken),
+        );
+        const response = json({
           token,
+          bindingRevision: Number(bound.data.revision ?? 0),
           draft: draftId,
           name: draft.data.name,
           ref: draft.data.ref,
@@ -896,6 +942,11 @@ export function createWeb<C extends Collections>(options: {
           variant: options.variant ?? {},
           review: (await reviews.draftStatus(draftId)).review,
         });
+        response.headers.append(
+          "Set-Cookie",
+          `ww-view=${viewToken}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400${options.origin.startsWith("https:") ? "; Secure" : ""}`,
+        );
+        return response;
       }
       if (path === "/agent" && request.method === "GET") {
         const person = await actor(request.headers);
@@ -909,7 +960,7 @@ export function createWeb<C extends Collections>(options: {
         requireEditor(person);
         const context = JSON.stringify({
           endpoint: base,
-          draft: url.searchParams.get("draft"),
+          draft: url.searchParams.get("draft") ?? (await view(request.headers)).viewId,
         }).replaceAll("<", "\\u003c");
         return new Response(
           `<!doctype html><html lang="en" translate="no"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent — Wildwood</title><link rel="stylesheet" href="${base}/assets/${assets["agent.css"].path}"><body><div id="agent-root"></div><script id="context" type="application/json">${context}</script><script type="module" src="${base}/assets/${assets["agent.js"].path}"></script></body></html>`,
@@ -957,6 +1008,7 @@ export function createWeb<C extends Collections>(options: {
         return json({
           snapshot: current.snapshot,
           mode: current.mode,
+          draft: current.mode === "draft" ? current.viewId : undefined,
           activity: result?.rows[0] ?? null,
         });
       }
@@ -1357,6 +1409,15 @@ export function createWeb<C extends Collections>(options: {
   async function activeAgent(token: string) {
     const grant = await get(digest(token), "agent");
     if (!grant) return null;
+    if (grant.data.embeddedSession) {
+      const binding = await get(String(grant.data.embeddedSession), "embedded-session");
+      if (
+        !binding ||
+        binding.data.draft !== grant.data.draft ||
+        Number(binding.data.revision ?? 0) !== Number(grant.data.bindingRevision)
+      )
+        return null;
+    }
     if (grant.data.createDrafts) return grant;
     if (grant.data.draft && (await reviews.draftStatus(String(grant.data.draft))).status !== "open")
       return null;

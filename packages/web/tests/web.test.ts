@@ -887,7 +887,7 @@ test("embedded sessions reuse one branch and expose the same draft-scoped MCP to
       }),
     );
   }
-  const first = await (await start({ session })).json();
+  const first = await (await start({ session, newDraft: true })).json();
   const second = await (await start({ session })).json();
   expect(second.draft).toBe(first.draft);
   expect(second.ref).toBe(first.ref);
@@ -920,7 +920,7 @@ test("embedded sessions reuse one branch and expose the same draft-scoped MCP to
     (await call("tools/call", { name: "list_files", arguments: { draft: foreign } })).result
       .isError,
   ).toBe(true);
-  expect((await start({ session, draft: foreign })).status).toBe(400);
+  expect((await start({ session, draft: foreign })).status).toBe(409);
   const write = {
     name: "apply_changes",
     arguments: {
@@ -988,6 +988,70 @@ test("embedded sessions reject unowned or completed drafts, anonymous callers, a
   expect(Array.from(new Uint8Array(await bytes.arrayBuffer()).slice(0, 4))).toEqual([
     0, 97, 115, 109,
   ]);
+});
+test("embedded conversations select the browser draft and rotate scoped grants when rebinding", async () => {
+  const { web, headers } = await setup();
+  const a = await web.view(headers);
+  const session = crypto.randomUUID();
+  const start = (input: Record<string, unknown>) =>
+    web.handler(
+      new Request("http://localhost:9999/cms/agent/start", {
+        method: "POST",
+        headers: {
+          cookie: headers.get("cookie")!,
+          origin: "http://localhost:9999",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ session, ...input }),
+      }),
+    );
+  const firstResponse = await start({});
+  const first = await firstResponse.json();
+  expect(first.draft).toBe(a.viewId);
+  const selectedHeaders = new Headers({
+    cookie: `${headers.get("cookie")!.split("; ww-view=")[0]}; ${firstResponse.headers.get("set-cookie")!.split(";")[0]}`,
+  });
+  expect(await web.view(selectedHeaders)).toMatchObject({
+    mode: "draft",
+    viewId: first.draft,
+    ref: { name: first.ref },
+  });
+  const created = await web.command(a, { type: "draft" });
+  const bHeaders = new Headers({
+    cookie: `${headers.get("cookie")!.split("; ww-view=")[0]}; ww-view=${created.viewToken}`,
+  });
+  const b = await web.view(bHeaders);
+  expect(b.snapshot).toBe(a.snapshot);
+  const status = await (
+    await web.handler(new Request("http://localhost:9999/cms/status", { headers: bHeaders }))
+  ).json();
+  expect(status.draft).toBe(b.viewId);
+  const switchedResponse = await start({ draft: b.viewId, bindingRevision: first.bindingRevision });
+  const switched = await switchedResponse.json();
+  expect(switchedResponse.status).toBe(200);
+  expect(switched.bindingRevision).toBe(1);
+  const mcpStatus = async (token: string) =>
+    (
+      await web.handler(
+        new Request(first.endpoint, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+        }),
+      )
+    ).status;
+  expect(await mcpStatus(first.token)).toBe(401);
+  expect(await mcpStatus(switched.token)).toBe(200);
+  expect((await start({ draft: a.viewId, bindingRevision: 0 })).status).toBe(409);
+  const back = await (await start({ draft: a.viewId, bindingRevision: 1 })).json();
+  expect(back.bindingRevision).toBe(2);
+  expect(await mcpStatus(first.token)).toBe(401);
+  expect(await mcpStatus(switched.token)).toBe(401);
+  expect(await mcpStatus(back.token)).toBe(200);
 });
 
 test("embedded configuration advertises a site key without serializing it", async () => {

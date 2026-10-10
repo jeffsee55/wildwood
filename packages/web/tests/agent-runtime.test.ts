@@ -267,3 +267,112 @@ test("an interrupted checkpoint explicitly requires inspecting the draft before 
   expect(mocks.create.mock.calls[0][0].checkpoint).toEqual(new Uint8Array([9]));
   await runtime.close();
 });
+test("branch switching preserves conversation identity, clears old checkpoints, and reauthorizes before another turn", async () => {
+  const checkpoint = new Uint8Array([1]);
+  const close = vi.fn(async () => {});
+  mocks.create.mockResolvedValue({ prompt: completed, checkpoint: async () => checkpoint, close });
+  const runtime = new AgentRuntime("/cms", { ...config, siteKey: true }, await loadSession(config));
+  await runtime.send("First branch");
+  const id = runtime.state.session.id;
+  const items = runtime.state.session.items;
+  const start = vi.fn(async (_url: string, init: RequestInit) => {
+    const input = JSON.parse(String(init.body));
+    return Response.json({
+      token: "new-credential",
+      draft: input.draft,
+      bindingRevision: 1,
+      ref: `draft/${input.draft}`,
+      name: "Draft B",
+      endpoint: "https://site.test/cms/mcp",
+      version: "1",
+      variant: {},
+    });
+  });
+  vi.stubGlobal("fetch", start);
+  await runtime.switchDraft("draft-b");
+  expect(runtime.state.session.id).toBe(id);
+  expect(runtime.state.session.items).toEqual(items);
+  expect(runtime.state.session.checkpoint).toBeUndefined();
+  expect(close).toHaveBeenCalledOnce();
+  expect(start).not.toHaveBeenCalled();
+  await runtime.send("Now edit B");
+  expect(JSON.parse(String(start.mock.calls[0][1].body))).toMatchObject({
+    session: id,
+    draft: "draft-b",
+    bindingRevision: 0,
+  });
+  expect(mocks.create.mock.calls[1][0].checkpoint).toBeUndefined();
+  expect(mocks.create.mock.calls[1][0].instructions).toContain('"draft":"draft-b"');
+  expect(mocks.create.mock.calls[1][0].instructions).toContain("First branch");
+  expect(runtime.state.session.bindingRevision).toBe(1);
+  const reopened = await loadSession(config, "draft-a");
+  expect(reopened.id).toBe(id);
+  expect(reopened.draft).toBe("draft-a");
+  expect(reopened.bindingRevision).toBe(1);
+  expect(reopened.checkpoint).toBeUndefined();
+  expect(reopened.items.some((item) => item.kind === "user" && item.text === "Now edit B")).toBe(
+    true,
+  );
+  await runtime.close();
+});
+test("rapid branch changes settle on the last selected draft", async () => {
+  const runtime = new AgentRuntime(
+    "/cms",
+    { ...config, siteKey: true },
+    await loadSession(config, "draft-a"),
+  );
+  const b = runtime.switchDraft("draft-b");
+  const a = runtime.switchDraft("draft-a");
+  await Promise.all([b, a]);
+  expect(runtime.state.session.draft).toBe("draft-a");
+  expect(runtime.state.switching).toBe(false);
+  await runtime.close();
+});
+test("switching drafts waits for the cancelled turn to settle and never restores its checkpoint", async () => {
+  let finish!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const prompt = vi.fn(() => ({
+    ...completed(),
+    cancel: vi.fn(() => finish()),
+    async *[Symbol.asyncIterator]() {
+      yield { type: "text_delta", delta: "Working on A" };
+      await waiting;
+    },
+  }));
+  mocks.create.mockResolvedValue({
+    prompt,
+    checkpoint: async () => new Uint8Array([9]),
+    close: async () => {},
+  });
+  const runtime = new AgentRuntime("/cms", { ...config, siteKey: true }, await loadSession(config));
+  const sent = runtime.send("Edit A");
+  await vi.waitFor(() => expect(prompt).toHaveBeenCalled());
+  const switched = runtime.switchDraft("draft-b");
+  expect(runtime.state.switching).toBe(true);
+  await Promise.all([sent, switched]);
+  expect(runtime.state.running).toBe(false);
+  expect(runtime.state.session.draft).toBe("draft-b");
+  expect(runtime.state.session.checkpoint).toBeUndefined();
+  expect(
+    runtime.state.session.items.some(
+      (item) => item.kind === "assistant" && item.text === "Working on A",
+    ),
+  ).toBe(true);
+  await runtime.close();
+});
+test("a busy target draft is refused before reauthorization or changing the browser view", async () => {
+  const runtime = new AgentRuntime(
+    "/cms",
+    { ...config, siteKey: true },
+    await loadSession(config, "draft-a"),
+  );
+  await runtime.switchDraft("draft-b");
+  mocks.locks.add("wildwood-agent-draft:alice:draft-b");
+  await runtime.send("Edit B");
+  expect(runtime.state.error).toMatch(/another tab/);
+  expect(fetch).not.toHaveBeenCalled();
+  expect(mocks.create).not.toHaveBeenCalled();
+  await runtime.close();
+});

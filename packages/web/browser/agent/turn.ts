@@ -47,6 +47,7 @@ export type FxEvent = { type: string; [key: string]: unknown };
 export interface SessionSink {
   items(fn: (items: ThreadItem[]) => ThreadItem[]): void;
   activity(next: Activity | undefined): void;
+  changed?(name: string): void;
 }
 
 /**
@@ -143,6 +144,7 @@ export async function pumpTurn(turn: FxTurn, sink: SessionSink, log: ToolLog, st
             : it,
         ),
       );
+      if (!ev.isError) sink.changed?.(ev.name);
     }
   }
   const result = await turn.result;
