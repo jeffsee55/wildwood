@@ -11,6 +11,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker-provider.js";
 
 if (!process.env.AI_GATEWAY_API_KEY) throw new Error("AI_GATEWAY_API_KEY is required.");
+if (/^\W?(sensitive|redacted)\W?$/i.test(process.env.AI_GATEWAY_API_KEY))
+  throw new Error("Vercel redacted this sensitive variable. Use an actual key for the live check.");
 const origin = "http://localhost:9999";
 const sql = createClient({ url: ":memory:" });
 let agent;
@@ -117,8 +119,13 @@ try {
     `On your current draft, discover and read pages/start.md. Replace its body with exactly 'Verified live AI Gateway and MCP.' preserving the title. Validate the draft, then submit it for review. Do not publish.`,
     { signal: AbortSignal.timeout(150_000) },
   );
-  for await (const event of turn)
+  for await (const event of turn) {
     if (event.type === "tool_start") console.log(`Calling ${event.name}`);
+    if (event.type === "tool_end" && event.isError)
+      console.error(
+        `MCP ${event.name} failed: ${String(event.content).replaceAll(process.env.AI_GATEWAY_API_KEY, "[redacted]")}`,
+      );
+  }
   const result = await turn.result;
   assert.equal(result.stopReason, "end_turn");
   assert.ok(completed.has("submit_review"), "Model must submit review through real MCP.");
