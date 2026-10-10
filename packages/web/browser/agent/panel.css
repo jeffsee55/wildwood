@@ -352,3 +352,40 @@
   font-size: inherit;
   color: inherit;
 }
+
+.agent-annotations {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px 0;
+  max-height: 180px;
+  overflow: auto;
+}
+.agent-annotation {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--muted);
+  font-size: 12px;
+}
+.agent-annotation > div {
+  flex: 1;
+  min-width: 0;
+}
+.agent-annotation strong {
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+.agent-annotation p {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-annotation button {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+}

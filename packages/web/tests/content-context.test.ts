@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { contentContext, isContentShortcut } from "../browser/content-context";
+import { contentAnnotation, contentContext, isContentShortcut } from "../browser/content-context";
 import { sourcemap, withSourcemap } from "../src/sourcemap";
 
 const map = JSON.stringify({
@@ -82,4 +82,14 @@ test("only plain command/control L triggers context insertion, including upperca
   ]) {
     expect(isContentShortcut({ ...key, ...change })).toBe(false);
   }
+});
+
+test("annotations retain source context separately from the composer and identify repeated selections", () => {
+  const first = contentAnnotation(map, "Bonjour", "https://docs.test/?token=secret");
+  const updated = contentAnnotation(map, "Updated text", "https://docs.test/");
+  expect(first.id).toBe(updated.id);
+  expect(first.label).toBe("/content/intro.md · blocks.2.title");
+  expect(first.excerpt).toBe("Bonjour");
+  expect(first.text).toContain('"snapshot": "published-snapshot"');
+  expect(first.text).not.toContain("secret");
 });

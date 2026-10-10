@@ -41,7 +41,8 @@ import { RelativeTime } from "./relative-time";
 import { Wordmark } from "./wordmark";
 import { Button } from "./ui/button";
 import { installContentIndicator } from "./content-indicator";
-import { contentContext, isContentShortcut, type ComposerContext } from "./content-context";
+import { contentAnnotation, type ComposerContext } from "./content-context";
+import { installContentPicker } from "./content-picker";
 
 const AgentPanel = lazy(() => import("./agent/panel").then((m) => ({ default: m.AgentPanel })));
 
@@ -88,7 +89,7 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
   const [section, setSection] = useState<"agent" | "home" | "share" | "drafts">("agent");
   const [picking, setPicking] = useState(false);
   const [selectedContent, setSelectedContent] = useState<Element | null>(null);
-  const [context, setContext] = useState<ComposerContext>();
+  const [contexts, setContexts] = useState<ComposerContext[]>([]);
   const [agentStarted, setAgentStarted] = useState(false);
   const [panel, setPanel] = useState<"editor" | "agent" | "review" | null>(null);
   const [doc, setDoc] = useState<Result | null>(null),
@@ -186,63 +187,46 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
   useEffect(() => {
     if (!picking || !editor || panel) return;
     const removeIndicator = installContentIndicator();
-    const click = (event: MouseEvent) => {
-      if (!(event.target instanceof Element) || event.composedPath().includes(host)) return;
-      const element = event.target.closest("[data-ww-contentmap]");
-      if (!element) return;
-      event.preventDefault();
-      event.stopPropagation();
-      setSelectedContent(element);
-    };
-    const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
+    const removePicker = installContentPicker({
+      host,
+      onSelect: setSelectedContent,
+      onCancel: () => {
         setPicking(false);
         setSelectedContent(null);
-        return;
-      }
-      if (!selectedContent?.isConnected || !isContentShortcut(event)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      try {
-        setContext({
-          id: crypto.randomUUID(),
-          text: contentContext(
-            selectedContent.getAttribute("data-ww-contentmap"),
-            (selectedContent instanceof HTMLElement
-              ? selectedContent.innerText
-              : selectedContent.textContent) ||
-              selectedContent.getAttribute("alt") ||
+      },
+      onAdd: (element) => {
+        try {
+          const annotation = contentAnnotation(
+            element.getAttribute("data-ww-contentmap"),
+            (element instanceof HTMLElement ? element.innerText : element.textContent) ||
+              element.getAttribute("alt") ||
               "",
             window.location.href,
-          ),
-        });
-        setPicking(false);
-        setSelectedContent(null);
-        setAgentStarted(true);
-        setSection("agent");
-        setMenuOpen(true);
-      } catch (error) {
-        setError((error as Error).message);
-        setMenuOpen(true);
-      }
-    };
-    document.addEventListener("click", click, true);
-    document.addEventListener("keydown", key, true);
+          );
+          setContexts((current) => [
+            ...current.filter((item) => item.id !== annotation.id),
+            annotation,
+          ]);
+          setPicking(false);
+          setSelectedContent(null);
+          setAgentStarted(true);
+          setSection("agent");
+          setMenuOpen(true);
+        } catch (error) {
+          setError((error as Error).message);
+          setMenuOpen(true);
+        }
+      },
+    });
     return () => {
+      removePicker();
       removeIndicator();
-      document.removeEventListener("click", click, true);
-      document.removeEventListener("keydown", key, true);
     };
-  }, [picking, editor, panel, host, selectedContent]);
+  }, [picking, editor, panel, host]);
   useEffect(() => {
     if (!selectedContent) return;
-    // Match source identity without changing authored DOM or its geometry.
-    return installContentIndicator(
-      document,
-      selectedContent.getAttribute("data-ww-contentmap") || "",
-    );
+    // Outline only the picked element, even if the same field renders more than once.
+    return installContentIndicator(document, selectedContent);
   }, [selectedContent]);
   const mode =
     s.mode === "published" ? "Published" : s.mode === "draft" ? "Draft" : "Shared preview";
@@ -435,8 +419,11 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
                     <AgentPanel
                       endpoint={s.endpoint}
                       draft={s.draft}
-                      context={context}
-                      onContextUsed={() => setContext(undefined)}
+                      contexts={contexts}
+                      onContextRemoved={(id) =>
+                        setContexts((current) => current.filter((item) => item.id !== id))
+                      }
+                      onContextsUsed={() => setContexts([])}
                     />
                   </Suspense>
                 ) : (

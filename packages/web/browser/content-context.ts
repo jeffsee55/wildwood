@@ -1,12 +1,29 @@
 import type { ContentMap } from "../src/sourcemap";
 
-export type ComposerContext = { id: string; text: string };
+export type ComposerContext = { id: string; text: string; label: string; excerpt: string };
+
+export function contentAnnotation(
+  raw: string | null,
+  displayedText: string,
+  pageUrl: string,
+): ComposerContext {
+  const text = contentContext(raw, displayedText, pageUrl);
+  const map: ContentMap = JSON.parse(raw!);
+  return {
+    id: JSON.stringify(map),
+    text,
+    label: `${map.source}${map.path.length ? ` · ${map.path.join(".")}` : ""}`,
+    excerpt: displayedText.trim().slice(0, 240),
+  };
+}
 
 /** Source metadata is context for an agent, never authority to read or write content. */
 export function contentContext(raw: string | null, text: string, pageUrl: string): string {
   if (!raw || raw.length > 32768) throw new Error("This element has no usable content source map.");
   const map: ContentMap = JSON.parse(raw);
   if (
+    !map ||
+    typeof map !== "object" ||
     map.v !== 1 ||
     ![map.repository, map.snapshot, map.version, map.source, map.canonical].every(
       (value) => typeof value === "string" && value.length > 0,

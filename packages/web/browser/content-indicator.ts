@@ -1,12 +1,16 @@
 /** Paint on the actual content box; never mirror its viewport geometry. */
 export function installContentIndicator(
   owner: Document = document,
-  selectedMap?: string,
+  selectedElement?: Element,
 ): () => void {
-  const selector =
-    selectedMap === undefined
-      ? "[data-ww-contentmap]:hover:not(:has([data-ww-contentmap]:hover, wildwood-toolbar:hover))"
-      : `[data-ww-contentmap="${CSS.escape(selectedMap)}"]`;
+  const path: string[] = [];
+  for (let element = selectedElement; element?.parentElement; element = element.parentElement) {
+    const index = Array.prototype.indexOf.call(element.parentElement.children, element) + 1;
+    path.unshift(`> :nth-child(${index})`);
+  }
+  const selector = selectedElement
+    ? `:root ${path.join(" ")}[data-ww-contentmap="${CSS.escape(selectedElement.getAttribute("data-ww-contentmap") || "")}"]`
+    : "[data-ww-contentmap]:hover:not(:has([data-ww-contentmap]:hover, wildwood-toolbar:hover))";
   const sheet = new CSSStyleSheet();
   sheet.replaceSync(`
     ${selector} {

@@ -36,16 +36,18 @@ export function AgentPanel({
   endpoint,
   draft,
   reference,
-  context,
-  onContextUsed,
+  contexts,
+  onContextsUsed,
+  onContextRemoved,
   onReferenceUsed,
   onChanged,
 }: {
   endpoint: string;
   draft?: string;
   reference?: AgentReference;
-  context?: ComposerContext;
-  onContextUsed?: () => void;
+  contexts?: ComposerContext[];
+  onContextsUsed?: () => void;
+  onContextRemoved?: (id: string) => void;
   onReferenceUsed?: () => void;
   onChanged?: () => void;
 }) {
@@ -101,8 +103,9 @@ export function AgentPanel({
         key={runtime.state.session.id}
         runtime={runtime}
         reference={reference}
-        context={context}
-        onContextUsed={onContextUsed}
+        contexts={contexts}
+        onContextsUsed={onContextsUsed}
+        onContextRemoved={onContextRemoved}
         onReferenceUsed={onReferenceUsed}
         onChanged={onChanged}
         onNew={
@@ -123,16 +126,18 @@ export function AgentPanel({
 function SessionPanel({
   runtime,
   reference,
-  context,
-  onContextUsed,
+  contexts,
+  onContextsUsed,
+  onContextRemoved,
   onReferenceUsed,
   onChanged,
   onNew,
 }: {
   runtime: AgentRuntime;
   reference?: AgentReference;
-  context?: ComposerContext;
-  onContextUsed?: () => void;
+  contexts?: ComposerContext[];
+  onContextsUsed?: () => void;
+  onContextRemoved?: (id: string) => void;
   onReferenceUsed?: () => void;
   onChanged?: () => void;
   onNew?: () => void;
@@ -145,19 +150,11 @@ function SessionPanel({
   const [error, setError] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
-  const consumedContext = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!context || consumedContext.current === context.id) return;
-    consumedContext.current = context.id;
-    setPrompt((current) => `${current}${current ? "\n\n" : ""}${context.text}`);
+    if (!contexts?.length) return;
     setSettings(false);
-    onContextUsed?.();
-    requestAnimationFrame(() => {
-      composer.current?.focus();
-      const length = composer.current?.value.length ?? 0;
-      composer.current?.setSelectionRange(length, length);
-    });
-  }, [context, onContextUsed]);
+    requestAnimationFrame(() => composer.current?.focus());
+  }, [contexts]);
   const nearBottom = useRef(true);
   const wasRunning = useRef(false);
   useEffect(() => {
@@ -181,11 +178,13 @@ function SessionPanel({
     if (!prompt.trim()) return;
     setError("");
     try {
+      const message = [prompt, ...(contexts ?? []).map((item) => item.text)].join("\n\n");
       const text = reference
-        ? `${prompt}\n\nQuoted review context (${reference.revision}), ${reference.path}, ${reference.side} lines ${reference.start}-${reference.end}:\n\n${reference.text}`
-        : prompt;
+        ? `${message}\n\nQuoted review context (${reference.revision}), ${reference.path}, ${reference.side} lines ${reference.start}-${reference.end}:\n\n${reference.text}`
+        : message;
       setPrompt("");
       onReferenceUsed?.();
+      onContextsUsed?.();
       setSettings(false);
       await runtime.send(text, { model: model.trim(), personalKey: personalKey.trim() });
     } catch (e) {
@@ -334,6 +333,27 @@ function SessionPanel({
           void send();
         }}
       >
+        {!!contexts?.length && (
+          <div className="agent-annotations" aria-label="Selected page content">
+            {contexts.map((item) => (
+              <article className="agent-annotation" key={item.id}>
+                <div>
+                  <strong>{item.label}</strong>
+                  {item.excerpt && <p>{item.excerpt}</p>}
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Remove annotation ${item.label}`}
+                  onClick={() => onContextRemoved?.(item.id)}
+                >
+                  <X size={14} />
+                </Button>
+              </article>
+            ))}
+          </div>
+        )}
         {reference && (
           <div className="agent-reference">
             <span>
