@@ -6,10 +6,14 @@ async function visit(path) {
   for (const entry of await readdir(new URL(path, root), { withFileTypes: true })) {
     const name = `${path}${entry.name}`;
     if (entry.isDirectory()) await visit(`${name}/`);
-    else files.push({ path: name, content: await readFile(new URL(name, root), "utf8") });
+    else {
+      const encoding = name.endsWith(".md") ? "utf8" : "base64";
+      files.push({ path: name, encoding, content: await readFile(new URL(name, root), encoding) });
+    }
   }
 }
 await visit("content/");
+await visit("media/");
 files.sort((a, b) => a.path.localeCompare(b.path));
 await writeFile(
   fileURLToPath(new URL("lib/content.generated.json", root)),

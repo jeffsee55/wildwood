@@ -37,31 +37,35 @@ const asRef = (row: Record<string, unknown>): Ref => ({
 });
 
 /** Logical file membership: nearest path wins, including deletion tombstones. */
-const membership = `WITH RECURSIVE lineage(id, depth) AS (
+const membershipFor = (filter = "1=1", join = "") => `WITH RECURSIVE lineage(id, depth) AS (
   SELECT id, 0 FROM ww2_snapshots WHERE id = ? AND repository = ?
   UNION ALL
   SELECT s.parent, l.depth + 1 FROM lineage l JOIN ww2_snapshots s ON s.id = l.id
     WHERE s.parent IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ww2_checkpoints c WHERE c.snapshot = l.id)
 ), candidates AS (
-  SELECT c.path, c.blob, c.mode, l.depth FROM lineage l JOIN ww2_changes c ON c.snapshot = l.id
-    WHERE NOT EXISTS (SELECT 1 FROM ww2_checkpoints k WHERE k.snapshot = l.id)
+  SELECT c.path, c.blob, c.mode, l.depth FROM lineage l ${join} JOIN ww2_changes c ON c.snapshot = l.id
+    WHERE NOT EXISTS (SELECT 1 FROM ww2_checkpoints k WHERE k.snapshot = l.id) AND (${filter})
   UNION ALL
-  SELECT c.path, c.blob, c.mode, l.depth FROM lineage l JOIN ww2_checkpoint_files c ON c.snapshot = l.id
+  SELECT c.path, c.blob, c.mode, l.depth FROM lineage l ${join} JOIN ww2_checkpoint_files c ON c.snapshot = l.id WHERE ${filter}
 ), ranked_files AS (
   SELECT path, blob, mode, ROW_NUMBER() OVER (PARTITION BY path ORDER BY depth) AS rank FROM candidates
 ), effective_files AS (
   SELECT path, blob, mode FROM ranked_files WHERE rank = 1 AND blob IS NOT NULL
 )`;
 
+const membership = membershipFor();
+
 export class ContentEngine<C extends Collections> {
   readonly config: Config<C>;
   readonly blobs: BlobStore;
   private initialized?: Promise<void>;
+  private readonly sqlBytes: boolean;
   private preparing = new Map<string, Promise<void>>();
   constructor(
     readonly database: SqlDatabase,
     config: Config<C>,
     blobs?: BlobStore,
+    readonly assetBlobs?: BlobStore,
   ) {
     if (!config.repository || !config.version)
       throw new Error("repository and version are required");
@@ -106,6 +110,7 @@ export class ContentEngine<C extends Collections> {
         ),
       ),
     });
+    this.sqlBytes = !blobs;
     this.blobs = blobs ?? sqlBlobs(database);
   }
 
@@ -195,17 +200,29 @@ export class ContentEngine<C extends Collections> {
     await this.ready();
     await this.assertSnapshot(snapshot);
     const result = await this.database.execute(
-      `${membership} SELECT path,blob,mode FROM effective_files ORDER BY path`,
-      [snapshot, this.config.repository],
+      `${membership} SELECT path,blob,mode,l.size,l.storage FROM effective_files f LEFT JOIN ww2_blob_locations l ON l.id=f.blob AND l.repository=? ORDER BY path`,
+      [snapshot, this.config.repository, this.config.repository],
     );
     return result.rows.map((row) => ({
       path: String(row.path),
       blob: String(row.blob),
       mode: String(row.mode) as SnapshotFile["mode"],
+      ...(row.size !== null && row.size !== undefined
+        ? { size: Number(row.size), storage: String(row.storage) as "default" | "assets" }
+        : {}),
     }));
   }
   async bytes(blob: string): Promise<Uint8Array> {
-    const bytes = await this.blobs.get(blob);
+    await this.ready();
+    const location = (
+      await this.database.execute(
+        "SELECT storage FROM ww2_blob_locations WHERE repository=? AND id=?",
+        [this.config.repository, blob],
+      )
+    ).rows[0];
+    if (location?.storage === "assets" && !this.assetBlobs)
+      throw new Error("Configure assetBlobs to read this asset");
+    const bytes = await (location?.storage === "assets" ? this.assetBlobs! : this.blobs).get(blob);
     if (!bytes || hash(bytes) !== blob) throw new Error(`Missing or corrupt content: ${blob}`);
     return bytes;
   }
@@ -214,6 +231,11 @@ export class ContentEngine<C extends Collections> {
     return {
       repository: this.config.repository,
       version: this.config.version,
+      assets: {
+        supported: true,
+        storage: this.assetBlobs ? "external" : "default",
+        tree: "database",
+      },
       variants: this.config.variants,
       collections: Object.entries(this.config.collections).map(([name, c]) => ({
         name,
@@ -228,16 +250,24 @@ export class ContentEngine<C extends Collections> {
     };
   }
 
-  collectionFor(path: string) {
+  matchCollection(path: string) {
     validPath(path);
     const matches = Object.entries(this.config.collections).filter(([, c]) =>
       minimatch(path, c.match, { dot: true }),
     );
-    if (matches.length !== 1)
+    if (matches.length > 1)
       throw new ValidationError([
         { path, message: "Path must match exactly one content collection" },
       ]);
-    return { name: matches[0][0], ...matches[0][1] };
+    return matches.length ? { name: matches[0][0], ...matches[0][1] } : null;
+  }
+  collectionFor(path: string) {
+    const collection = this.matchCollection(path);
+    if (!collection)
+      throw new ValidationError([
+        { path, message: "Path must match exactly one content collection" },
+      ]);
+    return collection;
   }
 
   /** Validate a proposed content batch without writing blobs, snapshots, or refs. */
@@ -251,10 +281,10 @@ export class ContentEngine<C extends Collections> {
       try {
         if (paths.has(change.path)) throw new Error("Duplicate change in batch");
         paths.add(change.path);
-        const c = this.collectionFor(change.path);
+        const c = this.matchCollection(change.path);
         if (!("delete" in change)) {
           if (change.mode === "120000") throw new Error("Content cannot be a symbolic link");
-          c.parse(
+          c?.parse(
             typeof change.content === "string"
               ? change.content
               : new TextDecoder("utf-8", { fatal: true }).decode(change.content),
@@ -332,14 +362,49 @@ export class ContentEngine<C extends Collections> {
       throw new ConflictError("Ref advanced; read the new revision before editing");
     }
     for (const change of changes)
-      if (change.bytes && change.blob) await this.blobs.put(change.blob, change.bytes);
-    const existing = new Map((await this.files(head.snapshot)).map((file) => [file.path, file]));
+      if (change.bytes && change.blob) {
+        const external = !this.matchCollection(change.path) && !!this.assetBlobs;
+        await (external ? this.assetBlobs! : this.blobs).put(change.blob, change.bytes);
+        await this.database.execute(
+          "INSERT INTO ww2_blob_locations(repository,id,storage,size) VALUES(?,?,?,?) ON CONFLICT DO NOTHING",
+          [
+            this.config.repository,
+            change.blob,
+            external ? "assets" : "default",
+            change.bytes.byteLength,
+          ],
+        );
+      }
+    // Only touched paths, their ancestors and descendants can affect this batch.
+    const exact = new Set(changes.map((c) => c.path));
+    for (const change of changes) {
+      const parts = change.path.split("/");
+      for (let n = 1; n < parts.length; n++) exact.add(parts.slice(0, n).join("/"));
+    }
+    const pathArgs = JSON.stringify([...exact]);
+    const found = await this.database.execute(
+      `${membershipFor("c.path=requested.value", "JOIN json_each(?) requested")} SELECT path,blob,mode FROM effective_files`,
+      [head.snapshot, this.config.repository, pathArgs, pathArgs],
+    );
+    const existing = new Map(
+      found.rows.map((row) => [
+        String(row.path),
+        {
+          path: String(row.path),
+          blob: String(row.blob),
+          mode: String(row.mode),
+        },
+      ]),
+    );
     const actual = changes.filter((change) =>
       change.blob === null
         ? existing.has(change.path)
         : existing.get(change.path)?.blob !== change.blob ||
           existing.get(change.path)?.mode !== change.mode,
     );
+    const additions = actual
+      .filter((change) => change.blob !== null && !existing.has(change.path))
+      .map((change) => change.path);
     for (const change of actual)
       change.blob === null
         ? existing.delete(change.path)
@@ -350,6 +415,24 @@ export class ContentEngine<C extends Collections> {
         if (existing.has(parts.slice(0, n).join("/")))
           throw new ValidationError([{ path, message: "A parent path is also a file" }]);
     }
+    if (additions.length) {
+      const requested = JSON.stringify(additions);
+      const descendant = await this.database.execute(
+        `${membershipFor("c.path >= requested.value || '/' AND c.path < requested.value || '0'", "JOIN json_each(?) requested")}
+         SELECT path FROM effective_files WHERE path NOT IN (SELECT value FROM json_each(?)) LIMIT 1`,
+        [
+          head.snapshot,
+          this.config.repository,
+          requested,
+          requested,
+          JSON.stringify(changes.map((change) => change.path)),
+        ],
+      );
+      if (descendant.rows.length)
+        throw new ValidationError([
+          { path: String(descendant.rows[0].path), message: "A parent path is also a file" },
+        ]);
+    }
     const snapshot = actual.length || args.advanceRevision ? randomUUID() : head.snapshot;
     if (actual.length || args.advanceRevision) {
       await this.database.transaction(async (tx) => {
@@ -357,18 +440,17 @@ export class ContentEngine<C extends Collections> {
           "INSERT INTO ww2_snapshots(id,repository,parent,created_at) VALUES(?,?,?,?)",
           [snapshot, this.config.repository, head.snapshot, new Date().toISOString()],
         );
-        for (const change of actual)
-          await tx.execute("INSERT INTO ww2_changes(snapshot,path,blob,mode) VALUES(?,?,?,?)", [
-            snapshot,
-            change.path,
-            change.blob,
-            change.mode,
-          ]);
+        await tx.execute(
+          `INSERT INTO ww2_changes(snapshot,path,blob,mode)
+          SELECT ?,json_extract(value,'$.path'),json_extract(value,'$.blob'),json_extract(value,'$.mode') FROM json_each(?)`,
+          [snapshot, JSON.stringify(actual.map(({ path, blob, mode }) => ({ path, blob, mode })))],
+        );
       });
     }
     // Validation and durable bytes precede publication. Failed/racing builds can
     // leave unreachable immutable data, never a partially visible ref.
     await this.prepare(snapshot);
+    await this.boundHistory(snapshot);
     return this.database.transaction(async (tx) => {
       const replay = await this.command(args.idempotencyKey, fingerprint, tx);
       if (replay) return replay;
@@ -523,8 +605,10 @@ export class ContentEngine<C extends Collections> {
   private async build(snapshot: string) {
     const version = this.config.version;
     const state = await this.database.execute(
-      "SELECT status FROM ww2_builds WHERE snapshot=? AND version=?",
-      [snapshot, version],
+      `SELECT b.status,p.status AS parent_status FROM ww2_snapshots s
+       LEFT JOIN ww2_builds b ON b.snapshot=s.id AND b.version=?
+       LEFT JOIN ww2_builds p ON p.snapshot=s.parent AND p.version=? WHERE s.id=?`,
+      [version, version, snapshot],
     );
     if (state.rows[0]?.status === "ready") return;
     await this.database.execute(
@@ -532,9 +616,74 @@ export class ContentEngine<C extends Collections> {
       [snapshot, version],
     );
     try {
-      const files = await this.files(snapshot);
+      // A validated parent under this generation proves unchanged files valid.
+      // New generations use the complete membership once, in a set-based query.
+      const incremental = state.rows[0]?.parent_status === "ready";
+      const source = incremental ? "ww2_changes" : "effective_files";
+      const candidates = await this.database.execute(
+        `${incremental ? "" : membership} SELECT f.path,f.blob,f.mode,p.id AS cached,
+         l.size AS source_size
+         FROM ${source} f
+         LEFT JOIN ww2_projections p ON p.repository=? AND p.version=? AND p.path=f.path AND p.blob=f.blob
+         LEFT JOIN ww2_blob_locations l ON l.id=f.blob AND l.repository=?
+         WHERE ${incremental ? "f.snapshot=? AND" : ""} f.blob IS NOT NULL AND (p.id IS NULL OR f.mode='120000')`,
+        [
+          ...(incremental ? [] : [snapshot, this.config.repository]),
+          this.config.repository,
+          version,
+          this.config.repository,
+          ...(incremental ? [snapshot] : []),
+        ],
+      );
+      const files = candidates.rows.map((row) => ({
+        path: String(row.path),
+        blob: String(row.blob),
+        mode: String(row.mode),
+        cached: row.cached,
+        size: row.source_size === null ? Infinity : Number(row.source_size),
+      }));
+      const projections: Record<string, unknown>[] = [];
+      const indexedFields: Record<string, unknown>[] = [];
+      const indexedConnections: Record<string, unknown>[] = [];
       const diagnostics: { path: string; message: string }[] = [];
-      for (const file of files) {
+      const sources = new Map<string, Uint8Array>();
+      let loadedThrough = 0;
+      for (let index = 0; index < files.length; index++) {
+        const file = files[index];
+        if (this.sqlBytes && index >= loadedThrough) {
+          sources.clear();
+          let size = 0;
+          loadedThrough = index;
+          do {
+            size += files[loadedThrough++].size;
+          } while (
+            loadedThrough < files.length &&
+            loadedThrough - index < 50 &&
+            size + files[loadedThrough].size <= 512 * 1024
+          );
+          const ids = [
+            ...new Set(
+              files
+                .slice(index, loadedThrough)
+                .filter(
+                  (candidate) =>
+                    !candidate.cached &&
+                    Object.values(this.config.collections).some((collection) =>
+                      minimatch(candidate.path, collection.match, { dot: true }),
+                    ),
+                )
+                .map((candidate) => candidate.blob),
+            ),
+          ];
+          if (ids.length) {
+            const rows = await this.database.execute(
+              "SELECT id,bytes FROM ww2_blobs WHERE id IN (SELECT value FROM json_each(?))",
+              [JSON.stringify(ids)],
+            );
+            for (const row of rows.rows)
+              sources.set(String(row.id), Buffer.from(String(row.bytes), "base64"));
+          }
+        }
         if (
           file.mode === "120000" &&
           Object.values(this.config.collections).some((c) =>
@@ -547,11 +696,7 @@ export class ContentEngine<C extends Collections> {
           });
           continue;
         }
-        const previous = await this.database.execute(
-          "SELECT id FROM ww2_projections WHERE repository=? AND version=? AND path=? AND blob=?",
-          [this.config.repository, version, file.path, file.blob],
-        );
-        if (previous.rows.length) continue;
+        if (file.cached) continue;
         const info = variantInfo(file.path, this.config.variants);
         const matches = Object.entries(this.config.collections).filter(([, c]) =>
           minimatch(file.path, c.match, { dot: true }),
@@ -561,10 +706,14 @@ export class ContentEngine<C extends Collections> {
           const [name, collection] = matches[0] ?? [];
           if (collection && file.mode === "120000")
             throw new Error("Collection documents cannot be symbolic links");
+          let bytes: Uint8Array | undefined;
+          if (collection) {
+            bytes = sources.get(file.blob) ?? (await this.bytes(file.blob));
+            if (hash(bytes) !== file.blob)
+              throw new Error(`Missing or corrupt content: ${file.blob}`);
+          }
           const value = collection
-            ? collection.parse(
-                new TextDecoder("utf-8", { fatal: true }).decode(await this.bytes(file.blob)),
-              )
+            ? collection.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))
             : null;
           const data = JSON.stringify(value);
           if (data === undefined)
@@ -603,33 +752,19 @@ export class ContentEngine<C extends Collections> {
             },
           );
           const id = hash(JSON.stringify([this.config.repository, version, file.path, file.blob]));
-          await this.database.transaction(async (tx) => {
-            const inserted = await tx.execute(
-              "INSERT INTO ww2_projections(id,repository,version,path,blob,collection,canonical,axes,data) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
-              [
-                id,
-                this.config.repository,
-                version,
-                file.path,
-                file.blob,
-                name ?? null,
-                info.canonical,
-                JSON.stringify(info.explicit),
-                data,
-              ],
-            );
-            if (!inserted.changes) return;
-            for (const f of fields)
-              await tx.execute(
-                "INSERT INTO ww2_fields(projection,field,kind,text_value,number_value) VALUES(?,?,?,?,?)",
-                [id, f.field, f.kind, f.text, f.number],
-              );
-            for (const c of connections)
-              await tx.execute(
-                "INSERT INTO ww2_connections(projection,field,target_collection,target_path) VALUES(?,?,?,?)",
-                [id, c.field, c.target, c.path],
-              );
+          projections.push({
+            id,
+            repository: this.config.repository,
+            version,
+            path: file.path,
+            blob: file.blob,
+            collection: name ?? null,
+            canonical: info.canonical,
+            axes: JSON.stringify(info.explicit),
+            data,
           });
+          indexedFields.push(...fields.map((f) => ({ projection: id, ...f })));
+          indexedConnections.push(...connections.map((c) => ({ projection: id, ...c })));
         } catch (error) {
           diagnostics.push({
             path: file.path,
@@ -638,6 +773,73 @@ export class ContentEngine<C extends Collections> {
         }
       }
       if (diagnostics.length) throw new ValidationError(diagnostics);
+      await this.database.transaction(async (tx) => {
+        // Projections and their indexes become visible together, including racing builders.
+        const insert = async (
+          table: string,
+          columns: string[],
+          keys: string[],
+          rows: Record<string, unknown>[],
+        ) => {
+          let batch: string[] = [],
+            bytes = 0;
+          const flush = async () => {
+            if (!batch.length) return;
+            await tx.execute(
+              `INSERT OR IGNORE INTO ${table}(${columns.join(",")}) SELECT ${keys.map((key) => `json_extract(value,'$.${key}')`).join(",")} FROM json_each(?)`,
+              [`[${batch.join(",")}]`],
+            );
+            batch = [];
+            bytes = 0;
+          };
+          for (const row of rows) {
+            const value = JSON.stringify(row),
+              size = Buffer.byteLength(value);
+            if (batch.length >= 50 || bytes + size > 512 * 1024) await flush();
+            batch.push(value);
+            bytes += size;
+          }
+          await flush();
+        };
+        await insert(
+          "ww2_projections",
+          [
+            "id",
+            "repository",
+            "version",
+            "path",
+            "blob",
+            "collection",
+            "canonical",
+            "axes",
+            "data",
+          ],
+          [
+            "id",
+            "repository",
+            "version",
+            "path",
+            "blob",
+            "collection",
+            "canonical",
+            "axes",
+            "data",
+          ],
+          projections,
+        );
+        await insert(
+          "ww2_fields",
+          ["projection", "field", "kind", "text_value", "number_value"],
+          ["projection", "field", "kind", "text", "number"],
+          indexedFields,
+        );
+        await insert(
+          "ww2_connections",
+          ["projection", "field", "target_collection", "target_path"],
+          ["projection", "field", "target", "path"],
+          indexedConnections,
+        );
+      });
       await this.database.execute(
         "UPDATE ww2_builds SET status='ready',diagnostics=NULL WHERE snapshot=? AND version=?",
         [snapshot, version],
@@ -799,42 +1001,97 @@ export class ContentEngine<C extends Collections> {
     };
   }
 
+  /** Resolve references together, preserving the source snapshot and variant context. */
+  async resolveReferences(
+    documents: readonly Document<unknown>[],
+    field: string,
+  ): Promise<(Document<unknown> | null)[]> {
+    if (!documents.length) return [];
+    const first = documents[0];
+    const context = (doc: Document<unknown>) => JSON.stringify(Object.entries(doc.variant).sort());
+    const variantKey = context(first);
+    if (
+      documents.some(
+        (doc) =>
+          doc.version !== this.config.version ||
+          doc.snapshot !== first.snapshot ||
+          context(doc) !== variantKey,
+      )
+    )
+      throw new Error(
+        "Resolve references with their original schema generation, snapshot and variant",
+      );
+    await this.prepare(first.snapshot);
+    const selected = this.selection(first.snapshot, first.variant);
+    const result = await this.database.execute(
+      `${selected.sql} SELECT source.id AS source_id,target.* FROM selected source
+       JOIN ww2_connections c ON c.projection=source.id
+       JOIN selected target ON target.collection=c.target_collection AND target.canonical=c.target_path
+       WHERE source.id IN (SELECT value FROM json_each(?)) AND c.field=?`,
+      [
+        ...selected.args,
+        JSON.stringify([...new Set(documents.map((doc) => doc.projection))]),
+        field,
+      ],
+    );
+    const targets = new Map(
+      result.rows.map((row) => [
+        String(row.source_id),
+        {
+          value: JSON.parse(String(row.data)),
+          path: String(row.path),
+          canonical: String(row.canonical),
+          projection: String(row.id),
+          snapshot: first.snapshot,
+          version: first.version,
+          variant: first.variant,
+        },
+      ]),
+    );
+    return documents.map((doc) => targets.get(doc.projection) ?? null);
+  }
+
   /** Resolve a reference in the source document's snapshot, never the moving ref. */
   async resolveReference(
     document: Document<unknown>,
     field: string,
   ): Promise<Document<unknown> | null> {
-    if (document.version !== this.config.version)
-      throw new Error("Resolve a reference with its original schema generation");
-    await this.prepare(document.snapshot);
-    const selected = this.selection(document.snapshot, document.variant);
-    const result = await this.database.execute(
-      `${selected.sql} SELECT target.* FROM selected source JOIN ww2_connections c ON c.projection=source.id JOIN selected target ON target.collection=c.target_collection AND target.canonical=c.target_path WHERE source.id=? AND c.field=?`,
-      [...selected.args, document.projection, field],
-    );
-    const row = result.rows[0];
-    return row
-      ? {
-          value: JSON.parse(String(row.data)),
-          path: String(row.path),
-          canonical: String(row.canonical),
-          projection: String(row.id),
-          snapshot: document.snapshot,
-          version: document.version,
-          variant: document.variant,
-        }
-      : null;
+    return (await this.resolveReferences([document], field))[0];
   }
 
   /** Rebuildable accelerator. Existing snapshots and their query results do not change. */
   async validateReferences(snapshot: string) {
     await this.prepare(snapshot);
+    const version = this.config.version;
+    const cached = await this.database.execute(
+      `SELECT v.snapshot,p.snapshot AS parent_valid FROM ww2_snapshots s
+      LEFT JOIN ww2_reference_builds v ON v.snapshot=s.id AND v.version=?
+      LEFT JOIN ww2_reference_builds p ON p.snapshot=s.parent AND p.version=? WHERE s.id=?`,
+      [version, version, snapshot],
+    );
+    if (cached.rows[0]?.snapshot) return;
+    const affected = cached.rows[0]?.parent_valid
+      ? (
+          await this.database.execute("SELECT path FROM ww2_changes WHERE snapshot=?", [snapshot])
+        ).rows.map((row) => variantInfo(String(row.path), this.config.variants).canonical)
+      : null;
+    const axes = await this.database.execute(
+      `${membership} SELECT DISTINCT p.axes FROM effective_files f
+      JOIN ww2_projections p ON p.path=f.path AND p.blob=f.blob WHERE p.repository=? AND p.version=? AND p.collection IS NOT NULL`,
+      [snapshot, this.config.repository, this.config.repository, version],
+    );
+    const explicit = axes.rows.map((row) => JSON.parse(String(row.axes)) as Record<string, string>);
     let variants: Record<string, string>[] = [{}];
     for (const [axis, spec] of Object.entries(this.config.variants ?? {})) {
-      if (variants.length * spec.options.length > 256)
-        throw new Error("Reference validation supports up to 256 variant combinations");
+      // Values without any explicit file have identical candidate sets. Their
+      // default-match score adds the same constant to every candidate.
+      const used = new Set(explicit.map((values) => values[axis]));
+      const unused = spec.options.find((value) => !used.has(value));
+      const options = spec.options.filter((value) => used.has(value) || value === unused);
+      if (variants.length * options.length > 256)
+        throw new Error("Reference validation supports up to 256 distinct variant selections");
       variants = variants.flatMap((context) =>
-        spec.options.map((value) => ({ ...context, [axis]: value })),
+        options.map((value) => ({ ...context, [axis]: value })),
       );
     }
     const diagnostics: { path: string; message: string }[] = [];
@@ -845,8 +1102,11 @@ export class ContentEngine<C extends Collections> {
         SELECT source.path,c.field,c.target_path FROM selected source
         JOIN ww2_connections c ON c.projection=source.id
         LEFT JOIN selected target ON target.collection=c.target_collection AND target.canonical=c.target_path
-        WHERE target.id IS NULL`,
-        selected.args,
+        WHERE target.id IS NULL ${affected ? "AND (source.canonical IN (SELECT value FROM json_each(?)) OR c.target_path IN (SELECT value FROM json_each(?)))" : ""}`,
+        [
+          ...selected.args,
+          ...(affected ? [JSON.stringify(affected), JSON.stringify(affected)] : []),
+        ],
       );
       for (const row of result.rows)
         diagnostics.push({
@@ -855,21 +1115,39 @@ export class ContentEngine<C extends Collections> {
         });
     }
     if (diagnostics.length) throw new ValidationError(diagnostics);
+    await this.database.execute(
+      "INSERT OR IGNORE INTO ww2_reference_builds(snapshot,version) VALUES(?,?)",
+      [snapshot, version],
+    );
+  }
+
+  /** Bound draft ancestry without copying membership on every edit. */
+  private async boundHistory(snapshot: string) {
+    const result = await this.database.execute(
+      `WITH RECURSIVE chain(id,parent,depth) AS (
+      SELECT id,parent,0 FROM ww2_snapshots WHERE id=? AND repository=?
+      UNION ALL SELECT s.id,s.parent,c.depth+1 FROM chain c JOIN ww2_snapshots s ON s.id=c.parent
+      WHERE c.depth<64 AND NOT EXISTS(SELECT 1 FROM ww2_checkpoints k WHERE k.snapshot=c.id)
+    ) SELECT MAX(depth) AS depth FROM chain`,
+      [snapshot, this.config.repository],
+    );
+    if (Number(result.rows[0]?.depth) >= 64) await this.checkpoint(snapshot);
   }
 
   /** Rebuildable accelerator. Existing snapshots and their query results do not change. */
   async checkpoint(snapshot: string) {
-    const files = await this.files(snapshot);
+    await this.ready();
+    await this.assertSnapshot(snapshot);
     await this.database.transaction(async (tx) => {
       const ready = await tx.execute("SELECT snapshot FROM ww2_checkpoints WHERE snapshot=?", [
         snapshot,
       ]);
       if (ready.rows.length) return;
-      for (const file of files)
-        await tx.execute(
-          "INSERT INTO ww2_checkpoint_files(snapshot,path,blob,mode) VALUES(?,?,?,?)",
-          [snapshot, file.path, file.blob, file.mode],
-        );
+      await tx.execute(
+        `${membership} INSERT INTO ww2_checkpoint_files(snapshot,path,blob,mode)
+        SELECT ?,path,blob,mode FROM effective_files`,
+        [snapshot, this.config.repository, snapshot],
+      );
       await tx.execute("INSERT INTO ww2_checkpoints(snapshot) VALUES(?)", [snapshot]);
     });
   }

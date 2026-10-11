@@ -74,8 +74,8 @@ export function collection<T>(definition: Collection<T>): Collection<T> {
   return definition;
 }
 export function createContent<const C extends Collections>(
-  options: Config<C> & { database: SqlDatabase; blobs?: BlobStore },
+  options: Config<C> & { database: SqlDatabase; blobs?: BlobStore; assetBlobs?: BlobStore },
 ): ContentEngine<C> {
-  const { database, blobs, ...config } = options;
-  return new ContentEngine(database, config, blobs);
+  const { database, blobs, assetBlobs, ...config } = options;
+  return new ContentEngine(database, config, blobs, assetBlobs);
 }

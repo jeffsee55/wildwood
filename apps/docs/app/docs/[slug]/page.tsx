@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import Markdown from "react-markdown";
+import Markdown, { defaultUrlTransform } from "react-markdown";
 import { getContext, readDocs, slugOf } from "@/lib/wildwood";
 import { sourcemap } from "wildwood-web/sourcemap";
 async function document(slug: string) {
@@ -27,7 +27,15 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
         {doc.value.audience && <> · For {doc.value.audience}</>}
       </p>
       <div className="typeset typeset-docs" {...sourcemap(doc, "body")}>
-        <Markdown>{doc.value.body}</Markdown>
+        <Markdown
+          urlTransform={(url, key) =>
+            key === "src" && url.startsWith("/media/")
+              ? `/cms/media?${new URLSearchParams({ path: url.slice(1), snapshot: ctx.snapshot })}`
+              : defaultUrlTransform(url)
+          }
+        >
+          {doc.value.body}
+        </Markdown>
       </div>
     </article>
   );

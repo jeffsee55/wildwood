@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createClient } from "@libsql/client";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -10,6 +11,8 @@ import { z } from "zod";
 import { collection, createContent, libsql, markdown } from "../src";
 import {
   createGitHandler,
+  compactGitStorage,
+  restoreGitArchive,
   exportGit,
   importGit,
   planGitMerge,
@@ -179,14 +182,7 @@ test("native Git merges separate edits in one file and retains both commit paren
   expect("content" in change && Buffer.from(change.content).toString()).toContain("Updated body");
   const bare = join(root, "merged.git");
   await exec("git", ["init", "--bare", bare]);
-  const { spawn } = await import("node:child_process");
-  const bytes = await engine.bytes(resolved.archive);
-  await new Promise<void>((resolve, reject) => {
-    const c = spawn("git", ["-C", bare, "index-pack", "--stdin"]);
-    c.stdin.end(bytes);
-    c.on("close", (code) => (code === 0 ? resolve() : reject(new Error("index-pack failed"))));
-    c.on("error", reject);
-  });
+  await restoreGitArchive(engine, bare, resolved.archive);
   expect(
     (await exec("git", ["-C", bare, "show", "-s", "--format=%P", resolved.commit])).stdout.trim(),
   ).toBe(`${plan.oursCommit} ${plan.theirsCommit}`);
@@ -346,4 +342,196 @@ test("Git rename/rename conflicts retain both destinations until an explicit res
     true,
   );
   expect(result.changes).toHaveLength(0);
+});
+
+test("incremental packs omit unchanged assets and compaction preserves old IDs and future exports", async () => {
+  const { engine, source, root } = await setup();
+  const base = await importGit(engine, { directory: source, targetRef: "main" });
+  const { randomBytes } = await import("node:crypto");
+  let head = await engine.apply({
+    ref: "main",
+    expectedRevision: base.revision,
+    idempotencyKey: "large-asset",
+    changes: [{ path: "media/large.bin", content: randomBytes(128 * 1024) }],
+  });
+  const archives: { oid: string; archive: string }[] = [];
+  for (let i = 0; i < 5; i++) {
+    archives.push(
+      await exportGit(engine, {
+        snapshot: head.snapshot,
+        directory: join(root, "increments.git"),
+        message: `Commit ${i}`,
+        author: { name: "Test", email: "test@example.com", timestamp: 1700000000 + i },
+      }),
+    );
+    if (i < 4)
+      head = await engine.apply({
+        ref: "main",
+        expectedRevision: head.revision,
+        idempotencyKey: `change-${i}`,
+        changes: [{ path: "docs/a.md", content: `---\ntitle: Revision ${i}\n---\nBody` }],
+      });
+  }
+  const sizes = await engine.database.execute("SELECT id,size FROM ww2_git_packs");
+  expect(Number(sizes.rows.find((r) => r.id === archives[0].archive)!.size)).toBeGreaterThan(
+    128 * 1024,
+  );
+  expect(Number(sizes.rows.find((r) => r.id === archives[4].archive)!.size)).toBeLessThan(2000);
+  const compact = await compactGitStorage(engine);
+  expect(compact.reclaimedBytes).toBeGreaterThan(0);
+  expect(
+    (await engine.database.execute("SELECT id FROM ww2_git_packs WHERE bytes IS NOT NULL")).rows,
+  ).toHaveLength(1);
+  const bare = join(root, "restored.git");
+  await exec("git", ["init", "--bare", bare]);
+  for (const archive of archives) {
+    await restoreGitArchive(engine, bare, archive.archive);
+    await exec("git", ["-C", bare, "fsck", "--strict", archive.oid]);
+  }
+  head = await engine.apply({
+    ref: "main",
+    expectedRevision: head.revision,
+    idempotencyKey: "after-compact",
+    changes: [{ path: "extra.txt", content: "new" }],
+  });
+  const next = await exportGit(engine, {
+    snapshot: head.snapshot,
+    directory: join(root, "next.git"),
+    message: "After compaction",
+    author: { name: "Test", email: "test@example.com" },
+  });
+  expect(
+    (
+      await exec("git", ["-C", next.directory, "show", "--format=%P", "-s", next.oid])
+    ).stdout.trim(),
+  ).toBe(archives.at(-1)!.oid);
+  await compactGitStorage(engine);
+  await restoreGitArchive(engine, bare, archives[0].archive);
+  await exec("git", ["-C", bare, "fsck", "--strict", archives[0].oid]);
+});
+
+test("compaction adopts legacy packs and preserves a writer that arrives during maintenance", async () => {
+  const { engine, source, root } = await setup();
+  const base = await importGit(engine, { directory: source, targetRef: "main" });
+  const row = (await engine.database.execute("SELECT * FROM ww2_git_packs")).rows[0];
+  const legacy = Buffer.from(String(row.bytes), "base64");
+  const legacyId = createHash("sha256").update(legacy).digest("hex");
+  await engine.blobs.put(legacyId, legacy);
+  await engine.database.execute("UPDATE ww2_git_commits SET archive=? WHERE archive=?", [
+    legacyId,
+    String(row.id),
+  ]);
+  await engine.database.execute("DELETE FROM ww2_git_packs");
+  const execute = engine.database.execute.bind(engine.database);
+  let late: Awaited<ReturnType<typeof exportGit>> | undefined;
+  engine.database.execute = async (sql, args) => {
+    const result = await execute(sql, args);
+    if (sql === "SELECT id,size FROM ww2_git_packs WHERE redirect IS NULL" && !late) {
+      const next = await engine.apply({
+        ref: "main",
+        expectedRevision: base.revision,
+        idempotencyKey: "concurrent-pack",
+        changes: [{ path: "notes.txt", content: "Concurrent writer" }],
+      });
+      late = await exportGit(engine, {
+        snapshot: next.snapshot,
+        directory: join(root, "late.git"),
+        message: "During maintenance",
+        author: { name: "Test", email: "test@example.com" },
+      });
+    }
+    return result;
+  };
+  await compactGitStorage(engine);
+  engine.database.execute = execute;
+  const bare = join(root, "concurrent-restored.git");
+  await exec("git", ["init", "--bare", bare]);
+  await restoreGitArchive(engine, bare, late!.archive);
+  expect((await exec("git", ["-C", bare, "show", `${late!.oid}:notes.txt`])).stdout).toBe(
+    "Concurrent writer",
+  );
+  await exec("git", ["-C", bare, "fsck", "--strict", late!.oid]);
+  expect(Buffer.from(await engine.bytes(legacyId))).toEqual(legacy);
+});
+
+test("identical empty packs retain distinct dependency histories", async () => {
+  const { engine, source } = await setup();
+  const base = await importGit(engine, { directory: source, targetRef: "main" });
+  const first = await planGitMerge(engine, {
+    base: base.snapshot,
+    ours: base.snapshot,
+    theirs: base.snapshot,
+  });
+  const next = await engine.apply({
+    ref: "main",
+    expectedRevision: base.revision,
+    idempotencyKey: "later-history",
+    changes: [{ path: "new.txt", content: "New history" }],
+  });
+  const second = await planGitMerge(engine, {
+    base: base.snapshot,
+    ours: next.snapshot,
+    theirs: base.snapshot,
+  });
+  expect(first.archive).not.toBe(second.archive);
+  expect((await resolveGitMerge(engine, second.id, [])).changes).toEqual([]);
+  await compactGitStorage(engine);
+  expect((await resolveGitMerge(engine, second.id, [])).changes).toEqual([]);
+});
+
+test("incremental Git export reads only delta bytes across directory replacements and checkpoints", async () => {
+  const { root, source, engine } = await setup();
+  let head = await importGit(engine, { directory: source, targetRef: "main" });
+  const originalBytes = engine.bytes.bind(engine);
+  const read: string[] = [];
+  engine.bytes = async (blob) => {
+    read.push(blob);
+    return originalBytes(blob);
+  };
+  // Replace a binary file with a directory, then replace the original docs directory with a file.
+  head = {
+    ...head,
+    ...(await engine.apply({
+      ref: "main",
+      expectedRevision: head.revision,
+      idempotencyKey: "directory",
+      changes: [
+        { path: "image.bin", delete: true },
+        { path: "image.bin/child", content: "new child" },
+        { path: "docs/a.md", delete: true },
+        { path: "docs", content: "replacement file" },
+      ],
+    })),
+  };
+  await engine.checkpoint(head.snapshot);
+  read.length = 0;
+  const bare = join(root, "incremental.git");
+  const author = { name: "Test", email: "test@example.com" };
+  const exported = await exportGit(engine, {
+    snapshot: head.snapshot,
+    directory: bare,
+    message: "Directory replacements",
+    author,
+  });
+  expect(read).toHaveLength(2);
+  expect((await exec("git", ["-C", bare, "show", "HEAD:image.bin/child"])).stdout).toBe(
+    "new child",
+  );
+  expect((await exec("git", ["-C", bare, "show", "HEAD:docs"])).stdout).toBe("replacement file");
+  expect((await exec("git", ["-C", bare, "ls-tree", "HEAD", "script.sh"])).stdout).toContain(
+    "100755",
+  );
+  await exec("git", ["-C", bare, "fsck", "--strict"]);
+  read.length = 0;
+  expect(
+    (
+      await exportGit(engine, {
+        snapshot: head.snapshot,
+        directory: bare,
+        message: "Already exported",
+        author,
+      })
+    ).oid,
+  ).toBe(exported.oid);
+  expect(read).toHaveLength(0);
 });

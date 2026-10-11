@@ -7,6 +7,7 @@ import {
   type SqlExecutor,
 } from "wildwood-core";
 import type { Actor } from "./server";
+import { mediaType } from "./media";
 export type ReviewAuthority = { kind: "native" } | { kind: "external"; label: string };
 export type PageContext = { url: string; version: string; variant: Record<string, string> };
 export type Change = {
@@ -77,22 +78,12 @@ export function createReviews<C extends Collections>({
         await db.execute(
           "CREATE TABLE IF NOT EXISTS ww_web_edit_context (repository TEXT NOT NULL, ref TEXT NOT NULL, revision INTEGER NOT NULL, path TEXT NOT NULL, context TEXT NOT NULL, snapshot TEXT NOT NULL, actor TEXT NOT NULL, PRIMARY KEY(repository,ref,revision,path,context))",
         );
-        await db.transaction(async (tx) => {
-          const rows = (
-            await tx.execute(
-              "SELECT data FROM ww_web_review_data WHERE repository=? AND kind='review'",
-              [repository],
-            )
-          ).rows;
-          for (const row of rows) {
-            const review = JSON.parse(String(row.data)) as Review;
-            if (review.status === "published" || review.status === "landing")
-              await tx.execute("INSERT OR IGNORE INTO ww2_ref_locks(repository,name) VALUES(?,?)", [
-                repository,
-                review.ref,
-              ]);
-          }
-        });
+        await db.execute(
+          `INSERT OR IGNORE INTO ww2_ref_locks(repository,name)
+          SELECT repository,json_extract(data,'$.ref') FROM ww_web_review_data
+          WHERE repository=? AND kind='review' AND json_extract(data,'$.status') IN ('published','landing')`,
+          [repository],
+        );
       })
       .catch((e) => {
         initialization = undefined;
@@ -310,6 +301,8 @@ export function createReviews<C extends Collections>({
     const decode = async (blob: string | null) => {
       if (!blob) return { source: "", binary: false, size: 0 };
       const bytes = await cms.bytes(blob);
+      const media = mediaType(bytes);
+      if (media.kind !== "file") return { source: null, binary: true, size: bytes.length, media };
       if (bytes.byteLength > 512 * 1024)
         return { source: null, binary: false, size: bytes.byteLength, tooLarge: true };
       try {
@@ -336,20 +329,41 @@ export function createReviews<C extends Collections>({
     type: Event["type"],
     body: string,
     path?: string,
+    command?: string,
   ) {
     await init();
+    const result = {
+      message:
+        type === "approve"
+          ? "Revision approved."
+          : type === "request_changes"
+            ? "Changes requested."
+            : "Comment added.",
+    };
     return db.transaction(async (tx) => {
       const r = await review(tx, id);
       const scope = await permission(tx, r, actor);
+      const activity = await events(tx, id);
+      const eventId = command ? hash(JSON.stringify([actor.id, command])) : randomUUID();
+      const previous = activity.find((event) => event.id === eventId);
+      if (previous) {
+        if (
+          previous.revision !== rid ||
+          previous.type !== type ||
+          previous.body !== body ||
+          previous.path !== path
+        )
+          throw new Error("Review action key already used with different feedback");
+        return result;
+      }
       if (r.status !== "open") throw new Error("Review is no longer open");
       const rev = latest(r, rid);
       if (type !== "comment" && (scope !== "approve" || latest(r).id !== rid))
         throw new Error("Approval requires the latest revision and reviewer permission");
       if (path && !rev.changes.some((c) => c.path === path))
         throw new Error("File not in this revision");
-      const activity = await events(tx, id);
       activity.push({
-        id: randomUUID(),
+        id: eventId,
         actor: actor.id,
         name: actor.name,
         revision: rid,
@@ -359,14 +373,7 @@ export function createReviews<C extends Collections>({
         created: Date.now(),
       });
       await write(tx, `events:${id}`, "events", activity);
-      return {
-        message:
-          type === "approve"
-            ? "Revision approved."
-            : type === "request_changes"
-              ? "Changes requested."
-              : "Comment added.",
-      };
+      return result;
     });
   }
   async function publish(actor: Actor, id: string, rid: string) {
@@ -589,16 +596,20 @@ export function createReviews<C extends Collections>({
     await write(db, key, "landing-grant", g);
     return { message: "Publication grant revoked. An operation already in progress may complete." };
   }
-  async function recordEdit(args: {
-    ref: string;
-    revision: number;
-    snapshot: string;
-    path: string;
-    actor: string;
-    page: PageContext;
-  }) {
-    await init();
-    await db.execute(
+  async function recordEdit(
+    args: {
+      ref: string;
+      revision: number;
+      snapshot: string;
+      path: string;
+      actor: string;
+      page: PageContext;
+    },
+    transaction?: SqlExecutor,
+  ) {
+    // Transaction callers initialized review metadata before acquiring the write lock.
+    if (!transaction) await init();
+    await (transaction ?? db).execute(
       "INSERT OR IGNORE INTO ww_web_edit_context(repository,ref,revision,path,context,snapshot,actor) VALUES(?,?,?,?,?,?,?)",
       [
         repository,
@@ -612,15 +623,79 @@ export function createReviews<C extends Collections>({
     );
   }
   return {
+    async draftView(id: string, actor: string) {
+      await init();
+      const row = (
+        await db.execute(
+          `SELECT d.id,r.name,r.snapshot,r.revision,json_extract(v.data,'$.status') AS status
+        FROM ww_web_records d
+        JOIN ww2_refs r ON r.repository=d.repository AND r.name=json_extract(d.data,'$.ref')
+        LEFT JOIN ww_web_review_data v ON v.repository=d.repository AND v.id=? AND v.kind='review'
+        WHERE d.repository=? AND d.id=? AND d.kind='draft' AND d.actor=? AND d.revoked=0 AND (d.expires IS NULL OR d.expires>?)`,
+          [hash(`review:${id}`).slice(0, 24), repository, id, actor, Date.now()],
+        )
+      ).rows[0];
+      return row
+        ? {
+            id: String(row.id),
+            status: String(row.status ?? "open") as Review["status"],
+            ref: {
+              name: String(row.name),
+              snapshot: String(row.snapshot),
+              revision: Number(row.revision),
+            },
+          }
+        : null;
+    },
+    async draftStatuses(ids: string[]) {
+      await init();
+      const keys = ids.map((id) => hash(`review:${id}`).slice(0, 24));
+      const rows = await db.execute(
+        `SELECT id,json_extract(data,'$.status') AS status FROM ww_web_review_data
+        WHERE repository=? AND kind='review' AND id IN (SELECT value FROM json_each(?))`,
+        [repository, JSON.stringify(keys)],
+      );
+      const statuses = new Map(
+        rows.rows.map((row) => [String(row.id), String(row.status) as Review["status"]]),
+      );
+      return new Map(
+        ids.map((id, index) => [
+          id,
+          {
+            status: statuses.get(keys[index]) ?? ("open" as const),
+            ...(statuses.has(keys[index]) ? { review: keys[index] } : {}),
+          },
+        ]),
+      );
+    },
     async draftStatus(id: string) {
       await init();
-      const r = await read<Review>(db, hash(`review:${id}`).slice(0, 24), "review");
-      return r ? { status: r.status, review: r.id } : { status: "open" as const };
+      const row = (
+        await db.execute(
+          `SELECT id,json_extract(data,'$.status') AS status FROM ww_web_review_data
+        WHERE repository=? AND id=? AND kind='review'`,
+          [repository, hash(`review:${id}`).slice(0, 24)],
+        )
+      ).rows[0];
+      return row
+        ? { status: String(row.status) as Review["status"], review: String(row.id) }
+        : { status: "open" as const };
     },
     recordEdit,
     submit,
     get,
     file,
+    async media(actor: Actor, id: string, rid: string, path: string, side: "before" | "after") {
+      const r = await get(actor, id, rid);
+      const change = r.revision.changes.find((c) => c.path === path);
+      if (
+        !change ||
+        !change[side] ||
+        change[side === "before" ? "beforeMode" : "afterMode"] === "120000"
+      )
+        throw new Error("Media not in this revision");
+      return cms.bytes(change[side]!);
+    },
     decide,
     publish,
     invite,

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { notifyWorkspace, watchWorkspace } from "../workspace-sync";
 export type Command = { type: string; [key: string]: unknown };
 export type CommandResult = {
   ok: boolean;
@@ -30,11 +31,16 @@ export function Toolbar({
   }, [action]);
   const router = useRouter();
   useEffect(() => {
-    if (!state.actor || state.mode === "pinned" || state.mode === "shared") return;
+    if (!state.actor) return;
     const controller = new AbortController();
     let pending = false;
+    let queued = false;
     const check = async () => {
-      if (document.hidden || pending) return;
+      if (document.hidden || controller.signal.aborted) return;
+      if (pending) {
+        queued = true;
+        return;
+      }
       pending = true;
       try {
         const response = await fetch(`${state.endpoint}/status`, {
@@ -43,21 +49,31 @@ export function Toolbar({
         });
         if (!response.ok) return;
         const next = await response.json();
-        if (next.snapshot !== stateRef.current.snapshot || next.mode !== stateRef.current.mode)
+        if (
+          next.snapshot !== stateRef.current.snapshot ||
+          next.mode !== stateRef.current.mode ||
+          next.draft !== stateRef.current.draft
+        )
           router.refresh();
       } catch {
         /* A later poll retries transient connection failures. */
       } finally {
         pending = false;
+        if (queued) {
+          queued = false;
+          void check();
+        }
       }
     };
     const interval = setInterval(check, 5000);
+    const unwatch = watchWorkspace(check);
     window.addEventListener("focus", check);
     document.addEventListener("visibilitychange", check);
     return () => {
       controller.abort();
       clearInterval(interval);
       window.removeEventListener("focus", check);
+      unwatch();
       document.removeEventListener("visibilitychange", check);
     };
   }, [state.actor, state.mode, state.endpoint, router]);
@@ -73,11 +89,15 @@ export function Toolbar({
         try {
           const result = await actionRef.current(detail.command);
           detail.done(result);
-          if (result.ok && result.refresh) router.refresh();
+          if (result.ok && result.refresh) {
+            notifyWorkspace();
+            router.refresh();
+          }
         } catch {
           detail.done({
             ok: false,
-            error: "The request failed. Reload before retrying an uncertain save.",
+            error:
+              "The response was interrupted. Retry the same save to check whether it completed.",
           });
         }
       });

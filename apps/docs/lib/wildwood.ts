@@ -20,18 +20,19 @@ export const getContext = cache(async () => {
     pinned: current.mode === "pinned" || current.mode === "shared",
   };
 });
-export const readDocs = unstable_cache(
-  async (snapshot: string, version: "1" | "2", locale: string) => {
-    const cms = engines[version];
-    const { items } = await cms.query("docs", {
-      snapshot,
-      variant: { locale },
-      orderBy: { field: "order" },
-      limit: 100,
-    });
-    return Promise.all(
-      items.map(async (doc) => {
-        const author = await cms.resolveReference(doc, "author");
+export const readDocs = cache(
+  unstable_cache(
+    async (snapshot: string, version: "1" | "2", locale: string) => {
+      const cms = engines[version];
+      const { items } = await cms.query("docs", {
+        snapshot,
+        variant: { locale },
+        orderBy: { field: "order" },
+        limit: 100,
+      });
+      const authors = await cms.resolveReferences(items, "author");
+      return items.map((doc, index) => {
+        const author = authors[index];
         return {
           ...withSourcemap(cms.config.repository, doc),
           author: author
@@ -41,11 +42,11 @@ export const readDocs = unstable_cache(
               })
             : null,
         };
-      }),
-    );
-  },
-  ["immutable-manual-mapped-v1"],
-  { revalidate: false },
+      });
+    },
+    ["immutable-manual-mapped-v1"],
+    { revalidate: false },
+  ),
 );
 export function slugOf(path: string) {
   return path.replace("content/pages/", "").replace(/\.md$/, "");

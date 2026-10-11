@@ -166,11 +166,17 @@ test("batch writes are atomic; dry runs store nothing; field patches and retries
   expect(events.rows[0].source).toBe("mcp");
   expect((await engine.query("pages", { ref: "main" })).items[0].value.title).toBe("Welcome");
 });
-test("content writes cannot escape collections, forge another draft, or overwrite a newer revision", async () => {
+test("file writes cannot escape the repository, forge another draft, or overwrite a newer revision", async () => {
   const { call, view, engine } = await fixture();
   expect(
-    (await call("write_source", { path: ".env", source: "secret", revision: 0, command: "escape" }))
-      .failed,
+    (
+      await call("write_source", {
+        path: ".git/config",
+        source: "secret",
+        revision: 0,
+        command: "escape",
+      })
+    ).failed,
   ).toBe(true);
   expect((await call("read_source", { path: "../secret.md" })).failed).toBe(true);
   expect(
@@ -576,4 +582,150 @@ test("a publication race rolls back the merged ref, base metadata, and audit eve
   expect(
     (await database.execute("SELECT id FROM ww2_events WHERE source='git-merge'")).rows,
   ).toHaveLength(0);
+});
+
+test("MCP assets retain database tree entries, require branch scope, and render only authorized media", async () => {
+  const { call, web, headers, engine, view } = await fixture();
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  const input = {
+    path: "media/pixel.png",
+    revision: 0,
+    command: "image",
+    base64: png.toString("base64"),
+  };
+  const saved = await call("write_asset", input);
+  expect(saved.failed).toBe(false);
+  expect(await call("write_asset", input)).toEqual(saved);
+  expect((await call("list_files", { prefix: "media/" })).files[0]).toMatchObject({
+    path: input.path,
+    size: png.length,
+    collection: null,
+  });
+  expect((await call("read_file", { path: input.path, includeContent: true })).base64).toBe(
+    input.base64,
+  );
+  expect(
+    (await call("write_asset", { ...input, path: "pages/hack.md", command: "schema", revision: 1 }))
+      .failed,
+  ).toBe(true);
+  expect(
+    (await call("write_asset", { ...input, path: "../bad.png", command: "traversal", revision: 1 }))
+      .failed,
+  ).toBe(true);
+  expect(
+    (await call("write_asset", { ...input, base64: "???", command: "invalid", revision: 1 }))
+      .failed,
+  ).toBe(true);
+  const foreign = await engine.branch("foreign");
+  expect((await call("read_file", { draft: foreign.name, path: input.path })).failed).toBe(true);
+  const publicUrl = "http://localhost:9999/cms/media?path=media%2Fpixel.png";
+  expect((await web.handler(new Request(publicUrl))).status).toBe(404);
+  const privateFile = await web.handler(new Request(publicUrl, { headers }));
+  expect(privateFile.headers.get("content-type")).toBe("image/png");
+  expect(Buffer.from(await privateFile.arrayBuffer())).toEqual(png);
+  const review = await call("submit_review");
+  const url = `http://localhost:9999/cms/review/media?id=${review.id}&revision=${review.revision}&path=media%2Fpixel.png&side=after`;
+  expect((await web.handler(new Request(url))).status).toBe(303);
+  const rangeHeaders = new Headers(headers);
+  rangeHeaders.set("range", "bytes=0-7");
+  const image = await web.handler(new Request(url, { headers: rangeHeaders }));
+  expect(image.status).toBe(206);
+  expect(image.headers.get("content-range")).toBe(`bytes 0-7/${png.length}`);
+  expect(image.headers.get("cache-control")).toBe("private, no-store");
+  expect(Buffer.from(await image.arrayBuffer())).toEqual(png.subarray(0, 8));
+  const diff = await (
+    await web.handler(
+      new Request(
+        `http://localhost:9999/cms/review/file?id=${review.id}&revision=${review.revision}&path=media%2Fpixel.png`,
+        { headers },
+      ),
+    )
+  ).json();
+  expect(diff.afterContent.media.kind).toBe("image");
+  await call("apply_changes", {
+    revision: 1,
+    command: "active-file",
+    changes: [
+      {
+        path: "media/unsafe.svg",
+        source: '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+      },
+    ],
+  });
+  const unsafe = await web.handler(
+    new Request("http://localhost:9999/cms/media?path=media%2Funsafe.svg", { headers }),
+  );
+  expect(unsafe.headers.get("content-type")).toBe("application/octet-stream");
+  expect(unsafe.headers.get("content-disposition")).toContain("attachment");
+  expect(unsafe.headers.get("content-security-policy")).toContain("sandbox");
+  await call("apply_changes", {
+    revision: 2,
+    command: "delete-image",
+    changes: [{ path: input.path, delete: true }],
+  });
+  expect((await web.handler(new Request(publicUrl, { headers }))).status).toBe(404);
+  expect((await web.handler(new Request(url, { headers }))).status).toBe(200);
+  expect((await engine.ref(view.ref!.name)).revision).toBe(3);
+});
+
+test("browser uploads require the selected editable draft, same origin and an observed revision", async () => {
+  const { web, headers, engine, view } = await fixture();
+  const uploadHeaders = new Headers(headers);
+  uploadHeaders.set("origin", "http://localhost:9999");
+  const url =
+    "http://localhost:9999/cms/asset-upload?path=media%2Fnotes.txt&revision=0&command=upload-once";
+  const request = () =>
+    new Request(url, { method: "POST", headers: uploadHeaders, body: "versioned file" });
+  const first = await web.handler(request());
+  expect(first.status).toBe(200);
+  expect(await (await web.handler(request())).json()).toEqual(await first.json());
+  expect((await engine.ref(view.ref!.name)).revision).toBe(1);
+  const stale = await web.handler(
+    new Request(url.replace("upload-once", "stale"), {
+      method: "POST",
+      headers: uploadHeaders,
+      body: "new",
+    }),
+  );
+  expect(stale.status).not.toBe(200);
+  uploadHeaders.set("origin", "https://attacker.invalid");
+  expect(
+    (await web.handler(new Request(url, { method: "POST", headers: uploadHeaders, body: "bad" })))
+      .status,
+  ).not.toBe(200);
+  expect(
+    (await web.handler(new Request(url, { method: "POST", body: "unauthorized" }))).status,
+  ).toBe(303);
+  expect(
+    await (
+      await web.handler(new Request("http://localhost:9999/cms/media-library", { headers }))
+    ).text(),
+  ).toContain("media/notes.txt");
+});
+
+test("storage maintenance is owner-only and unavailable to delegated MCP clients", async () => {
+  const { web, headers, view, rpc } = await fixture();
+  await expect(
+    web.command({ ...view, actor: { ...view.actor!, role: "editor" } }, { type: "compact-git" }),
+  ).rejects.toThrow("Owner access");
+  const h = new Headers(headers);
+  h.set("origin", "http://localhost:9999");
+  h.set("content-type", "application/json");
+  const response = await web.handler(
+    new Request("http://localhost:9999/cms/command", {
+      method: "POST",
+      headers: h,
+      body: JSON.stringify({ type: "compact-git" }),
+    }),
+  );
+  expect(response.status).toBe(200);
+  expect((await response.json()).message).toContain("History preserved");
+  expect(
+    (await rpc("tools/list")).body.result.tools.some((t: { name: string }) =>
+      /compact|optimize/.test(t.name),
+    ),
+  ).toBe(false);
 });

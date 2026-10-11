@@ -46,7 +46,13 @@ export type FileMode = "100644" | "100755" | "120000";
 export type FileChange =
   | { path: string; content: string | Uint8Array; mode?: FileMode }
   | { path: string; delete: true };
-export type SnapshotFile = { path: string; blob: string; mode: FileMode };
+export type SnapshotFile = {
+  path: string;
+  blob: string;
+  mode: FileMode;
+  size?: number;
+  storage?: "default" | "assets";
+};
 export type Predicate =
   | { field: string; eq: Scalar }
   | { field: string; gt: number | string }
