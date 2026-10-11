@@ -43,8 +43,10 @@ import { Button } from "./ui/button";
 import { installContentIndicator } from "./content-indicator";
 import { contentAnnotation, type ComposerContext } from "./content-context";
 import { installContentPicker } from "./content-picker";
+import type { AgentConfig } from "./agent/runtime";
 
-const AgentPanel = lazy(() => import("./agent/panel").then((m) => ({ default: m.AgentPanel })));
+const loadAgentPanel = () => import("./agent/panel").then((m) => ({ default: m.AgentPanel }));
+const AgentPanel = lazy(loadAgentPanel);
 
 type State = {
   endpoint: string;
@@ -55,6 +57,8 @@ type State = {
   snapshot: string;
   canEdit: boolean;
   draft?: string;
+  draftName?: string;
+  agentConfig?: AgentConfig;
   actor: { name: string; role: string } | null;
   completed: { updatedAt: number; id: string; review: string; data: { name: string } }[];
   drafts: {
@@ -229,7 +233,11 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
     return installContentIndicator(document, selectedContent);
   }, [selectedContent]);
   const mode =
-    s.mode === "published" ? "Published" : s.mode === "draft" ? "Draft" : "Shared preview";
+    s.mode === "published"
+      ? "Published"
+      : s.mode === "draft"
+        ? `Draft · ${s.draftName ?? "Selected draft"}`
+        : "Shared preview";
   useEffect(() => {
     if (!dirty) return;
     const guard = (event: BeforeUnloadEvent) => {
@@ -338,6 +346,12 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
         >
           <PopoverTrigger
             render={<Button className="launcher" variant="outline" size="icon" />}
+            onPointerEnter={() => {
+              if (editor) void loadAgentPanel();
+            }}
+            onFocus={() => {
+              if (editor) void loadAgentPanel();
+            }}
             aria-label={`Open Wildwood — ${mode}`}
             title={selecting ? "Select content to edit. Escape cancels." : `Wildwood · ${mode}`}
           >
@@ -419,6 +433,8 @@ function App({ state: s, host }: { state: State; host: HTMLElement }) {
                     <AgentPanel
                       endpoint={s.endpoint}
                       draft={s.draft}
+                      draftName={s.draftName}
+                      initialConfig={s.agentConfig}
                       contexts={contexts}
                       onContextRemoved={(id) =>
                         setContexts((current) => current.filter((item) => item.id !== id))

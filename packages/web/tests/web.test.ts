@@ -1066,3 +1066,51 @@ test("embedded configuration advertises a site key without serializing it", asyn
   expect(text).not.toContain("server-secret-do-not-send");
   expect(JSON.parse(text)).toMatchObject({ siteKey: true, model: "custom/model" });
 });
+
+test("opening an existing chat selects its owned draft without creating branches or MCP grants", async () => {
+  const { web, headers, database } = await setup();
+  const draft = (await web.view(headers)).viewId!;
+  const before = await database.execute(
+    "SELECT kind, count(*) AS n FROM ww_web_records WHERE kind IN ('draft','agent','embedded-session') GROUP BY kind",
+  );
+  const publishedHeaders = new Headers({ cookie: headers.get("cookie")!.split("; ww-view=")[0] });
+  expect((await web.view(publishedHeaders)).mode).toBe("published");
+  const open = (cookie: string, origin = "http://localhost:9999") =>
+    web.handler(
+      new Request("http://localhost:9999/cms/agent/view", {
+        method: "POST",
+        headers: { cookie, origin, "content-type": "application/json" },
+        body: JSON.stringify({ draft }),
+      }),
+    );
+  const response = await open(publishedHeaders.get("cookie")!);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ draft, name: expect.any(String) });
+  const selected = new Headers({
+    cookie: `${publishedHeaders.get("cookie")}; ${response.headers.get("set-cookie")!.split(";")[0]}`,
+  });
+  const view = await web.view(selected);
+  expect(view).toMatchObject({ mode: "draft", viewId: draft });
+  const state = await web.state(view);
+  expect(state.draftName).toEqual(expect.any(String));
+  expect(state.agentConfig).toMatchObject({ actor: { id: "local-owner" }, siteKey: false });
+  expect(
+    await database.execute(
+      "SELECT kind, count(*) AS n FROM ww_web_records WHERE kind IN ('draft','agent','embedded-session') GROUP BY kind",
+    ),
+  ).toEqual(before);
+  expect((await open(publishedHeaders.get("cookie")!, "https://evil.test")).status).not.toBe(200);
+  expect((await open("")).status).not.toBe(200);
+  await database.execute("UPDATE ww_web_records SET actor='foreign' WHERE id=?", [draft]);
+  expect((await open(publishedHeaders.get("cookie")!)).status).toBe(403);
+  await database.execute("UPDATE ww_web_records SET actor='local-owner' WHERE id=?", [draft]);
+  const review = await web.command(view, { type: "review" });
+  await web.command(view, {
+    type: "review-decision",
+    id: review.id,
+    revision: review.revision,
+    decision: "approve",
+  });
+  await web.command(view, { type: "publish", id: review.id, revision: review.revision });
+  expect((await open(publishedHeaders.get("cookie")!)).status).toBe(403);
+});

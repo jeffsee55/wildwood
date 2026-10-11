@@ -7,6 +7,7 @@ import { get, set, createStore } from "idb-keyval";
 import { pumpTurn, ToolLog, transportActivity, uid } from "./turn";
 import type { Activity, ThreadItem } from "./types";
 import { notifyWorkspace } from "../../src/workspace-sync";
+import { requestJson } from "../request";
 
 export type AgentConfig = {
   actor: { id: string; name: string };
@@ -46,6 +47,7 @@ export type AgentState = {
   error?: string;
   tools: number;
   switching?: boolean;
+  viewing?: boolean;
 };
 const storage = () => createStore("wildwood-agent", "sessions");
 const key = (config: AgentConfig, draft?: string) =>
@@ -76,7 +78,14 @@ export const freshSession = (config: AgentConfig, newDraft = false): Session => 
 export async function loadSession(config: AgentConfig, draft?: string): Promise<Session> {
   const value = normalizeSession(await readSession(config, draft), config);
   if (value && draft && value.draft !== draft)
-    return { ...value, draft, checkpoint: undefined, newDraft: false, interrupted: true };
+    return {
+      ...value,
+      draft,
+      name: undefined,
+      checkpoint: undefined,
+      newDraft: false,
+      interrupted: true,
+    };
   return value ?? { ...freshSession(config), draft };
 }
 
@@ -116,6 +125,7 @@ export class AgentRuntime {
   private client?: Client;
   private turn?: FxTurn;
   private abort?: AbortController;
+  private viewAbort?: AbortController;
   private disposed = false;
   private personalKey = "";
   private model: string;
@@ -189,6 +199,26 @@ export class AgentRuntime {
       });
     await this.saveChain;
   }
+  /** Restore only the browser view. No MCP grant, model, WASM, or new branch is needed. */
+  async restoreView() {
+    const draft = this.state.session.draft;
+    if (!draft || this.disposed) return;
+    this.viewAbort?.abort();
+    const controller = new AbortController();
+    this.viewAbort = controller;
+    this.update({ viewing: true, error: undefined });
+    try {
+      const view = await requestJson(`${this.endpoint}/agent/view`, { draft }, controller.signal);
+      if (this.disposed || this.state.session.draft !== draft) return;
+      this.update({ session: { ...this.state.session, name: view.name } });
+      notifyWorkspace();
+    } catch (error) {
+      if (!this.disposed && !controller.signal.aborted)
+        this.update({ error: (error as Error).message });
+    } finally {
+      if (!this.disposed && this.viewAbort === controller) this.update({ viewing: false });
+    }
+  }
   async configure(model: string, personalKey: string) {
     if (this.state.running) throw new Error("Stop the current turn before changing settings.");
     await this.applyConfiguration(model, personalKey);
@@ -196,8 +226,9 @@ export class AgentRuntime {
   /** Conversations survive branch changes; checkpoints and MCP credentials do not. */
   switchDraft(draft?: string) {
     if (draft === this.state.session.draft && !this.state.switching) return this.switchChain;
+    this.viewAbort?.abort();
     const generation = ++this.switchGeneration;
-    this.update({ switching: true });
+    this.update({ switching: true, viewing: false });
     this.stop();
     this.switchChain = this.switchChain
       .catch(() => {})
@@ -352,6 +383,7 @@ ${adapter.instructions}`,
   }
   async send(text: string, settings?: { model: string; personalKey: string }) {
     if (this.disposed || !text.trim()) return;
+    if (this.state.viewing) throw new Error("Wait for the website to select this draft.");
     if (this.state.switching)
       throw new Error("Wait for the draft switch to finish before sending.");
     if (this.state.running) {
@@ -523,6 +555,7 @@ ${adapter.instructions}`,
   }
   async close() {
     this.disposed = true;
+    this.viewAbort?.abort();
     this.stop();
     this.personalKey = "";
     clearTimeout(this.persistTimer);

@@ -34,8 +34,13 @@ export function Toolbar({
     if (!state.actor) return;
     const controller = new AbortController();
     let pending = false;
+    let queued = false;
     const check = async () => {
-      if (document.hidden || pending) return;
+      if (document.hidden || controller.signal.aborted) return;
+      if (pending) {
+        queued = true;
+        return;
+      }
       pending = true;
       try {
         const response = await fetch(`${state.endpoint}/status`, {
@@ -54,6 +59,10 @@ export function Toolbar({
         /* A later poll retries transient connection failures. */
       } finally {
         pending = false;
+        if (queued) {
+          queued = false;
+          void check();
+        }
       }
     };
     const interval = setInterval(check, 5000);

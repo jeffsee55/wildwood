@@ -376,3 +376,46 @@ test("a busy target draft is refused before reauthorization or changing the brow
   expect(mocks.create).not.toHaveBeenCalled();
   await runtime.close();
 });
+
+test("reopening a saved draft selects the website without starting MCP or loading WASM", async () => {
+  const runtime = new AgentRuntime("/cms", config, {
+    id: crypto.randomUUID(),
+    draft: "draft-a",
+    name: "Old name",
+    model: config.model,
+    items: [],
+    updated: 1,
+  });
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ draft: "draft-a", name: "Draft A" }));
+  await runtime.restoreView();
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(fetch).toHaveBeenCalledWith(
+    "/cms/agent/view",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ draft: "draft-a" }),
+    }),
+  );
+  expect(runtime.state.session.name).toBe("Draft A");
+  expect(runtime.state.viewing).toBe(false);
+  expect(mocks.create).not.toHaveBeenCalled();
+  await runtime.close();
+});
+
+test("unavailable saved drafts leave the conversation visible and report why its view could not open", async () => {
+  const runtime = new AgentRuntime("/cms", config, {
+    id: crypto.randomUUID(),
+    draft: "draft-a",
+    model: config.model,
+    items: [{ kind: "user", id: "old-message", text: "Earlier edit", at: 1 }],
+    updated: 1,
+  });
+  vi.mocked(fetch).mockResolvedValueOnce(
+    Response.json({ error: "Draft completed" }, { status: 403 }),
+  );
+  await runtime.restoreView();
+  expect(runtime.state.error).toBe("Draft completed");
+  expect(runtime.state.session.items[0]).toMatchObject({ text: "Earlier edit" });
+  expect(runtime.state.viewing).toBe(false);
+  await runtime.close();
+});

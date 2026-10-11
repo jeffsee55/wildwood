@@ -35,6 +35,8 @@ export type AgentReference = {
 export function AgentPanel({
   endpoint,
   draft,
+  draftName,
+  initialConfig,
   reference,
   contexts,
   onContextsUsed,
@@ -44,6 +46,8 @@ export function AgentPanel({
 }: {
   endpoint: string;
   draft?: string;
+  draftName?: string;
+  initialConfig?: AgentConfig;
   reference?: AgentReference;
   contexts?: ComposerContext[];
   onContextsUsed?: () => void;
@@ -53,6 +57,8 @@ export function AgentPanel({
 }) {
   const [runtime, setRuntime] = useState<AgentRuntime>();
   const [error, setError] = useState("");
+  const configured = useRef(initialConfig);
+  configured.current = initialConfig;
   const selectedDraft = useRef(draft);
   const observedDraft = useRef(draft);
   selectedDraft.current = draft;
@@ -66,11 +72,13 @@ export function AgentPanel({
     let live = true;
     let instance: AgentRuntime | undefined;
     (async () => {
-      const config: AgentConfig = await requestJson(`${endpoint}/agent/config`);
+      const config: AgentConfig =
+        configured.current ?? (await requestJson(`${endpoint}/agent/config`));
       const session = await loadSession(config, selectedDraft.current);
       if (!live) return;
       instance = new AgentRuntime(endpoint, config, session);
       setRuntime(instance);
+      if (session.draft) void instance.restoreView();
     })().catch((e) => live && setError(e.message));
     return () => {
       live = false;
@@ -102,22 +110,20 @@ export function AgentPanel({
       <SessionPanel
         key={runtime.state.session.id}
         runtime={runtime}
+        websiteDraft={draft}
+        websiteName={draftName}
         reference={reference}
         contexts={contexts}
         onContextsUsed={onContextsUsed}
         onContextRemoved={onContextRemoved}
         onReferenceUsed={onReferenceUsed}
         onChanged={onChanged}
-        onNew={
-          !draft
-            ? () => {
-                void runtime.close();
-                setRuntime(
-                  new AgentRuntime(endpoint, runtime.config, freshSession(runtime.config, true)),
-                );
-              }
-            : undefined
-        }
+        onNew={() => {
+          void runtime.close();
+          setRuntime(
+            new AgentRuntime(endpoint, runtime.config, freshSession(runtime.config, true)),
+          );
+        }}
       />
     </TooltipProvider>
   );
@@ -125,6 +131,8 @@ export function AgentPanel({
 
 function SessionPanel({
   runtime,
+  websiteDraft,
+  websiteName,
   reference,
   contexts,
   onContextsUsed,
@@ -134,6 +142,8 @@ function SessionPanel({
   onNew,
 }: {
   runtime: AgentRuntime;
+  websiteDraft?: string;
+  websiteName?: string;
   reference?: AgentReference;
   contexts?: ComposerContext[];
   onContextsUsed?: () => void;
@@ -150,6 +160,9 @@ function SessionPanel({
   const [error, setError] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    composer.current?.focus();
+  }, []);
   useEffect(() => {
     if (!contexts?.length) return;
     setSettings(false);
@@ -175,7 +188,7 @@ function SessionPanel({
     return () => window.removeEventListener("beforeunload", prevent);
   }, [state.running, onChanged]);
   async function send() {
-    if (!prompt.trim()) return;
+    if (!prompt.trim() || state.viewing || state.switching) return;
     setError("");
     try {
       const message = [prompt, ...(contexts ?? []).map((item) => item.text)].join("\n\n");
@@ -198,17 +211,18 @@ function SessionPanel({
           <Bot size={17} />
           <strong>Content agent</strong>
           <span className="agent-status">
-            {state.switching ? "Switching draft" : state.running ? "Working" : "Ready"}
+            {state.viewing
+              ? "Opening draft"
+              : state.switching
+                ? "Switching draft"
+                : state.running
+                  ? "Working"
+                  : "Ready"}
           </span>
         </div>
         <div>
           {onNew && (
-            <Button
-              variant="ghost"
-              aria-label="New agent draft"
-              disabled={state.running}
-              onClick={onNew}
-            >
+            <Button variant="ghost" aria-label="New chat" disabled={state.running} onClick={onNew}>
               <Plus size={16} />
             </Button>
           )}
@@ -225,11 +239,32 @@ function SessionPanel({
           </Tooltip>
         </div>
       </header>
+      <div className="agent-view" role="status">
+        <span>
+          Website:{" "}
+          {websiteDraft
+            ? (websiteName ??
+              (websiteDraft === state.session.draft ? state.session.name : undefined) ??
+              "Draft")
+            : "Published"}
+        </span>
+        {state.session.draft && state.session.draft !== websiteDraft && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={state.viewing}
+            onClick={() => void runtime.restoreView()}
+          >
+            {state.viewing ? "Opening draft…" : "View chat draft"}
+          </Button>
+        )}
+      </div>
       <div className="agent-draft">
         <GitBranch size={13} />
         <span>
-          {state.session.name ??
-            (state.session.draft ? "Selected draft" : "A new draft for this session")}
+          {state.session.draft
+            ? `Chat draft: ${state.session.name ?? websiteName ?? "Selected draft"}`
+            : "A new draft will open with your first message"}
         </span>
         <small>{state.tools ? `${state.tools} MCP tools` : "Powered by libfx"}</small>
       </div>
@@ -416,6 +451,7 @@ function SessionPanel({
               className="agent-send"
               aria-label={state.running ? "Send guidance" : "Send message"}
               disabled={
+                state.viewing ||
                 state.switching ||
                 !prompt.trim() ||
                 !model.trim() ||

@@ -389,3 +389,19 @@
   width: 24px;
   height: 24px;
 }
+
+.agent-view {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 18px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.agent-view span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

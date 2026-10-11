@@ -9,8 +9,13 @@ function Workspace() {
   useEffect(() => {
     const controller = new AbortController();
     let pending = false;
+    let queued = false;
     const check = async () => {
-      if (pending || document.hidden) return;
+      if (document.hidden || controller.signal.aborted) return;
+      if (pending) {
+        queued = true;
+        return;
+      }
       pending = true;
       try {
         const response = await fetch(`${context.endpoint}/status`, {
@@ -22,6 +27,10 @@ function Workspace() {
         /* The next poll retries transient failures. */
       } finally {
         pending = false;
+        if (queued) {
+          queued = false;
+          void check();
+        }
       }
     };
     const unwatch = watchWorkspace(check);
@@ -49,7 +58,11 @@ function Workspace() {
           <ArrowLeft size={13} />
           Back to content
         </a>
-        <AgentPanel endpoint={context.endpoint} draft={draft} />
+        <AgentPanel
+          endpoint={context.endpoint}
+          draft={draft}
+          initialConfig={context.initialConfig}
+        />
       </main>
     </div>
   );

@@ -662,6 +662,15 @@ export function createWeb<C extends Collections>(options: {
     }
     throw new Error("Unsupported command");
   }
+  function agentConfiguration(person: Actor) {
+    return {
+      actor: person,
+      repository,
+      siteKey: !!options.agent?.apiKey,
+      model: options.agent?.model ?? "anthropic/claude-sonnet-4.5",
+      wasm: `${base}/assets/${assets["fx-core.wasm"].path}`,
+    };
+  }
   async function state(current: View) {
     const records = current.actor ? await list("draft", current.actor.id) : [];
     const [statuses, timestamps] = records.length
@@ -698,6 +707,18 @@ export function createWeb<C extends Collections>(options: {
       mode: current.mode,
       snapshot: current.snapshot,
       actor: current.actor,
+      agentConfig:
+        current.actor && current.actor.role !== "reader"
+          ? agentConfiguration(current.actor)
+          : undefined,
+      draftName:
+        current.mode === "draft"
+          ? String(
+              drafts.find((draft) => draft.id === current.viewId)?.data.name ??
+                current.ref?.name ??
+                "Draft",
+            )
+          : undefined,
       version: current.version,
       variant: current.variant,
       draft: current.mode === "draft" ? current.viewId : undefined,
@@ -787,13 +808,38 @@ export function createWeb<C extends Collections>(options: {
         const person = await actor(request.headers);
         if (!person || person.role === "reader")
           return json({ error: "Editor sign-in required" }, 403);
-        return json({
-          actor: person,
-          repository,
-          siteKey: !!options.agent?.apiKey,
-          model: options.agent?.model ?? "anthropic/claude-sonnet-4.5",
-          wasm: `${base}/assets/${assets["fx-core.wasm"].path}`,
+        return json(agentConfiguration(person));
+      }
+      if (path === "/agent/view" && request.method === "POST") {
+        sameOrigin(request);
+        const person = requireEditor(await actor(request.headers));
+        const { draft: id } = z
+          .object({ draft: text })
+          .parse(JSON.parse(new TextDecoder().decode(await readBody(request, 4096))));
+        const draft = await get(id, "draft");
+        if (
+          !draft ||
+          draft.actor !== person.id ||
+          (await reviews.draftStatus(id)).status !== "open"
+        )
+          return json(
+            {
+              error:
+                "This draft is unavailable or completed. Start a new chat or choose an open draft.",
+            },
+            403,
+          );
+        const token = secret();
+        await put("draft-view", person.id, { draft: id }, Date.now() + 86400_000, digest(token));
+        const response = json({
+          draft: id,
+          name: draft.data.name ?? draftName(String(draft.data.ref)),
         });
+        response.headers.append(
+          "Set-Cookie",
+          `ww-view=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400${options.origin.startsWith("https:") ? "; Secure" : ""}`,
+        );
+        return response;
       }
       if (path === "/agent/start" && request.method === "POST") {
         sameOrigin(request);
@@ -958,9 +1004,13 @@ export function createWeb<C extends Collections>(options: {
             },
           });
         requireEditor(person);
+        const currentView = await view(request.headers);
         const context = JSON.stringify({
           endpoint: base,
-          draft: url.searchParams.get("draft") ?? (await view(request.headers)).viewId,
+          initialConfig: agentConfiguration(person),
+          draft:
+            url.searchParams.get("draft") ??
+            (currentView.mode === "draft" ? currentView.viewId : undefined),
         }).replaceAll("<", "\\u003c");
         return new Response(
           `<!doctype html><html lang="en" translate="no"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent — Wildwood</title><link rel="stylesheet" href="${base}/assets/${assets["agent.css"].path}"><body><div id="agent-root"></div><script id="context" type="application/json">${context}</script><script type="module" src="${base}/assets/${assets["agent.js"].path}"></script></body></html>`,

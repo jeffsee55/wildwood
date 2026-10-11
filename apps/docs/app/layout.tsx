@@ -33,7 +33,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
                 : ctx.pinned
                   ? "PINNED"
                   : ctx.preview
-                    ? "DRAFT"
+                    ? `DRAFT · ${toolbarState.draftName ?? "Selected draft"}`
                     : "PUBLISHED"}
             </span>
           </header>
@@ -63,7 +63,9 @@ export default async function Layout({ children }: { children: React.ReactNode }
               </p>
               <p className="muted">
                 {ctx.preview
-                  ? "Your view is isolated from published content."
+                  ? toolbarState.draftName
+                    ? `Viewing ${toolbarState.draftName}. Changes stay isolated until published.`
+                    : "Your view is isolated from published content."
                   : "Published content. Drafts stay private behind signed preview access."}
               </p>
             </aside>
